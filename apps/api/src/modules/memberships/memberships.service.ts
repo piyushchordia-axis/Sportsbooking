@@ -67,6 +67,13 @@ export class MembershipsService {
     );
   }
 
+  /** Customer-facing: active packs offered by a given owner. */
+  listPacksForOwner(ownerId: string) {
+    return this.prisma.withTenantId(ownerId, (tx) =>
+      tx.membershipPack.findMany({ where: { active: true } }),
+    );
+  }
+
   /** Customer buys a pack → ledger credited with sessions (PRD §6.3). */
   async purchase(ownerId: string, customerId: string, packId: string) {
     return this.prisma.withTenantId(ownerId, async (tx) => {

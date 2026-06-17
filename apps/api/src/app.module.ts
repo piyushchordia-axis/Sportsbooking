@@ -11,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AddonsModule } from './modules/addons/addons.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
+import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { OpenMatchesModule } from './modules/open-matches/open-matches.module';
 import { PlayersModule } from './modules/players/players.module';
@@ -39,6 +40,7 @@ import { VenuesModule } from './modules/venues/venues.module';
     SuperAdminModule,
     VenuesModule,
     BookingsModule,
+    DiscoveryModule,
     AddonsModule,
     OffersModule,
     PlayersModule,

@@ -75,9 +75,21 @@ pnpm dev   # turbo runs api (:3001) + web (:5173)
   growth — per venue + consolidated) and a Super-Admin **platform aggregate**;
   CRM **segmentation** (lapsed / regulars) for marketing.
 
-The React web app currently covers Stage 1 (discovery/booking + owner login).
-Owner/customer screens for Stages 2–5 are the remaining follow-up; every stage's
-API is implemented and tested.
+### Web UI (all roles, stitched to the API)
+
+A role-aware React SPA (`apps/web`) with token-based per-owner theming:
+
+- **Customer:** browse venues → pick court → live calendar → multi-slot booking
+  with pack / points / offer; wallet (balances + ledger history) & pack purchase;
+  tournaments browse + registration; account (referral code + skill level).
+- **Owner/Staff:** dashboard (reports), venues/courts/price-grid/add-ons,
+  membership packs, offers, player CRM with segments, tournament creation.
+- **Super Admin:** platform overview, game catalogue, owner onboarding & oversight.
+
+Auth is via `AuthProvider` (JWT in localStorage); routes are role-guarded and the
+nav adapts per role. The customer side re-themes from each venue owner's branding
+tokens (white-label). Public discovery endpoints (`/api/discover/venues|games`)
+drive the customer browse flow.
 
 ## Tests
 

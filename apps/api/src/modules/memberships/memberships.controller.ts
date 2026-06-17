@@ -39,6 +39,13 @@ export class MembershipsController {
   }
 
   // ---- Customer ----
+  /** Active packs offered by an owner (for the purchase screen). */
+  @Get('owners/:ownerId/packs')
+  @Roles(UserRole.CUSTOMER)
+  listForOwner(@Param('ownerId') ownerId: string) {
+    return this.memberships.listPacksForOwner(ownerId);
+  }
+
   /** Buy a pack offered by a given owner. */
   @Post('owners/:ownerId/packs/:packId/purchase')
   @Roles(UserRole.CUSTOMER)

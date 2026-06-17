@@ -6,16 +6,18 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   BookingResponse,
-  LedgerTxnType,
+  BookingStatus,
   PayMode,
   PaymentStatus,
 } from '@sportsbooking/shared';
 import { DateTime } from 'luxon';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LedgerService } from '../ledger/ledger.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
+import { MembershipsService } from '../memberships/memberships.service';
 import { NotificationService } from '../notifications/notification.service';
 import { PaymentService } from '../payments/payment.service';
 import { PricingService } from '../pricing/pricing.service';
+import { ReferralService } from '../referral/referral.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { CreateBookingDto } from './dto';
 
@@ -26,23 +28,24 @@ export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricing: PricingService,
-    private readonly ledger: LedgerService,
+    private readonly memberships: MembershipsService,
+    private readonly loyalty: LoyaltyService,
+    private readonly referral: ReferralService,
     private readonly payments: PaymentService,
     private readonly notifications: NotificationService,
   ) {}
 
   /**
    * Create a booking for one or more slots (PRD §6.1). Slot locking (PRD §7):
-   * each slot row carries a UNIQUE(unitId, startsAt) constraint, and the whole
+   * each slot row carries a UNIQUE(unitId, startsAt) constraint and the whole
    * reservation runs in one transaction — a concurrent booking of the same slot
-   * fails with a unique violation, which we surface as 409. Idempotency keys
-   * make confirmation retry-safe.
+   * fails with a unique violation surfaced as 409. Pack/points/offer are
+   * applied to the total; ledger debits happen only after the lock succeeds.
    */
   async create(
     dto: CreateBookingDto,
     user: RequestUser | undefined,
   ): Promise<BookingResponse> {
-    // Resolve the venue's owner so we can scope the whole operation.
     const venue = await this.prisma.withTenantBypass((tx) =>
       tx.venue.findUnique({ where: { id: dto.venueId } }),
     );
@@ -50,75 +53,106 @@ export class BookingsService {
     const ownerId = venue.ownerId;
 
     return this.prisma.withTenantId(ownerId, async (tx) => {
-      // Idempotency: return the existing booking on retry.
       if (dto.idempotencyKey) {
         const existing = await tx.booking.findUnique({
           where: { idempotencyKey: dto.idempotencyKey },
-          include: { slots: true },
         });
         if (existing) return this.toResponse(existing, []);
       }
 
-      const customerId = await this.resolveCustomer(tx, ownerId, dto, user);
+      const customerId = await this.resolveCustomer(tx, dto, user);
 
-      // 1. Price + lock each slot.
-      let subtotal = new Prisma.Decimal(0);
+      // 1. Price each slot (resolved per-court dynamic price).
+      let slotSubtotal = new Prisma.Decimal(0);
       const slotRows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
+      const unitIds = new Set<string>();
       for (const s of dto.slots) {
         const start = DateTime.fromISO(s.start).toJSDate();
         const end = DateTime.fromISO(s.end).toJSDate();
-        const durationMin = Math.round(
-          (end.getTime() - start.getTime()) / 60000,
-        );
-        const resolved = await this.pricing.resolve(
-          s.unitId,
-          start,
-          durationMin,
-          tx,
-        );
-        subtotal = subtotal.add(resolved.price);
+        const durationMin = Math.round((end.getTime() - start.getTime()) / 60000);
+        const resolved = await this.pricing.resolve(s.unitId, start, durationMin, tx);
+        slotSubtotal = slotSubtotal.add(resolved.price);
         slotRows.push({ unitId: s.unitId, startsAt: start, endsAt: end });
+        unitIds.add(s.unitId);
       }
 
-      // 2. Add-ons as line items.
+      // 2. Add-ons.
       const addons = dto.addonIds?.length
         ? await tx.addon.findMany({ where: { id: { in: dto.addonIds } } })
         : [];
-      for (const a of addons) subtotal = subtotal.add(a.price);
+      const addonSubtotal = addons.reduce(
+        (acc, a) => acc.add(a.price),
+        new Prisma.Decimal(0),
+      );
 
-      // 3. Apply pack/offer (minimal v1 wiring).
-      let discount = new Prisma.Decimal(0);
-      let packId: string | undefined;
+      // 3. Pack (evaluate only; debit after the lock).
+      let packDiscount = new Prisma.Decimal(0);
+      let packSessions = 0;
       if (dto.packId) {
-        packId = dto.packId;
-        // debit one session per slot from the pack ledger lane
-        await this.ledger.post(tx, {
-          ownerId,
+        const app = await this.memberships.evaluatePack(
+          tx,
+          dto.packId,
           customerId,
-          type: LedgerTxnType.PACK_DEBIT,
-          amount: -dto.slots.length,
-          lane: `pack:${dto.packId}`,
-          refType: 'booking',
-          note: 'Pack sessions debited',
-        });
+          dto.venueId,
+          [...unitIds],
+          dto.slots.length,
+          slotSubtotal,
+        );
+        packDiscount = app.discount;
+        packSessions = app.sessions;
       }
+
+      // 4. Offer (applied to the post-pack slot + addon amount).
       let offerId: string | undefined;
+      let offerDiscount = new Prisma.Decimal(0);
       if (dto.offerCode) {
+        const now = new Date();
         const offer = await tx.offer.findFirst({
-          where: { code: dto.offerCode, active: true },
+          where: {
+            code: dto.offerCode,
+            active: true,
+            AND: [
+              { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+              { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+              { OR: [{ venueIds: { isEmpty: true } }, { venueIds: { has: dto.venueId } }] },
+            ],
+          },
         });
         if (offer) {
           offerId = offer.id;
-          discount =
+          const base = slotSubtotal.sub(packDiscount).add(addonSubtotal);
+          offerDiscount =
             offer.type === 'percent'
-              ? subtotal.mul(offer.value).div(100)
-              : offer.value;
+              ? base.mul(offer.value).div(100)
+              : Prisma.Decimal.min(offer.value, base);
         }
       }
 
-      const total = Prisma.Decimal.max(subtotal.sub(discount), new Prisma.Decimal(0));
+      // 5. Loyalty points redemption (capped to remaining + balance).
+      let pointsRedeemed = 0;
+      let pointsValue = new Prisma.Decimal(0);
+      if (dto.pointsToRedeem && dto.pointsToRedeem > 0) {
+        const owner = await tx.owner.findUnique({ where: { id: ownerId } });
+        const redeemValue = Number(owner?.loyaltyRedeemValue ?? 1);
+        const balance = Number(await this.loyalty.pointsBalance(tx, customerId));
+        const remaining = Number(
+          slotSubtotal.sub(packDiscount).add(addonSubtotal).sub(offerDiscount),
+        );
+        const maxByCash = redeemValue > 0 ? Math.floor(remaining / redeemValue) : 0;
+        pointsRedeemed = Math.min(dto.pointsToRedeem, balance, maxByCash);
+        pointsValue = new Prisma.Decimal(pointsRedeemed).mul(redeemValue);
+      }
 
-      // 4. Create booking + occupying slot rows (the lock).
+      const total = Prisma.Decimal.max(
+        slotSubtotal
+          .sub(packDiscount)
+          .add(addonSubtotal)
+          .sub(offerDiscount)
+          .sub(pointsValue),
+        new Prisma.Decimal(0),
+      );
+
+      // 6. Create booking + occupying slot rows (the lock).
       const booking = await tx.booking.create({
         data: {
           ownerId,
@@ -129,11 +163,12 @@ export class BookingsService {
             dto.payMode === PayMode.PREPAY
               ? PaymentStatus.PENDING
               : PaymentStatus.AWAITING_VENUE_SETTLEMENT,
-          subtotal,
-          discount,
+          subtotal: slotSubtotal.add(addonSubtotal),
+          discount: packDiscount.add(offerDiscount),
           total,
-          packId,
+          packId: dto.packId,
           offerId,
+          pointsRedeemed: pointsValue,
           idempotencyKey: dto.idempotencyKey,
         },
       });
@@ -163,16 +198,38 @@ export class BookingsService {
         throw err;
       }
 
-      // 5. Player capture into owner CRM (PRD §4.9).
-      await this.capturePlayer(tx, ownerId, customerId);
-
-      // 6. Payment order for prepay.
-      let razorpayOrderId: string | undefined;
-      if (dto.payMode === PayMode.PREPAY && total.greaterThan(0)) {
-        const order = await this.payments.createOrder(
-          Number(total),
+      // 7. Ledger debits (only after the lock held).
+      if (dto.packId && packSessions > 0) {
+        await this.memberships.debitSessions(
+          tx,
+          ownerId,
+          customerId,
+          dto.packId,
+          packSessions,
           booking.id,
         );
+      }
+      if (pointsRedeemed > 0) {
+        await this.loyalty.redeem(tx, ownerId, customerId, pointsRedeemed, booking.id);
+      }
+
+      // 8. Player capture into owner CRM (PRD §4.9).
+      await this.capturePlayer(tx, ownerId, customerId);
+
+      // 9. Decrement add-on stock where tracked.
+      for (const a of addons) {
+        if (a.stock != null) {
+          await tx.addon.update({
+            where: { id: a.id },
+            data: { stock: { decrement: 1 } },
+          });
+        }
+      }
+
+      // 10. Razorpay order for prepay.
+      let razorpayOrderId: string | undefined;
+      if (dto.payMode === PayMode.PREPAY && total.greaterThan(0)) {
+        const order = await this.payments.createOrder(Number(total), booking.id);
         razorpayOrderId = order.id;
         await tx.booking.update({
           where: { id: booking.id },
@@ -180,34 +237,124 @@ export class BookingsService {
         });
       }
 
-      const lineItems = [
-        { label: `${dto.slots.length} slot(s)`, amount: Number(subtotal.sub(
-            addons.reduce((acc, a) => acc.add(a.price), new Prisma.Decimal(0)),
-          )) },
-        ...addons.map((a) => ({ label: a.name, amount: Number(a.price) })),
-      ];
-      if (discount.greaterThan(0)) {
-        lineItems.push({ label: 'Discount', amount: -Number(discount) });
-      }
-
       await this.notifications.sendWhatsApp(
         venue.contactPhone ?? '',
         `Booking ${booking.id} confirmed for ${dto.slots.length} slot(s).`,
       );
 
+      const lineItems = [
+        { label: `${dto.slots.length} slot(s)`, amount: Number(slotSubtotal) },
+        ...addons.map((a) => ({ label: a.name, amount: Number(a.price) })),
+      ];
+      if (packDiscount.greaterThan(0))
+        lineItems.push({ label: 'Pack', amount: -Number(packDiscount) });
+      if (offerDiscount.greaterThan(0))
+        lineItems.push({ label: 'Offer', amount: -Number(offerDiscount) });
+      if (pointsValue.greaterThan(0))
+        lineItems.push({ label: 'Points', amount: -Number(pointsValue) });
+
       return { ...this.toResponse(booking, lineItems), razorpayOrderId };
+    });
+  }
+
+  /**
+   * Mark a booking paid/settled → earn loyalty and release any referral reward
+   * (PRD §4.5). Idempotent: a second call after the booking is already paid is
+   * a no-op. Used by prepay confirmation and pay-at-venue settlement.
+   */
+  async markPaid(bookingId: string): Promise<{ paid: true }> {
+    const booking = await this.prisma.withTenantBypass((tx) =>
+      tx.booking.findUnique({ where: { id: bookingId } }),
+    );
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
+      const fresh = await tx.booking.findUnique({ where: { id: bookingId } });
+      if (!fresh) throw new NotFoundException('Booking not found');
+      if (
+        fresh.paymentStatus === PaymentStatus.PAID ||
+        fresh.paymentStatus === PaymentStatus.SETTLED_AT_VENUE
+      ) {
+        return { paid: true as const };
+      }
+
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          paymentStatus:
+            fresh.payMode === PayMode.PREPAY
+              ? PaymentStatus.PAID
+              : PaymentStatus.SETTLED_AT_VENUE,
+        },
+      });
+
+      await this.loyalty.earn(
+        tx,
+        fresh.ownerId,
+        fresh.customerId,
+        fresh.total,
+        bookingId,
+      );
+      await this.referral.releaseOnFirstPaid(tx, fresh.ownerId, fresh.customerId);
+      return { paid: true as const };
+    });
+  }
+
+  /**
+   * Cancel a booking: free the slots and return pack sessions / redeemed points
+   * to the ledger (PRD §4.4 — cancellation returns session credit, not cash).
+   */
+  async cancel(bookingId: string): Promise<{ cancelled: true }> {
+    const booking = await this.prisma.withTenantBypass((tx) =>
+      tx.booking.findUnique({ where: { id: bookingId }, include: { slots: true } }),
+    );
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
+      const fresh = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: { slots: true },
+      });
+      if (!fresh || fresh.status === BookingStatus.CANCELLED) {
+        return { cancelled: true as const };
+      }
+
+      await tx.slot.deleteMany({ where: { bookingId } });
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: { status: BookingStatus.CANCELLED },
+      });
+
+      if (fresh.packId) {
+        await this.memberships.refundSessions(
+          tx,
+          fresh.ownerId,
+          fresh.customerId,
+          fresh.packId,
+          fresh.slots.length,
+          bookingId,
+        );
+      }
+      if (fresh.pointsRedeemed.greaterThan(0)) {
+        await this.loyalty.creditRefund(
+          tx,
+          fresh.ownerId,
+          fresh.customerId,
+          fresh.pointsRedeemed,
+          bookingId,
+        );
+      }
+      return { cancelled: true as const };
     });
   }
 
   private async resolveCustomer(
     tx: Prisma.TransactionClient,
-    ownerId: string,
     dto: CreateBookingDto,
     user: RequestUser | undefined,
   ): Promise<string> {
     if (user?.role === 'customer') return user.id;
     if (dto.customer) {
-      // walk-in / capture by mobile (PRD §4.3 manual bookings, §4.9)
       const existing = await tx.user.findUnique({
         where: { mobile: dto.customer.mobile },
       });
@@ -233,16 +380,8 @@ export class BookingsService {
     if (!user) return;
     await tx.ownerCustomer.upsert({
       where: { ownerId_customerId: { ownerId, customerId } },
-      create: {
-        ownerId,
-        customerId,
-        bookingCount: 1,
-        lastVisitAt: new Date(),
-      },
-      update: {
-        bookingCount: { increment: 1 },
-        lastVisitAt: new Date(),
-      },
+      create: { ownerId, customerId, bookingCount: 1, lastVisitAt: new Date() },
+      update: { bookingCount: { increment: 1 }, lastVisitAt: new Date() },
     });
     await tx.playerProfile.upsert({
       where: { ownerId_customerId: { ownerId, customerId } },

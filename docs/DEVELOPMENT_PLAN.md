@@ -23,15 +23,26 @@ React + Vite frontend with token-based white-label theming.
 | Stage | Scope | Status |
 |-------|-------|--------|
 | 0 | Monorepo, RLS, auth, ledger/adapters, theming, CI | ✅ implemented |
-| 1 | Super-admin catalogue & onboarding; venues/units; per-court dynamic pricing; blocking; multi-slot booking; player capture; staff logins | ✅ core implemented |
-| 2 | Membership packs + loyalty + referral on the unified ledger | ▢ planned |
-| 3 | Add-on sales; offers & promo engine | ▢ planned |
-| 4 | Open matches + player profiles/skill | ▢ planned |
-| 5 | Tournaments (solo/team) + reports & analytics; marketing outreach | ▢ planned |
+| 1 | Super-admin catalogue & onboarding; venues/units; per-court dynamic pricing; blocking; multi-slot booking; player capture; staff logins | ✅ implemented |
+| 2 | Membership packs + loyalty + referral on the unified ledger | ✅ implemented |
+| 3 | Add-on sales; offers & promo engine | ✅ implemented |
+| 4 | Open matches + player profiles/skill | ✅ implemented |
+| 5 | Tournaments (solo/team) + reports & analytics; CRM segmentation | ✅ implemented |
 
-The Prisma data model (`apps/api/prisma/schema.prisma`) and shared enums already
-cover Stages 2–5, so later stages add services/controllers/screens without
-schema rework.
+All v1 stages are implemented on the API. The Prisma data model
+(`apps/api/prisma/schema.prisma`) covers every entity; no schema rework was
+needed across stages. Web screens currently cover Stage 1 (discovery/booking +
+owner login); owner/customer screens for Stages 2–5 are the remaining follow-up.
+
+### Stage module map (apps/api/src/modules)
+- Stage 2 — `memberships/` (packs, purchase, wallet), `loyalty/`, `referral/`
+- Stage 3 — `addons/`, `offers/`
+- Stage 4 — `players/` (profile/skill, CRM), `open-matches/`
+- Stage 5 — `tournaments/`, `reports/`
+
+Booking integration (`bookings/bookings.service.ts`) ties packs, offers, loyalty
+redemption, slot-locking, `markPaid` (loyalty earn + referral release) and
+`cancel` (session/credit refund) together.
 
 ## Open PRD items (defaults chosen, confirm at the relevant stage)
 

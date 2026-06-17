@@ -3,10 +3,12 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsInt,
   IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { PayMode } from '@sportsbooking/shared';
@@ -59,6 +61,11 @@ export class CreateBookingDto {
   offerCode?: string;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  pointsToRedeem?: number;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => CustomerCaptureDto)
   customer?: CustomerCaptureDto;
@@ -67,6 +74,17 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+}
+
+export class ConfirmPaymentDto {
+  @IsString()
+  razorpayOrderId!: string;
+
+  @IsString()
+  razorpayPaymentId!: string;
+
+  @IsString()
+  razorpaySignature!: string;
 }
 
 export class AvailabilityQueryDto {

@@ -1,0 +1,106 @@
+:root {
+  --color-primary: #0ea5e9;
+  --color-secondary: #0f172a;
+  --color-accent: #22c55e;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: var(--color-secondary);
+  background: #f8fafc;
+}
+
+.nav {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--color-secondary);
+  color: white;
+}
+
+.nav a {
+  color: white;
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.nav a:hover {
+  opacity: 1;
+}
+
+.container {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+button {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button.accent {
+  background: var(--color-accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select {
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius);
+  font-size: 14px;
+  width: 100%;
+  margin: 6px 0 12px;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.slot {
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius);
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  background: white;
+}
+
+.slot.booked,
+.slot.blocked {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.slot.selected {
+  border-color: var(--color-accent);
+  outline: 2px solid var(--color-accent);
+}

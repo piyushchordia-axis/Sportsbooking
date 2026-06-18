@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1000" height="420" fill="#f8fafc"/>
+
+  <!-- nav -->
+  <rect width="1000" height="52" fill="#0f172a"/>
+  <text x="24" y="32" fill="#ffffff" font-size="16" font-weight="700">🏟️ SportsBooking</text>
+  <text x="200" y="32" fill="#ffffff" font-size="14" opacity="0.85">Platform</text>
+  <text x="290" y="32" fill="#ffffff" font-size="14" font-weight="700">Games</text>
+  <text x="360" y="32" fill="#ffffff" font-size="14" opacity="0.85">Owners</text>
+  <text x="838" y="32" fill="#ffffff" font-size="13" opacity="0.8" text-anchor="end">Super Admin · super_admin</text>
+  <text x="852" y="32" fill="#ffffff" font-size="14" opacity="0.85">Logout</text>
+
+  <!-- Add game card -->
+  <rect x="40" y="76" width="920" height="186" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="60" y="108" fill="#0f172a" font-size="18" font-weight="700">Add game</text>
+
+  <!-- row 1: Name / Unit label / Slot mins -->
+  <text x="60" y="134" fill="#475569" font-size="13">Name</text>
+  <rect x="60" y="142" width="270" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="164" fill="#0f172a" font-size="14">Badminton</text>
+
+  <text x="350" y="134" fill="#475569" font-size="13">Unit label</text>
+  <rect x="350" y="142" width="270" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="362" y="164" fill="#0f172a" font-size="14">court</text>
+  <path d="M600 156 l8 0 l-4 6 z" fill="#64748b"/>
+
+  <text x="640" y="134" fill="#475569" font-size="13">Slot mins</text>
+  <rect x="640" y="142" width="280" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="652" y="164" fill="#0f172a" font-size="14">60</text>
+  <path d="M900 156 l8 0 l-4 6 z" fill="#64748b"/>
+
+  <!-- row 2: Min / Max players -->
+  <text x="60" y="196" fill="#475569" font-size="13">Min players</text>
+  <rect x="60" y="204" width="270" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="226" fill="#0f172a" font-size="14">2</text>
+
+  <text x="350" y="196" fill="#475569" font-size="13">Max players</text>
+  <rect x="350" y="204" width="270" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="362" y="226" fill="#0f172a" font-size="14">4</text>
+
+  <rect x="640" y="204" width="104" height="34" rx="10" fill="#0ea5e9"/>
+  <text x="692" y="226" fill="#ffffff" font-size="14" text-anchor="middle">Add game</text>
+
+  <!-- Catalogue card -->
+  <rect x="40" y="278" width="920" height="124" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="60" y="310" fill="#0f172a" font-size="18" font-weight="700">Catalogue</text>
+
+  <text x="60" y="340" fill="#0f172a" font-size="14"><tspan font-weight="700">Pickleball</tspan> — court · 60min · 2-4 players</text>
+  <line x1="60" y1="352" x2="940" y2="352" stroke="#eeeeee"/>
+  <text x="60" y="378" fill="#0f172a" font-size="14"><tspan font-weight="700">Turf Football</tspan> — turf · 60min · 5-14 players</text>
+  <line x1="60" y1="390" x2="940" y2="390" stroke="#eeeeee"/>
+</svg>

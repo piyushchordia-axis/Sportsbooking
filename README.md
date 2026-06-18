@@ -6,7 +6,9 @@ memberships & add-ons, run open matches and tournaments, and build a player CRM.
 
 Built to the PRD (`Sports_Venue_Booking_PRD.md`, v2.1). See
 [`docs/`](docs/) — start with the development plan referenced in
-[`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md).
+[`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md). For operating the
+Super Admin console (with screen snapshots) see
+[`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md).
 
 ## Stack
 

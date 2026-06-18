@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="440" viewBox="0 0 1000 440" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1000" height="440" fill="#f8fafc"/>
+
+  <!-- nav -->
+  <rect width="1000" height="52" fill="#0f172a"/>
+  <text x="24" y="32" fill="#ffffff" font-size="16" font-weight="700">🏟️ SportsBooking</text>
+  <text x="200" y="32" fill="#ffffff" font-size="14" opacity="0.85">Platform</text>
+  <text x="290" y="32" fill="#ffffff" font-size="14" opacity="0.85">Games</text>
+  <text x="360" y="32" fill="#ffffff" font-size="14" font-weight="700">Owners</text>
+  <text x="838" y="32" fill="#ffffff" font-size="13" opacity="0.8" text-anchor="end">Super Admin · super_admin</text>
+  <text x="852" y="32" fill="#ffffff" font-size="14" opacity="0.85">Logout</text>
+
+  <!-- Onboard owner card -->
+  <rect x="40" y="76" width="920" height="210" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="60" y="108" fill="#0f172a" font-size="18" font-weight="700">Onboard owner</text>
+
+  <!-- row 1 -->
+  <text x="60" y="134" fill="#475569" font-size="13">Business name</text>
+  <rect x="60" y="142" width="420" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="164" fill="#0f172a" font-size="14">New Turf Co</text>
+
+  <text x="500" y="134" fill="#475569" font-size="13">Contact email</text>
+  <rect x="500" y="142" width="420" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="512" y="164" fill="#0f172a" font-size="14">owner2@example.com</text>
+
+  <!-- row 2 -->
+  <text x="60" y="196" fill="#475569" font-size="13">Admin password</text>
+  <rect x="60" y="204" width="420" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="72" y="226" fill="#0f172a" font-size="14">owner12345</text>
+
+  <text x="500" y="196" fill="#475569" font-size="13">Venue quota</text>
+  <rect x="500" y="204" width="420" height="34" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="512" y="226" fill="#0f172a" font-size="14">3</text>
+
+  <text x="60" y="258" fill="#64748b" font-size="12">All catalogue games &amp; feature flags are granted in this quick form.</text>
+  <rect x="788" y="246" width="132" height="34" rx="10" fill="#0ea5e9"/>
+  <text x="854" y="268" fill="#ffffff" font-size="14" text-anchor="middle">Onboard owner</text>
+
+  <!-- Owners table card -->
+  <rect x="40" y="302" width="920" height="118" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="60" y="334" fill="#0f172a" font-size="18" font-weight="700">Owners</text>
+
+  <!-- table header -->
+  <text x="60" y="362" fill="#64748b" font-size="13">Name</text>
+  <text x="420" y="362" fill="#64748b" font-size="13">Status</text>
+  <text x="640" y="362" fill="#64748b" font-size="13">Venues</text>
+  <text x="820" y="362" fill="#64748b" font-size="13">Quota</text>
+  <line x1="60" y1="372" x2="940" y2="372" stroke="#f1f5f9"/>
+
+  <!-- row -->
+  <text x="60" y="396" fill="#0f172a" font-size="14">Smash Arena</text>
+  <text x="420" y="396" fill="#16a34a" font-size="14">active</text>
+  <text x="640" y="396" fill="#0f172a" font-size="14">1</text>
+  <text x="820" y="396" fill="#0f172a" font-size="14">5</text>
+</svg>

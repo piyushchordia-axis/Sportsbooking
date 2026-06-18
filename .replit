@@ -76,3 +76,7 @@ externalPort = 80
 deploymentTarget = "autoscale"
 run = ["bash", "-c", "node apps/api/dist/main.js & npx serve -s apps/web/dist -l 5000"]
 build = ["bash", "-c", "cd /home/runner/workspace && npm install -g pnpm@10.33.0 && pnpm install && pnpm --filter @sportsbooking/shared build && pnpm --filter @sportsbooking/api exec npx prisma generate && pnpm --filter @sportsbooking/api exec npx nest build && pnpm --filter @sportsbooking/web exec npx vite build"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000

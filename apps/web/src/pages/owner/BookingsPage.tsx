@@ -39,6 +39,11 @@ const PAYMENT_META: Record<
   [PaymentStatus.FAILED]: { label: 'Failed', tone: 'red' },
 };
 
+const PAY_MODE_LABEL: Record<PayMode, string> = {
+  [PayMode.PREPAY]: 'Prepay',
+  [PayMode.AT_VENUE]: 'Pay at venue',
+};
+
 const TONE: Record<string, string> = {
   green: 'bg-primary/15 text-primary',
   red: 'bg-destructive/15 text-destructive',
@@ -233,6 +238,9 @@ export function BookingsPage() {
                   <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                     Payment
                   </th>
+                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Pay mode
+                  </th>
                   <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-right">
                     Total
                   </th>
@@ -283,6 +291,9 @@ export function BookingsPage() {
                           text={PAYMENT_META[b.paymentStatus].label}
                           tone={PAYMENT_META[b.paymentStatus].tone}
                         />
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted-foreground">
+                        {PAY_MODE_LABEL[b.payMode]}
                       </td>
                       <td className="px-4 py-3 text-right font-display font-semibold whitespace-nowrap">
                         ₹{b.total}

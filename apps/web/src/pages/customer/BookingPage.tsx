@@ -2,7 +2,8 @@ import { PayMode, ResolvedSlot, SlotStatus } from '@sportsbooking/shared';
 import { useEffect, useState } from 'react';
 import { MapPin } from 'lucide-react';
 import { api, DiscoverVenue, Pack } from '../../api/client';
-import { Field, Msg, PageHeader, Select } from '../../components/common';
+import { Field, ImageWithFallback, Msg, PageHeader, Select, SportIcon } from '../../components/common';
+import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function BookingPage() {
@@ -54,6 +55,10 @@ export function BookingPage() {
     .filter((s) => selected.has(s.start))
     .reduce((sum, s) => sum + s.price, 0);
 
+  const selectedSport = venue?.games.find(
+    (g) => g.id === venue.units.find((u) => u.id === unitId)?.gameId,
+  )?.name;
+
   const book = async (payMode: PayMode) => {
     if (!venue) return;
     setMsg(null);
@@ -91,32 +96,41 @@ export function BookingPage() {
               key={v.id}
               onClick={() => pickVenue(v)}
               aria-pressed={active}
-              className={`text-left bg-card border rounded-xl p-4 transition-colors ${
+              className={`text-left bg-card border rounded-xl overflow-hidden transition-colors ${
                 active
                   ? 'border-primary ring-1 ring-primary/40'
                   : 'border-border hover:border-primary/40'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="font-display font-semibold text-lg leading-tight">{v.name}</h3>
+              <div className="relative h-28 w-full bg-secondary">
+                <ImageWithFallback
+                  src={venuePhoto({ games: v.games })}
+                  fallback={FALLBACK_VENUE_PHOTO}
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-transparent" />
                 {active && (
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-primary mt-1">
+                  <span className="absolute top-2 right-2 text-[10px] font-mono uppercase tracking-widest text-primary-foreground bg-primary/90 px-2 py-0.5 rounded-md">
                     Selected
                   </span>
                 )}
               </div>
-              <p className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
-                <MapPin className="h-3.5 w-3.5" /> {v.city}
-              </p>
-              <div className="flex flex-wrap gap-1.5 mt-3">
-                {v.games.map((g) => (
-                  <span
-                    key={g.id}
-                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground"
-                  >
-                    {g.name}
-                  </span>
-                ))}
+              <div className="p-4">
+                <h3 className="font-display font-semibold text-lg leading-tight">{v.name}</h3>
+                <p className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
+                  <MapPin className="h-3.5 w-3.5" /> {v.city}
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {v.games.map((g) => (
+                    <span
+                      key={g.id}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground"
+                    >
+                      <SportIcon name={g.name} className="h-3.5 w-3.5" />
+                      {g.name}
+                    </span>
+                  ))}
+                </div>
               </div>
             </button>
           );
@@ -125,7 +139,8 @@ export function BookingPage() {
 
       {venue && (
         <div className="bg-card border border-border rounded-xl p-5 mb-6">
-          <h3 className="font-display font-semibold text-lg mb-4">
+          <h3 className="font-display font-semibold text-lg mb-4 flex items-center gap-2">
+            <SportIcon name={selectedSport} className="h-5 w-5" />
             {venue.name} — pick a court &amp; date
           </h3>
 
@@ -171,7 +186,10 @@ export function BookingPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           {/* Slot grid */}
           <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
-            <h3 className="font-display font-semibold text-lg mb-1">{date}</h3>
+            <h3 className="font-display font-semibold text-lg mb-1 flex items-center gap-2">
+              <SportIcon name={selectedSport} className="h-5 w-5" />
+              {date}
+            </h3>
             <p className="text-xs text-muted-foreground mb-4">Resolved per-court dynamic pricing</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {slots.map((s) => {

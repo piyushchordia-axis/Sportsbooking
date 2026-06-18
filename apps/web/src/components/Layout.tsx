@@ -1,8 +1,9 @@
 import { UserRole } from '@sportsbooking/shared';
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Activity, LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
+import { useTheme } from '../theme/ThemeProvider';
 
 const NAV: Record<UserRole, { to: string; label: string }[]> = {
   [UserRole.CUSTOMER]: [
@@ -36,17 +37,29 @@ const ROLE_LABEL: Record<UserRole, string> = {
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const { branding } = useTheme();
   const loc = useLocation();
   const links = user ? NAV[user.role] : [];
+  const [logoBroken, setLogoBroken] = useState(false);
+  useEffect(() => setLogoBroken(false), [branding.logoUrl]);
 
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-md">
         <nav className="max-w-[80rem] mx-auto px-4 h-16 flex items-center gap-6">
           <Link to="/" className="flex items-center gap-2 shrink-0">
-            <span className="grid place-items-center h-8 w-8 rounded-lg bg-primary text-primary-foreground">
-              <Activity className="h-5 w-5" strokeWidth={2.5} />
-            </span>
+            {branding.logoUrl && !logoBroken ? (
+              <img
+                src={branding.logoUrl}
+                alt=""
+                onError={() => setLogoBroken(true)}
+                className="h-8 w-8 rounded-lg object-contain bg-secondary/60 p-0.5"
+              />
+            ) : (
+              <span className="grid place-items-center h-8 w-8 rounded-lg bg-primary text-primary-foreground">
+                <Activity className="h-5 w-5" strokeWidth={2.5} />
+              </span>
+            )}
             <span className="font-display font-bold text-xl tracking-tight">
               Sport<span className="text-primary">line</span>
             </span>

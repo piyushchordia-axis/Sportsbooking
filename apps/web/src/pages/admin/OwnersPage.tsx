@@ -1,7 +1,7 @@
 import { FeatureFlag } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, PageHeader, useLoad } from '../../components/common';
+import { Card, Field, Msg, OwnerLogo, PageHeader, useLoad } from '../../components/common';
 
 /** Super Admin: owner onboarding & oversight (PRD §3.2, §3.3). */
 export function OwnersPage() {
@@ -67,7 +67,12 @@ export function OwnersPage() {
             <tbody>
               {(owners.data ?? []).map((o) => (
                 <tr key={o.id}>
-                  <td className="font-medium">{o.name}</td>
+                  <td className="font-medium">
+                    <span className="flex items-center gap-2.5">
+                      <OwnerLogo name={o.name} logoUrl={o.logoUrl} className="h-8 w-8" />
+                      {o.name}
+                    </span>
+                  </td>
                   <td>
                     <span className="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground">
                       {o.status}

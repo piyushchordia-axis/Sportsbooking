@@ -1,7 +1,7 @@
 import { UnitLabel } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, SportIcon, useLoad } from '../../components/common';
 
 /** Super Admin: global game catalogue (PRD §3.1). */
 export function GamesPage() {
@@ -63,11 +63,14 @@ export function GamesPage() {
       <Card title="Catalogue">
         <div className="divide-y divide-border">
           {(games.data ?? []).map((g) => (
-            <div key={g.id} className="py-3 first:pt-0 text-sm">
-              <strong className="font-display">{g.name}</strong>{' '}
-              <span className="text-muted-foreground">
-                — {g.unitLabel} · {g.slotGranularityMin}min · {g.minPlayers}-{g.maxPlayers} players
-              </span>
+            <div key={g.id} className="py-3 first:pt-0 text-sm flex items-center gap-3">
+              <SportIcon name={g.name} src={g.iconUrl} className="h-6 w-6 shrink-0" />
+              <div>
+                <strong className="font-display">{g.name}</strong>{' '}
+                <span className="text-muted-foreground">
+                  — {g.unitLabel} · {g.slotGranularityMin}min · {g.minPlayers}-{g.maxPlayers} players
+                </span>
+              </div>
             </div>
           ))}
         </div>

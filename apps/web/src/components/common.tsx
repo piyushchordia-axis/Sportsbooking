@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
+import { EMPTY_GENERIC, initials, sportIcon } from '../lib/imagery';
 
 export function Card({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -159,4 +160,130 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
 
   useEffect(() => reload(), [reload]);
   return { data, error, loading, reload, setData };
+}
+
+/**
+ * <img> that swaps to a fallback source once if the primary fails to load, so a
+ * missing asset degrades to a branded placeholder instead of a broken image.
+ * Renders nothing if the fallback also fails (parent supplies a backdrop).
+ */
+export function ImageWithFallback({
+  src,
+  fallback,
+  alt = '',
+  className,
+}: {
+  src: string;
+  fallback?: string;
+  alt?: string;
+  className?: string;
+}) {
+  const [current, setCurrent] = useState(src);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setCurrent(src);
+    setFailed(false);
+  }, [src]);
+  if (failed) return null;
+  return (
+    <img
+      src={current}
+      alt={alt}
+      loading="lazy"
+      className={className}
+      onError={() => {
+        if (fallback && current !== fallback) setCurrent(fallback);
+        else setFailed(true);
+      }}
+    />
+  );
+}
+
+/** Recognizable line icon for a sport, resolved from its name (or an explicit
+ * stored `iconUrl`) with a graceful fallback to a generic court glyph, then to a
+ * sized empty slot if even the generic asset fails (never a broken image). */
+export function SportIcon({
+  name,
+  src,
+  className = 'h-5 w-5',
+}: {
+  name?: string | null;
+  src?: string | null;
+  className?: string;
+}) {
+  const resolved = src || sportIcon(name);
+  const [current, setCurrent] = useState(resolved);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setCurrent(resolved);
+    setFailed(false);
+  }, [resolved]);
+  if (failed) return <span aria-hidden className={`${className} inline-block`} />;
+  return (
+    <img
+      src={current}
+      alt=""
+      aria-hidden
+      className={className}
+      onError={() => {
+        const generic = sportIcon(undefined);
+        if (current !== generic) setCurrent(generic);
+        else setFailed(true);
+      }}
+    />
+  );
+}
+
+/** Owner/business logo: the stored logo if present, else an initials monogram. */
+export function OwnerLogo({
+  name,
+  logoUrl,
+  className = 'h-9 w-9',
+}: {
+  name?: string | null;
+  logoUrl?: string | null;
+  className?: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  if (logoUrl && !broken) {
+    return (
+      <img
+        src={logoUrl}
+        alt={`${name ?? 'Owner'} logo`}
+        className={`${className} shrink-0 rounded-lg object-contain bg-secondary/60 p-1`}
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  return (
+    <span
+      className={`${className} shrink-0 grid place-items-center rounded-lg bg-secondary text-secondary-foreground font-display font-bold text-sm`}
+      aria-hidden
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+/** Friendly empty-state block: illustration + message, used for empty lists. */
+export function EmptyState({
+  title,
+  hint,
+  image = EMPTY_GENERIC,
+}: {
+  title: string;
+  hint?: string;
+  image?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center text-center py-10 px-4">
+      <ImageWithFallback
+        src={image}
+        alt=""
+        className="h-28 w-28 object-contain opacity-90 mb-4 drop-shadow"
+      />
+      <p className="font-display font-semibold text-base text-foreground">{title}</p>
+      {hint && <p className="text-sm text-muted-foreground mt-1 max-w-sm">{hint}</p>}
+    </div>
+  );
 }

@@ -1,0 +1,49 @@
+uploads = []
+
+[[generated]]
+id = "RUXncGQgX9qei8JzWr5Ng"
+uri = "file://apps/web/public/images/empty/generic.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "MIaW-rqKo1tvP3JUD-UEI"
+uri = "file://apps/web/public/images/empty/trophy.png"
+type = "image"
+title = "generated_image"
+
+[[outputs]]
+id = "2ARZd85Qo72_sTNQ5fNs3"
+uri = "file://attached_assets/stock_images/pickleball_court.jpg"
+type = "image"
+title = "indoor pickleball court with paddle and ball, modern bright sports facility, wide angle"
+
+[[outputs]]
+id = "Y4jWwmueKBDIoHCeW1EA6"
+uri = "file://attached_assets/stock_images/turf_football.jpg"
+type = "image"
+title = "five a side football turf pitch at night under floodlights, green artificial grass, wide angle"
+
+[[outputs]]
+id = "Yl8bjbRHnWrd1C0GZ_6It"
+uri = "file://attached_assets/stock_images/box_cricket.jpg"
+type = "image"
+title = "indoor box cricket turf arena with surrounding netting and pitch, floodlit"
+
+[[outputs]]
+id = "Rzi4j1izGNao6wivSJKyg"
+uri = "file://attached_assets/stock_images/sports_venue_generic.jpg"
+type = "image"
+title = "modern indoor multi sport court facility, clean professional, wide angle"
+
+[[outputs]]
+id = "s_0ZrtgIM63mqOcRfZb7k"
+uri = "file://attached_assets/stock_images/badminton_court.jpg"
+type = "image"
+title = "indoor badminton court with net and shuttlecock, modern sports hall, wide angle"
+
+[[outputs]]
+id = "MifPGkLpU-Q_cxG5jVi21"
+uri = "file://attached_assets/stock_images/sports_hero.jpg"
+type = "image"
+title = "professional indoor badminton sports court arena, dramatic lighting, wide angle"

@@ -207,22 +207,23 @@ async function seed(prisma: PrismaClient) {
 
   // ---- game catalogue (PRD §3.1) ---------------------------------------
   const pickleball = await prisma.gameCatalogue.create({
-    data: { name: 'Pickleball', slotGranularityMin: 60, unitLabel: 'court', minPlayers: 2, maxPlayers: 4 },
+    data: { name: 'Pickleball', iconUrl: '/images/sports/pickleball.svg', slotGranularityMin: 60, unitLabel: 'court', minPlayers: 2, maxPlayers: 4 },
   });
   const badminton = await prisma.gameCatalogue.create({
-    data: { name: 'Badminton', slotGranularityMin: 60, unitLabel: 'court', minPlayers: 2, maxPlayers: 4 },
+    data: { name: 'Badminton', iconUrl: '/images/sports/badminton.svg', slotGranularityMin: 60, unitLabel: 'court', minPlayers: 2, maxPlayers: 4 },
   });
   const football = await prisma.gameCatalogue.create({
-    data: { name: 'Turf Football', slotGranularityMin: 60, unitLabel: 'turf', minPlayers: 10, maxPlayers: 14 },
+    data: { name: 'Turf Football', iconUrl: '/images/sports/football.svg', slotGranularityMin: 60, unitLabel: 'turf', minPlayers: 10, maxPlayers: 14 },
   });
   const boxCricket = await prisma.gameCatalogue.create({
-    data: { name: 'Box Cricket', slotGranularityMin: 60, unitLabel: 'turf', minPlayers: 6, maxPlayers: 12 },
+    data: { name: 'Box Cricket', iconUrl: '/images/sports/cricket.svg', slotGranularityMin: 60, unitLabel: 'turf', minPlayers: 6, maxPlayers: 12 },
   });
 
   // ---- primary tenant: Smash Arena -------------------------------------
   const owner = await prisma.owner.create({
     data: {
       name: 'Smash Arena',
+      logoUrl: '/images/owner-emblem.svg',
       contactEmail: 'owner@smasharena.local',
       contactMobile: '+919900000001',
       status: 'active',
@@ -250,6 +251,7 @@ async function seed(prisma: PrismaClient) {
     data: {
       ownerId: owner.id,
       name: 'Smash Arena — Indiranagar',
+      photos: ['/images/venues/pickleball.jpg', '/images/venues/badminton.jpg'],
       city: 'Bengaluru',
       address: '100ft Road, Indiranagar',
       contactPhone: '+919900000010',
@@ -263,6 +265,7 @@ async function seed(prisma: PrismaClient) {
     data: {
       ownerId: owner.id,
       name: 'Smash Arena — Koramangala',
+      photos: ['/images/venues/turf-football.jpg', '/images/venues/box-cricket.jpg'],
       city: 'Bengaluru',
       address: '80ft Road, Koramangala',
       contactPhone: '+919900000011',
@@ -492,11 +495,11 @@ async function seed(prisma: PrismaClient) {
 
   // ---- additional tenants (admin Owners / platform variety) ------------
   const baseline = await prisma.owner.create({
-    data: { name: 'Baseline Sports', contactEmail: 'admin@baseline.local', contactMobile: '+919900000002', status: 'active', venueQuota: 3, allowedGameIds: [pickleball.id, badminton.id], featureFlags: ['memberships', 'loyalty'], primaryColor: '#0EA5E9' },
+    data: { name: 'Baseline Sports', logoUrl: '/images/owner-emblem.svg', contactEmail: 'admin@baseline.local', contactMobile: '+919900000002', status: 'active', venueQuota: 3, allowedGameIds: [pickleball.id, badminton.id], featureFlags: ['memberships', 'loyalty'], primaryColor: '#0EA5E9' },
   });
   await prisma.user.create({ data: { role: 'owner', ownerId: baseline.id, name: 'Baseline Admin', email: 'admin@baseline.local', passwordHash: ownerPass } });
   const bv = await prisma.venue.create({
-    data: { ownerId: baseline.id, name: 'Baseline — HSR Layout', city: 'Bengaluru', address: '27th Main, HSR', openTime: '06:00', closeTime: '22:00', games: { create: [{ gameId: pickleball.id }] }, settings: { create: { noShowFee: 150 } } },
+    data: { ownerId: baseline.id, name: 'Baseline — HSR Layout', photos: ['/images/venues/pickleball.jpg'], city: 'Bengaluru', address: '27th Main, HSR', openTime: '06:00', closeTime: '22:00', games: { create: [{ gameId: pickleball.id }] }, settings: { create: { noShowFee: 150 } } },
   });
   const bCourt = await makeUnit(bv.id, baseline.id, 'Court 1', 'court', pickleball.id, 4, { base: 550, weekend: 700, evening: 800, weekendEvening: 950 });
   await makeBooking({ ownerId: baseline.id, venueId: bv.id, unitId: bCourt.id, customerId: aarav.id, start: playAt(-4, 18), status: 'completed', payMode: 'prepay', paymentStatus: 'paid', subtotal: 800, total: 800 });

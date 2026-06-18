@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Msg, PageHeader, Select, useLoad } from '../../components/common';
+import { Card, EmptyState, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner CRM directory with segment filter (PRD §4.9). */
 export function PlayersPage() {
@@ -22,41 +22,48 @@ export function PlayersPage() {
           ]}
         />
         <Msg text={players.error} />
-        <div className="overflow-x-auto mt-4">
-          <table>
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Bookings</th>
-                <th>Last visit</th>
-                <th>Consent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(players.data ?? []).map((p) => (
-                <tr key={p.customerId}>
-                  <td className="font-mono text-xs text-muted-foreground">{p.customerId}</td>
-                  <td className="font-mono">{p.bookingCount}</td>
-                  <td className="whitespace-nowrap">
-                    {new Date(p.lastVisitAt).toLocaleDateString()}
-                  </td>
-                  <td>
-                    {p.consent ? (
-                      <span className="text-primary">✓</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                    {p.optedOut ? (
-                      <span className="text-muted-foreground"> (opted out)</span>
-                    ) : (
-                      ''
-                    )}
-                  </td>
+        {!players.error && (players.data ?? []).length === 0 ? (
+          <EmptyState
+            title="No players in this segment"
+            hint="As customers book and opt in, they’ll show up in your CRM here."
+          />
+        ) : (
+          <div className="overflow-x-auto mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Bookings</th>
+                  <th>Last visit</th>
+                  <th>Consent</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(players.data ?? []).map((p) => (
+                  <tr key={p.customerId}>
+                    <td className="font-mono text-xs text-muted-foreground">{p.customerId}</td>
+                    <td className="font-mono">{p.bookingCount}</td>
+                    <td className="whitespace-nowrap">
+                      {new Date(p.lastVisitAt).toLocaleDateString()}
+                    </td>
+                    <td>
+                      {p.consent ? (
+                        <span className="text-primary">✓</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                      {p.optedOut ? (
+                        <span className="text-muted-foreground"> (opted out)</span>
+                      ) : (
+                        ''
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

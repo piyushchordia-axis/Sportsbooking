@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, DiscoverVenue } from '../../api/client';
-import { Card, Field, Msg, PageHeader, Select } from '../../components/common';
+import { Card, EmptyState, Field, ImageWithFallback, Msg, PageHeader, Select } from '../../components/common';
+import { EMPTY_TROPHY, FALLBACK_VENUE_PHOTO, tournamentBanner } from '../../lib/imagery';
 
 /** Customer: browse and register for tournaments (PRD §4.7, §5.4). */
 export function TournamentsPage() {
@@ -37,6 +38,10 @@ export function TournamentsPage() {
     }
   };
 
+  const selectedVenue = venues.find((v) => v.id === venueId);
+  const sportOf = (gameId: string) =>
+    selectedVenue?.games.find((g) => g.id === gameId)?.name;
+
   return (
     <div className="container">
       <PageHeader title="Tournaments" subtitle="Browse & register your team" />
@@ -56,19 +61,33 @@ export function TournamentsPage() {
 
       {tournaments.length === 0 && (
         <Card>
-          <p className="text-muted-foreground text-sm">No tournaments at this venue.</p>
+          <EmptyState
+            image={EMPTY_TROPHY}
+            title="No tournaments here yet"
+            hint="This venue hasn’t scheduled any tournaments. Check back soon or try another venue."
+          />
         </Card>
       )}
       {tournaments.map((t) => (
-        <Card key={t.id}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-display font-semibold text-base">{t.name}</p>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {t.format} · {t.regType} · ₹{t.fee} ({t.feeBasis}) ·{' '}
-                {t._count?.participants ?? 0}/{t.capacity} registered
+        <div key={t.id} className="bg-card border border-border rounded-xl overflow-hidden mb-4">
+          <div className="relative h-28">
+            <ImageWithFallback
+              src={tournamentBanner(sportOf(t.gameId))}
+              fallback={FALLBACK_VENUE_PHOTO}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-card via-card/70 to-card/20" />
+            <div className="absolute inset-0 p-4 flex flex-col justify-end">
+              <p className="font-display font-semibold text-lg leading-tight">{t.name}</p>
+              <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">
+                {t.format} · {t.regType}
               </p>
             </div>
+          </div>
+          <div className="p-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              ₹{t.fee} ({t.feeBasis}) · {t._count?.participants ?? 0}/{t.capacity} registered
+            </p>
             <button
               onClick={() => register(t.id)}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors shrink-0"
@@ -76,7 +95,7 @@ export function TournamentsPage() {
               Register
             </button>
           </div>
-        </Card>
+        </div>
       ))}
 
       <Msg text={msg} />

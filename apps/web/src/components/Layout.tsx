@@ -14,13 +14,17 @@ const NAV: Record<UserRole, { to: string; label: string }[]> = {
   ],
   [UserRole.OWNER]: [
     { to: '/owner', label: 'Dashboard' },
+    { to: '/owner/new-booking', label: 'New booking' },
     { to: '/owner/venues', label: 'Venues' },
     { to: '/owner/packs', label: 'Packs' },
     { to: '/owner/offers', label: 'Offers' },
     { to: '/owner/players', label: 'Players' },
     { to: '/owner/tournaments', label: 'Tournaments' },
   ],
-  [UserRole.STAFF]: [{ to: '/owner/venues', label: 'Venues' }],
+  [UserRole.STAFF]: [
+    { to: '/owner/new-booking', label: 'New booking' },
+    { to: '/owner/venues', label: 'Venues' },
+  ],
   [UserRole.SUPER_ADMIN]: [
     { to: '/admin', label: 'Platform' },
     { to: '/admin/games', label: 'Games' },

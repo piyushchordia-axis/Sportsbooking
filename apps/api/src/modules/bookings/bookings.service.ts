@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -262,11 +263,21 @@ export class BookingsService {
    * (PRD §4.5). Idempotent: a second call after the booking is already paid is
    * a no-op. Used by prepay confirmation and pay-at-venue settlement.
    */
-  async markPaid(bookingId: string): Promise<{ paid: true }> {
+  async markPaid(
+    bookingId: string,
+    user?: RequestUser,
+  ): Promise<{ paid: true }> {
     const booking = await this.prisma.withTenantBypass((tx) =>
       tx.booking.findUnique({ where: { id: bookingId } }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
+
+    // Owner/staff settlement must stay within the caller's own tenant. The
+    // public prepay confirmation path calls this without a user (verified by
+    // payment signature), so the check only applies when a user is present.
+    if (user && user.ownerId !== booking.ownerId) {
+      throw new ForbiddenException('Booking belongs to another tenant');
+    }
 
     return this.prisma.withTenantId(booking.ownerId, async (tx) => {
       const fresh = await tx.booking.findUnique({ where: { id: bookingId } });

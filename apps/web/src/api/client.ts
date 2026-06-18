@@ -2,7 +2,9 @@ import {
   BookingResponse,
   CalendarResponse,
   CreateBookingRequest,
+  CreateCustomerRequest,
   LoginResponse,
+  PlayerSummary,
 } from '@sportsbooking/shared';
 
 const BASE = '/api';
@@ -22,6 +24,16 @@ export interface DiscoverVenue {
     accentColor: string;
   };
   games: { id: string; name: string }[];
+  units: { id: string; name: string; label: string; gameId: string; capacity: number }[];
+}
+
+/** Owner's own venue (GET /venues) with units, for the offline booking flow. */
+export interface OwnerVenue {
+  id: string;
+  name: string;
+  city: string | null;
+  openTime: string;
+  closeTime: string;
   units: { id: string; name: string; label: string; gameId: string; capacity: number }[];
 }
 
@@ -136,7 +148,8 @@ export const api = {
   listOffers: () => get<any[]>('/offers'),
   createAddon: (venueId: string, body: unknown) => post(`/venues/${venueId}/addons`, body),
   listPlayers: (segment?: string) =>
-    get<any[]>(`/players${segment ? `?segment=${segment}` : ''}`),
+    get<PlayerSummary[]>(`/players${segment ? `?segment=${segment}` : ''}`),
+  addCustomer: (body: CreateCustomerRequest) => post<PlayerSummary>('/players', body),
   createTournament: (body: unknown) => post('/tournaments', body),
   settleBooking: (id: string) => post(`/bookings/${id}/settle`),
 

@@ -99,6 +99,25 @@ export interface CreateBookingRequest {
   customer?: { name: string; mobile: string; consent: boolean };
 }
 
+/** Owner CRM directory row (PRD §4.9) — name/mobile sourced from the player
+ * profile / user, plus frequency/recency + consent. */
+export interface PlayerSummary {
+  customerId: string;
+  name: string | null;
+  mobile: string | null;
+  bookingCount: number;
+  lastVisitAt: string; // ISO
+  consent: boolean;
+  optedOut: boolean;
+}
+
+/** Owner/staff-initiated add of a customer to the CRM. */
+export interface CreateCustomerRequest {
+  name: string;
+  mobile: string;
+  consent: boolean;
+}
+
 export interface BookingLineItem {
   label: string;
   amount: number;

@@ -69,8 +69,8 @@ export class BookingsController {
   @Post('bookings/:id/settle')
   @UseGuards(RolesGuard)
   @Roles(UserRole.OWNER, UserRole.STAFF)
-  settle(@Param('id') id: string) {
-    return this.bookings.markPaid(id);
+  settle(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.bookings.markPaid(id, user);
   }
 
   /** Cancel a booking per the owner's policy (PRD §5.4). */

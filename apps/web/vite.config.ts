@@ -16,6 +16,17 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Isolate the heavy charting library (only used on the owner
+          // dashboard) into its own chunk so it loads on demand.
+          recharts: ['recharts'],
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5000,

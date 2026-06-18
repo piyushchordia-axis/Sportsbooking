@@ -1,2 +1,2 @@
-- [apps/web Sportline theming](apps-web-theming.md) — Tailwind v4 white-label: branding writes SOURCE vars (not --color-*), contrast-computed foregrounds, unlayered .container, guarded base-layer element styles.
+- [apps/web Sportline theming](apps-web-theming.md) — Tailwind v4 white-label: branding writes SOURCE vars (not --color-*); foregrounds contrast-computed; .container is unlayered.
 - [apps/web dashboard chart](apps-web-chart.md) — owner dashboard bar chart is a hand-rolled SVG, intentionally NOT recharts; don't re-add heavy chart libs.

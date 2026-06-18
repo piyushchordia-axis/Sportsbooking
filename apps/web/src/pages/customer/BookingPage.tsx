@@ -68,8 +68,10 @@ export function BookingPage() {
         offerCode: offer || undefined,
         pointsToRedeem: Number(points) || undefined,
       });
-      setMsg(`Booking ${res.id} — ${res.status} · paid ₹${res.total} (${res.paymentStatus})`);
+      // Refresh availability first (load() clears the message), then surface
+      // the confirmation so it persists for the customer.
       await load();
+      setMsg(`Booking ${res.id} — ${res.status} · paid ₹${res.total} (${res.paymentStatus})`);
     } catch (e) {
       setMsg((e as Error).message);
     }

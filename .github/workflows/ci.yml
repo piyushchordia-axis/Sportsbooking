@@ -39,3 +39,52 @@ jobs:
       - run: pnpm --filter @sportsbooking/api db:generate
       - run: pnpm typecheck
       - run: pnpm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sportsbooking
+          POSTGRES_PASSWORD: sportsbooking
+          POSTGRES_DB: sportsbooking
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sportsbooking"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
+      DATABASE_ADMIN_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
+      JWT_SECRET: ci-secret
+      NODE_ENV: development
+      PGPASSWORD: sportsbooking
+      CI: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sportsbooking/shared build
+      - run: pnpm --filter @sportsbooking/api db:generate
+      # Schema is managed via `prisma db push` (no migration history yet).
+      - run: pnpm --filter @sportsbooking/api exec prisma db push --skip-generate
+      - run: psql "$DATABASE_URL" -f apps/api/prisma/sql/rls.sql
+      - run: pnpm db:seed
+      - run: pnpm exec playwright install --with-deps chromium
+      # playwright.config.ts boots the full stack (pnpm dev) and waits for :5173.
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

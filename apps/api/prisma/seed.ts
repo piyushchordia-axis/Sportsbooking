@@ -131,6 +131,19 @@ async function seed(prisma: PrismaClient) {
     });
   }
 
+  // A starter membership pack so the customer wallet/purchase flow is demoable
+  // out of the box (PRD §4.4): flat-rate, fully covers the dynamic court price.
+  await prisma.membershipPack.create({
+    data: {
+      ownerId: owner.id,
+      name: '10-Play Flat',
+      sessions: 10,
+      price: 5000,
+      pricingMode: 'flat',
+      expiryMode: 'none',
+    },
+  });
+
   // eslint-disable-next-line no-console
   console.log('Seed complete. Owner login: owner@smasharena.local / owner12345');
 }

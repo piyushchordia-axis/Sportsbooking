@@ -94,5 +94,15 @@ drive the customer browse flow.
 ## Tests
 
 ```bash
-pnpm test          # unit tests (e.g. pricing resolver specificity)
+pnpm test          # unit tests (pricing resolver, pack pricing, ...)
+
+# End-to-end (Playwright) — drives the real app against a live API + seeded DB.
+# See e2e/README.md for the one-time DB setup (push schema, apply RLS, seed).
+pnpm test:e2e:install   # one-time: install the Chromium browser
+pnpm test:e2e           # boots the stack (pnpm dev) and runs the specs
 ```
+
+E2E specs (`e2e/`) cover login + role routing, customer venue→court→slot booking
+and pack purchase, the owner console (dashboard, pack/offer creation, CRM) and
+the super-admin console. They run in CI against a Postgres service (`e2e` job in
+`.github/workflows/ci.yml`).

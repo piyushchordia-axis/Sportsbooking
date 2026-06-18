@@ -1,13 +1,5 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { api } from '../../api/client';
+import { BarChart } from '../../components/BarChart';
 import { Card, Msg, PageHeader, Stat, useLoad } from '../../components/common';
 
 /** Owner dashboard — consolidated reports (PRD §4.11). */
@@ -46,35 +38,7 @@ export function DashboardPage() {
           {chartData.length > 0 && (
             <Card title="Revenue by venue">
               <div className="h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis
-                      dataKey="name"
-                      stroke="var(--muted-foreground)"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={{ stroke: 'var(--border)' }}
-                    />
-                    <YAxis
-                      stroke="var(--muted-foreground)"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <Tooltip
-                      cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-                      contentStyle={{
-                        background: 'var(--popover)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 12,
-                        color: 'var(--popover-foreground)',
-                        fontSize: 12,
-                      }}
-                    />
-                    <Bar dataKey="revenue" fill="var(--primary)" radius={[6, 6, 0, 0]} maxBarSize={48} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <BarChart data={chartData} />
               </div>
             </Card>
           )}

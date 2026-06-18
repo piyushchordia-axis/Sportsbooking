@@ -1,7 +1,7 @@
 import { PackExpiryMode, PackPricingMode } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner: membership session packs (PRD §4.4). */
 export function PacksPage() {
@@ -34,8 +34,9 @@ export function PacksPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Packs" subtitle="Membership session packs" />
       <Card title="Create pack">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Name" value={name} onChange={setName} />
           <Field label="Sessions" value={sessions} onChange={setSessions} />
           <Field label="Price ₹" value={price} onChange={setPrice} />
@@ -55,17 +56,27 @@ export function PacksPage() {
             options={Object.values(PackExpiryMode).map((m) => ({ value: m, label: m }))}
           />
         </div>
-        <button onClick={create}>Create pack</button>
+        <button
+          onClick={create}
+          className="mt-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Create pack
+        </button>
         <Msg text={msg} />
       </Card>
 
       <Card title="Packs">
-        {(packs.data ?? []).map((p) => (
-          <div key={p.id} style={{ borderBottom: '1px solid #eee', padding: '6px 0' }}>
-            <strong>{p.name}</strong> — {p.sessions} sessions · ₹{p.price} · {p.pricingMode}
-            {p.pricingMode === 'discount' ? ` ${p.discountPct}%` : ''} · expiry {p.expiryMode}
-          </div>
-        ))}
+        <div className="divide-y divide-border">
+          {(packs.data ?? []).map((p) => (
+            <div key={p.id} className="py-3 first:pt-0 text-sm">
+              <strong className="font-display">{p.name}</strong>{' '}
+              <span className="text-muted-foreground">
+                — {p.sessions} sessions · ₹{p.price} · {p.pricingMode}
+                {p.pricingMode === 'discount' ? ` ${p.discountPct}%` : ''} · expiry {p.expiryMode}
+              </span>
+            </div>
+          ))}
+        </div>
       </Card>
     </div>
   );

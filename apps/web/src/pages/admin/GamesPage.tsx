@@ -1,7 +1,7 @@
 import { UnitLabel } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Super Admin: global game catalogue (PRD §3.1). */
 export function GamesPage() {
@@ -32,8 +32,9 @@ export function GamesPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Games" subtitle="Global game catalogue" />
       <Card title="Add game">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Name" value={name} onChange={setName} />
           <Select
             label="Unit label"
@@ -50,17 +51,26 @@ export function GamesPage() {
           <Field label="Min players" value={minP} onChange={setMinP} />
           <Field label="Max players" value={maxP} onChange={setMaxP} />
         </div>
-        <button onClick={create}>Add game</button>
+        <button
+          onClick={create}
+          className="mt-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Add game
+        </button>
         <Msg text={msg} />
       </Card>
 
       <Card title="Catalogue">
-        {(games.data ?? []).map((g) => (
-          <div key={g.id} style={{ borderBottom: '1px solid #eee', padding: '6px 0' }}>
-            <strong>{g.name}</strong> — {g.unitLabel} · {g.slotGranularityMin}min ·{' '}
-            {g.minPlayers}-{g.maxPlayers} players
-          </div>
-        ))}
+        <div className="divide-y divide-border">
+          {(games.data ?? []).map((g) => (
+            <div key={g.id} className="py-3 first:pt-0 text-sm">
+              <strong className="font-display">{g.name}</strong>{' '}
+              <span className="text-muted-foreground">
+                — {g.unitLabel} · {g.slotGranularityMin}min · {g.minPlayers}-{g.maxPlayers} players
+              </span>
+            </div>
+          ))}
+        </div>
       </Card>
     </div>
   );

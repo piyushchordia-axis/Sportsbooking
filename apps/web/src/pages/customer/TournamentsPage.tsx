@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, DiscoverVenue } from '../../api/client';
-import { Card, Field, Msg, Select } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select } from '../../components/common';
 
 /** Customer: browse and register for tournaments (PRD §4.7, §5.4). */
 export function TournamentsPage() {
@@ -39,29 +39,42 @@ export function TournamentsPage() {
 
   return (
     <div className="container">
-      <Card title="Tournaments">
+      <PageHeader title="Tournaments" subtitle="Browse & register your team" />
+      <Card title="Your details">
         <Select
           label="Venue"
           value={venueId}
           onChange={setVenueId}
           options={venues.map((v) => ({ value: v.id, label: v.name }))}
         />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Captain name" value={name} onChange={setName} />
           <Field label="Mobile" value={mobile} onChange={setMobile} />
           <Field label="Team (optional)" value={team} onChange={setTeam} />
         </div>
       </Card>
 
-      {tournaments.length === 0 && <Card><p>No tournaments at this venue.</p></Card>}
+      {tournaments.length === 0 && (
+        <Card>
+          <p className="text-muted-foreground text-sm">No tournaments at this venue.</p>
+        </Card>
+      )}
       {tournaments.map((t) => (
         <Card key={t.id}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>
-              <strong>{t.name}</strong> — {t.format} · {t.regType} · ₹{t.fee} ({t.feeBasis}) ·{' '}
-              {t._count?.participants ?? 0}/{t.capacity} registered
-            </span>
-            <button onClick={() => register(t.id)}>Register</button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-display font-semibold text-base">{t.name}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {t.format} · {t.regType} · ₹{t.fee} ({t.feeBasis}) ·{' '}
+                {t._count?.participants ?? 0}/{t.capacity} registered
+              </p>
+            </div>
+            <button
+              onClick={() => register(t.id)}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors shrink-0"
+            >
+              Register
+            </button>
           </div>
         </Card>
       ))}

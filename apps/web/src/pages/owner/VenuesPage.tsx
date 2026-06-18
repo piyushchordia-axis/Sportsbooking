@@ -1,7 +1,7 @@
 import { AddonType, DayType, TimeBand, UnitLabel } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner: venues, courts, per-court price grid and add-ons (PRD §4.1–4.3, §4.6). */
 export function VenuesPage() {
@@ -34,6 +34,7 @@ export function VenuesPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Venues" subtitle="Courts, pricing grids & add-ons" />
       <Card title="Create venue">
         <Field label="Name" value={vName} onChange={setVName} />
         <Field label="City" value={city} onChange={setCity} />
@@ -54,14 +55,16 @@ export function VenuesPage() {
 
       {(venues.data ?? []).map((v: any) => (
         <Card key={v.id} title={`${v.name} — ${v.city ?? ''}`}>
-          <div style={{ marginBottom: 8 }}>
-            <strong>Courts:</strong>{' '}
-            {v.units.length ? v.units.map((u: any) => u.name).join(', ') : 'none yet'}
+          <div className="mb-3 text-sm">
+            <strong className="font-display">Courts:</strong>{' '}
+            <span className="text-muted-foreground">
+              {v.units.length ? v.units.map((u: any) => u.name).join(', ') : 'none yet'}
+            </span>
           </div>
 
           <details>
             <summary>Add a court</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, margin: '8px 0' }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-3">
               <Field label="Court name" value={uName} onChange={setUName} />
               <Select
                 label="Label"
@@ -119,9 +122,9 @@ function UnitPricing({ unit, onMsg }: { unit: any; onMsg: (m: string) => void })
   };
 
   return (
-    <details style={{ marginTop: 6 }}>
+    <details className="mt-2">
       <summary>Price grid — {unit.name}</summary>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '8px 0' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-3">
         <Field label="Base ₹/hr" value={base} onChange={setBase} />
         <Field label="Weekend ₹/hr" value={weekend} onChange={setWeekend} />
         <Field label="Evening ₹/hr" value={evening} onChange={setEvening} />
@@ -147,9 +150,9 @@ function AddAddon({ venueId, onMsg }: { venueId: string; onMsg: (m: string) => v
   };
 
   return (
-    <details style={{ marginTop: 6 }}>
+    <details className="mt-2">
       <summary>Add an add-on</summary>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '8px 0' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-3">
         <Field label="Name" value={name} onChange={setName} />
         <Select
           label="Type"

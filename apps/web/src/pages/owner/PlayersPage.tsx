@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Msg, Select, useLoad } from '../../components/common';
+import { Card, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner CRM directory with segment filter (PRD §4.9). */
 export function PlayersPage() {
@@ -9,7 +9,8 @@ export function PlayersPage() {
 
   return (
     <div className="container">
-      <Card title="Players (CRM)">
+      <PageHeader title="Players" subtitle="CRM directory & segments" />
+      <Card>
         <Select
           label="Segment"
           value={segment}
@@ -21,23 +22,41 @@ export function PlayersPage() {
           ]}
         />
         <Msg text={players.error} />
-        <table style={{ width: '100%', fontSize: 14, marginTop: 8 }}>
-          <thead>
-            <tr style={{ textAlign: 'left', color: '#64748b' }}>
-              <th>Customer</th><th>Bookings</th><th>Last visit</th><th>Consent</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(players.data ?? []).map((p) => (
-              <tr key={p.customerId} style={{ borderTop: '1px solid #f1f5f9' }}>
-                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{p.customerId}</td>
-                <td>{p.bookingCount}</td>
-                <td>{new Date(p.lastVisitAt).toLocaleDateString()}</td>
-                <td>{p.consent ? '✓' : '—'}{p.optedOut ? ' (opted out)' : ''}</td>
+        <div className="overflow-x-auto mt-4">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Bookings</th>
+                <th>Last visit</th>
+                <th>Consent</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(players.data ?? []).map((p) => (
+                <tr key={p.customerId}>
+                  <td className="font-mono text-xs text-muted-foreground">{p.customerId}</td>
+                  <td className="font-mono">{p.bookingCount}</td>
+                  <td className="whitespace-nowrap">
+                    {new Date(p.lastVisitAt).toLocaleDateString()}
+                  </td>
+                  <td>
+                    {p.consent ? (
+                      <span className="text-primary">✓</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                    {p.optedOut ? (
+                      <span className="text-muted-foreground"> (opted out)</span>
+                    ) : (
+                      ''
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

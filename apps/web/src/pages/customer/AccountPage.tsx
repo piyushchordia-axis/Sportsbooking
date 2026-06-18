@@ -1,7 +1,7 @@
 import { SkillLevel } from '@sportsbooking/shared';
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Msg, Select } from '../../components/common';
+import { Card, Msg, PageHeader, Select } from '../../components/common';
 
 /** Customer account: per-owner referral code + skill level (PRD §4.5, §5.1). */
 export function AccountPage() {
@@ -35,8 +35,9 @@ export function AccountPage() {
   };
 
   return (
-    <div className="container" style={{ maxWidth: 560 }}>
-      <Card title="Account">
+    <div className="container" style={{ maxWidth: '40rem' }}>
+      <PageHeader title="Account" subtitle="Referrals & skill profile" />
+      <Card title="Profile">
         <Select
           label="Venue operator"
           value={ownerId}
@@ -44,13 +45,15 @@ export function AccountPage() {
           options={owners.map((o) => ({ value: o.id, label: o.name }))}
         />
 
-        <p>
-          Your referral code: <strong>{code ?? '—'}</strong>
-          <br />
-          <span style={{ fontSize: 12, color: '#64748b' }}>
+        <div className="rounded-lg border border-border bg-input-background p-4 my-4">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+            Your referral code
+          </p>
+          <p className="font-display font-bold text-2xl mt-1">{code ?? '—'}</p>
+          <p className="text-xs text-muted-foreground mt-1">
             Reward is released after a referred player's first paid booking.
-          </span>
-        </p>
+          </p>
+        </div>
 
         <Select
           label="Skill level (powers open-match matching)"
@@ -58,7 +61,12 @@ export function AccountPage() {
           onChange={(v) => setSkill(v as SkillLevel)}
           options={Object.values(SkillLevel).map((s) => ({ value: s, label: s }))}
         />
-        <button onClick={saveSkill}>Save skill</button>
+        <button
+          onClick={saveSkill}
+          className="mt-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Save skill
+        </button>
         <Msg text={msg} />
       </Card>
     </div>

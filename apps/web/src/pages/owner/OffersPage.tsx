@@ -1,7 +1,7 @@
 import { OfferType } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner: offers & promo codes (PRD §4.8). */
 export function OffersPage() {
@@ -25,8 +25,9 @@ export function OffersPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Offers" subtitle="Promotions & discount codes" />
       <Card title="Create offer">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Field label="Name" value={name} onChange={setName} />
           <Select
             label="Type"
@@ -34,20 +35,34 @@ export function OffersPage() {
             onChange={(x) => setType(x as OfferType)}
             options={Object.values(OfferType).map((t) => ({ value: t, label: t }))}
           />
-          <Field label={type === 'percent' ? 'Percent' : 'Amount ₹'} value={value} onChange={setValue} />
+          <Field
+            label={type === 'percent' ? 'Percent' : 'Amount ₹'}
+            value={value}
+            onChange={setValue}
+          />
           <Field label="Code" value={code} onChange={setCode} />
         </div>
-        <button onClick={create}>Create offer</button>
+        <button
+          onClick={create}
+          className="mt-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Create offer
+        </button>
         <Msg text={msg} />
       </Card>
 
       <Card title="Offers">
-        {(offers.data ?? []).map((o) => (
-          <div key={o.id} style={{ borderBottom: '1px solid #eee', padding: '6px 0' }}>
-            <strong>{o.name}</strong> — {o.type === 'percent' ? `${o.value}%` : `₹${o.value}`} ·
-            code {o.code ?? '—'} {o.autoApply ? '· auto' : ''}
-          </div>
-        ))}
+        <div className="divide-y divide-border">
+          {(offers.data ?? []).map((o) => (
+            <div key={o.id} className="py-3 first:pt-0 text-sm">
+              <strong className="font-display">{o.name}</strong>{' '}
+              <span className="text-muted-foreground">
+                — {o.type === 'percent' ? `${o.value}%` : `₹${o.value}`} · code {o.code ?? '—'}{' '}
+                {o.autoApply ? '· auto' : ''}
+              </span>
+            </div>
+          ))}
+        </div>
       </Card>
     </div>
   );

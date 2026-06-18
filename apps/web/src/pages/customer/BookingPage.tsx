@@ -1,7 +1,8 @@
 import { PayMode, ResolvedSlot, SlotStatus } from '@sportsbooking/shared';
 import { useEffect, useState } from 'react';
+import { MapPin } from 'lucide-react';
 import { api, DiscoverVenue, Pack } from '../../api/client';
-import { Card, Field, Msg, Select } from '../../components/common';
+import { Field, Msg, PageHeader, Select } from '../../components/common';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function BookingPage() {
@@ -79,81 +80,182 @@ export function BookingPage() {
 
   return (
     <div className="container">
-      <Card title="Find a venue">
-        <div className="slot-grid">
-          {venues.map((v) => (
-            <div
+      <PageHeader title="Book a court" subtitle="Find a venue, pick your slots, lock it in" />
+
+      {/* Venue discovery */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+        {venues.map((v) => {
+          const active = venue?.id === v.id;
+          return (
+            <button
               key={v.id}
-              className="slot"
-              style={{ borderColor: venue?.id === v.id ? 'var(--color-accent)' : undefined }}
               onClick={() => pickVenue(v)}
+              aria-pressed={active}
+              className={`text-left bg-card border rounded-xl p-4 transition-colors ${
+                active
+                  ? 'border-primary ring-1 ring-primary/40'
+                  : 'border-border hover:border-primary/40'
+              }`}
             >
-              <strong>{v.name}</strong>
-              <div style={{ fontSize: 12 }}>{v.city}</div>
-              <div style={{ fontSize: 12 }}>{v.games.map((g) => g.name).join(', ')}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-display font-semibold text-lg leading-tight">{v.name}</h3>
+                {active && (
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-primary mt-1">
+                    Selected
+                  </span>
+                )}
+              </div>
+              <p className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
+                <MapPin className="h-3.5 w-3.5" /> {v.city}
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {v.games.map((g) => (
+                  <span
+                    key={g.id}
+                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground"
+                  >
+                    {g.name}
+                  </span>
+                ))}
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       {venue && (
-        <Card title={`${venue.name} — pick a court & date`}>
-          <Select
-            label="Court"
-            value={unitId}
-            onChange={setUnitId}
-            options={venue.units.map((u) => ({ value: u.id, label: `${u.name} (${u.label})` }))}
-          />
-          <Field label="Date" type="date" value={date} onChange={setDate} />
-          <button onClick={load} disabled={!unitId}>
-            Load availability
-          </button>
-        </Card>
+        <div className="bg-card border border-border rounded-xl p-5 mb-6">
+          <h3 className="font-display font-semibold text-lg mb-4">
+            {venue.name} — pick a court &amp; date
+          </h3>
+
+          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            Court
+          </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {venue.units.map((u) => {
+              const active = unitId === u.id;
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => setUnitId(u.id)}
+                  aria-pressed={active}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    active
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {u.name} <span className="opacity-70">({u.label})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-48">
+              <Field label="Date" type="date" value={date} onChange={setDate} />
+            </div>
+            <button
+              onClick={load}
+              disabled={!unitId}
+              className="mb-3 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold disabled:opacity-40 hover:bg-primary/90 transition-colors"
+            >
+              Load availability
+            </button>
+          </div>
+        </div>
       )}
 
       {slots.length > 0 && (
-        <Card title={`${date} — resolved per-court pricing`}>
-          <div className="slot-grid">
-            {slots.map((s) => (
-              <div
-                key={s.start}
-                className={selected.has(s.start) ? 'slot selected' : `slot ${s.status}`}
-                onClick={() => toggle(s)}
-              >
-                <div>
-                  {new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                <strong>{s.status === SlotStatus.OPEN ? `₹${s.price}` : s.status}</strong>
-              </div>
-            ))}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Slot grid */}
+          <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
+            <h3 className="font-display font-semibold text-lg mb-1">{date}</h3>
+            <p className="text-xs text-muted-foreground mb-4">Resolved per-court dynamic pricing</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {slots.map((s) => {
+                const isOpen = s.status === SlotStatus.OPEN;
+                const isSel = selected.has(s.start);
+                const time = new Date(s.start).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                let cls =
+                  'border-border bg-input-background hover:border-primary/50 cursor-pointer';
+                if (isSel) cls = 'border-primary bg-primary/15 ring-1 ring-primary/40 cursor-pointer';
+                else if (!isOpen)
+                  cls = 'border-transparent bg-secondary/40 opacity-50 cursor-not-allowed';
+                return (
+                  <button
+                    key={s.start}
+                    onClick={() => toggle(s)}
+                    disabled={!isOpen}
+                    aria-pressed={isSel}
+                    className={`flex flex-col items-center justify-center gap-1 rounded-lg border py-3 transition-colors ${cls}`}
+                  >
+                    <span className="text-xs font-mono text-muted-foreground">{time}</span>
+                    <span
+                      className={`font-display font-semibold ${
+                        isSel ? 'text-primary' : isOpen ? 'text-foreground' : 'text-muted-foreground'
+                      }`}
+                    >
+                      {isOpen ? `₹${s.price}` : s.status}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 12 }}>
+          {/* Summary */}
+          <div className="bg-card border border-border rounded-xl p-5 lg:sticky lg:top-20">
+            <h3 className="font-display font-semibold text-lg mb-4">Order summary</h3>
             <Select
               label="Use pack"
               value={packId}
               onChange={setPackId}
-              options={[{ value: '', label: 'None' }, ...packs.map((p) => ({ value: p.id, label: p.name }))]}
+              options={[
+                { value: '', label: 'None' },
+                ...packs.map((p) => ({ value: p.id, label: p.name })),
+              ]}
             />
             <Field label="Redeem points" value={points} onChange={setPoints} />
             <Field label="Offer code" value={offer} onChange={setOffer} />
-          </div>
 
-          <p>
-            Selected {selected.size} slot(s) — <strong>₹{total}</strong> before pack/points/offer
-          </p>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => book(PayMode.PREPAY)} disabled={!selected.size}>
-              Prepay
-            </button>
-            <button className="accent" onClick={() => book(PayMode.AT_VENUE)} disabled={!selected.size}>
-              Pay at venue
-            </button>
+            <div className="flex items-center justify-between border-t border-border mt-2 pt-4">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                  {selected.size} slot(s)
+                </p>
+                <p className="text-xs text-muted-foreground">before pack / points / offer</p>
+              </div>
+              <span className="font-display font-bold text-2xl">₹{total}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button
+                onClick={() => book(PayMode.PREPAY)}
+                disabled={!selected.size}
+                className="px-4 py-2.5 rounded-lg bg-primary text-primary-foreground font-semibold disabled:opacity-40 hover:bg-primary/90 transition-colors"
+              >
+                Prepay
+              </button>
+              <button
+                onClick={() => book(PayMode.AT_VENUE)}
+                disabled={!selected.size}
+                className="px-4 py-2.5 rounded-lg border border-accent text-accent font-semibold disabled:opacity-40 hover:bg-accent/10 transition-colors"
+              >
+                Pay at venue
+              </button>
+            </div>
           </div>
-        </Card>
+        </div>
       )}
 
-      <Msg text={msg} />
+      <div className="mt-4">
+        <Msg text={msg} />
+      </div>
     </div>
   );
 }

@@ -3,15 +3,38 @@ import { createContext, ReactNode, useContext, useEffect, useState } from 'react
 
 /**
  * Token-based white-label theming (PRD §4.10, §7). Branding tokens are written
- * to CSS variables so the whole app re-themes per owner without code changes.
+ * to the Sportline source CSS variables (`--primary` / `--secondary` /
+ * `--accent`) which the Tailwind `@theme` mapping consumes, so the whole app
+ * re-themes per owner without code changes. Defaults are the Sportline palette,
+ * keeping the stadium-night look unless an owner's branding overrides it.
  * Architected subdomain-ready: a future host→owner resolver can hydrate this.
  */
 const DEFAULT_BRANDING: Branding = {
   logoUrl: null,
-  primaryColor: '#0EA5E9',
-  secondaryColor: '#0F172A',
-  accentColor: '#22C55E',
+  primaryColor: '#20D07A',
+  secondaryColor: '#162038',
+  accentColor: '#F5A623',
 };
+
+/**
+ * Relative luminance (WCAG) of a hex colour, used to pick a readable foreground
+ * so owner branding (which can be any colour) keeps accessible button text.
+ */
+function luminance(hex: string): number {
+  const c = hex.replace('#', '');
+  if (c.length !== 6) return 0.5;
+  const channel = (h: string) => {
+    const v = parseInt(h, 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const r = channel(c.slice(0, 2));
+  const g = channel(c.slice(2, 4));
+  const b = channel(c.slice(4, 6));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Dark ink for light/bright brand colours, near-white for dark ones. */
+const foregroundFor = (hex: string) => (luminance(hex) > 0.4 ? '#070b14' : '#f2f6fc');
 
 interface ThemeContextValue {
   branding: Branding;
@@ -28,9 +51,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty('--color-primary', branding.primaryColor);
-    root.style.setProperty('--color-secondary', branding.secondaryColor);
-    root.style.setProperty('--color-accent', branding.accentColor);
+    root.style.setProperty('--primary', branding.primaryColor);
+    root.style.setProperty('--primary-foreground', foregroundFor(branding.primaryColor));
+    root.style.setProperty('--secondary', branding.secondaryColor);
+    root.style.setProperty('--secondary-foreground', foregroundFor(branding.secondaryColor));
+    root.style.setProperty('--accent', branding.accentColor);
+    root.style.setProperty('--accent-foreground', foregroundFor(branding.accentColor));
+    root.style.setProperty('--ring', branding.primaryColor);
   }, [branding]);
 
   return (

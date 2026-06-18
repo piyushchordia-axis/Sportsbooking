@@ -5,7 +5,7 @@ import {
 } from '@sportsbooking/shared';
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, Select, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, Select, useLoad } from '../../components/common';
 
 /** Owner: create tournaments (PRD §4.7). */
 export function TournamentsAdminPage() {
@@ -48,6 +48,7 @@ export function TournamentsAdminPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Tournaments" subtitle="Create & configure events" />
       <Card title="Create tournament">
         <Select
           label="Venue"
@@ -55,7 +56,7 @@ export function TournamentsAdminPage() {
           onChange={setVenueId}
           options={(venues.data ?? []).map((v: any) => ({ value: v.id, label: v.name }))}
         />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Name" value={name} onChange={setName} />
           <Select
             label="Format"

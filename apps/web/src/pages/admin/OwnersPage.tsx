@@ -1,7 +1,7 @@
 import { FeatureFlag } from '@sportsbooking/shared';
 import { useState } from 'react';
 import { api } from '../../api/client';
-import { Card, Field, Msg, useLoad } from '../../components/common';
+import { Card, Field, Msg, PageHeader, useLoad } from '../../components/common';
 
 /** Super Admin: owner onboarding & oversight (PRD §3.2, §3.3). */
 export function OwnersPage() {
@@ -33,38 +33,53 @@ export function OwnersPage() {
 
   return (
     <div className="container">
+      <PageHeader title="Owners" subtitle="Onboarding & oversight" />
       <Card title="Onboard owner">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Business name" value={name} onChange={setName} />
           <Field label="Contact email" value={email} onChange={setEmail} />
           <Field label="Admin password" value={password} onChange={setPassword} />
           <Field label="Venue quota" value={quota} onChange={setQuota} />
         </div>
-        <p style={{ fontSize: 12, color: '#64748b' }}>
+        <p className="text-xs text-muted-foreground my-3">
           All catalogue games &amp; feature flags are granted in this quick form.
         </p>
-        <button onClick={create}>Onboard owner</button>
+        <button
+          onClick={create}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors"
+        >
+          Onboard owner
+        </button>
         <Msg text={msg} />
       </Card>
 
       <Card title="Owners">
-        <table style={{ width: '100%', fontSize: 14 }}>
-          <thead>
-            <tr style={{ textAlign: 'left', color: '#64748b' }}>
-              <th>Name</th><th>Status</th><th>Venues</th><th>Quota</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(owners.data ?? []).map((o) => (
-              <tr key={o.id} style={{ borderTop: '1px solid #f1f5f9' }}>
-                <td>{o.name}</td>
-                <td>{o.status}</td>
-                <td>{o.venueCount}</td>
-                <td>{o.venueQuota}</td>
+        <div className="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Venues</th>
+                <th>Quota</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(owners.data ?? []).map((o) => (
+                <tr key={o.id}>
+                  <td className="font-medium">{o.name}</td>
+                  <td>
+                    <span className="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground">
+                      {o.status}
+                    </span>
+                  </td>
+                  <td className="font-mono">{o.venueCount}</td>
+                  <td className="font-mono">{o.venueQuota}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );

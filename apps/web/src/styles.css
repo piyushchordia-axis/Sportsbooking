@@ -1,106 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Sportline design tokens. White-label branding (see ThemeProvider) overrides
+ * the source --primary / --secondary / --accent vars at runtime so the whole
+ * app re-themes per owner while keeping the Sportline palette as the default.
+ */
 :root {
-  --color-primary: #0ea5e9;
-  --color-secondary: #0f172a;
-  --color-accent: #22c55e;
-  --radius: 10px;
+  --font-size: 16px;
+  --background: #070b14;
+  --foreground: #e8edf8;
+  --card: #0d1424;
+  --card-foreground: #e8edf8;
+  --popover: #0d1424;
+  --popover-foreground: #e8edf8;
+  --primary: #20d07a;
+  --primary-foreground: #040a10;
+  --secondary: #162038;
+  --secondary-foreground: #a0b0cc;
+  --muted: #111c30;
+  --muted-foreground: #6a7d9c;
+  --accent: #f5a623;
+  --accent-foreground: #070b14;
+  --destructive: #e53e5a;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.07);
+  --input: transparent;
+  --input-background: #111c30;
+  --ring: #20d07a;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: #20d07a;
+  --chart-2: #f5a623;
+  --chart-3: #3b82f6;
+  --chart-4: #a855f7;
+  --chart-5: #e53e5a;
+  --radius: 0.625rem;
 }
 
-* {
-  box-sizing: border-box;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+  --font-display: 'Rajdhani', sans-serif;
 }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: var(--color-secondary);
-  background: #f8fafc;
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /*
+   * Sensible dark-theme defaults for raw elements that appear across CRUD
+   * pages. These live in @layer base, so any Tailwind utility class on an
+   * element overrides them — bespoke screens stay in full control.
+   */
+  button:not([class*='bg-']):not([class*='text-']) {
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--primary-foreground);
+    background-color: var(--primary);
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    transition: all 0.15s ease;
+  }
+
+  button:not([class*='bg-']):not([class*='text-']):hover {
+    background-color: color-mix(in srgb, var(--primary) 90%, transparent);
+  }
+
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  th {
+    text-align: left;
+    font-family: 'DM Mono', ui-monospace, monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted-foreground);
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--foreground);
+  }
+
+  tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+
+  summary {
+    cursor: pointer;
+    color: var(--primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    user-select: none;
+  }
 }
 
-.nav {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  padding: 14px 24px;
-  background: var(--color-secondary);
-  color: white;
+@layer utilities {
+  .font-display {
+    font-family: 'Rajdhani', sans-serif;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }
 
-.nav a {
-  color: white;
-  text-decoration: none;
-  opacity: 0.85;
-}
-
-.nav a:hover {
-  opacity: 1;
-}
-
+/*
+ * Page container. Defined unlayered so it reliably overrides Tailwind's
+ * built-in `.container` utility (unlayered CSS wins over @layer rules).
+ * Centers content and matches the app shell width.
+ */
 .container {
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: var(--radius);
-  padding: 20px;
-  margin-bottom: 16px;
-}
-
-button {
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  padding: 10px 16px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-button.accent {
-  background: var(--color-accent);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-input,
-select {
-  padding: 9px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: var(--radius);
-  font-size: 14px;
   width: 100%;
-  margin: 6px 0 12px;
-}
-
-.slot-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 10px;
-}
-
-.slot {
-  border: 1px solid #cbd5e1;
-  border-radius: var(--radius);
-  padding: 10px;
-  text-align: center;
-  cursor: pointer;
-  background: white;
-}
-
-.slot.booked,
-.slot.blocked {
-  background: #f1f5f9;
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.slot.selected {
-  border-color: var(--color-accent);
-  outline: 2px solid var(--color-accent);
+  max-width: 80rem;
+  margin-inline: auto;
+  padding: 1.5rem 1rem 4rem;
 }

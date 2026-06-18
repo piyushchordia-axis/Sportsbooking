@@ -2,10 +2,12 @@ import { ReactNode, useCallback, useEffect, useState } from 'react';
 
 export function Card({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <div className="card">
-      {title && <h3 style={{ marginTop: 0 }}>{title}</h3>}
+    <section className="bg-card border border-border rounded-xl p-5 mb-4">
+      {title && (
+        <h3 className="font-display font-semibold text-lg leading-none mb-4">{title}</h3>
+      )}
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -23,13 +25,16 @@ export function Field({
   placeholder?: string;
 }) {
   return (
-    <label style={{ display: 'block' }}>
-      <span style={{ fontSize: 13, color: '#475569' }}>{label}</span>
+    <label className="block mb-3">
+      <span className="block text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
+        {label}
+      </span>
       <input
         type={type}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        className="flex h-9 w-full min-w-0 rounded-lg border border-border bg-input-background px-3 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
       />
     </label>
   );
@@ -47,11 +52,17 @@ export function Select({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label style={{ display: 'block' }}>
-      <span style={{ fontSize: 13, color: '#475569' }}>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+    <label className="block mb-3">
+      <span className="block text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex h-9 w-full min-w-0 cursor-pointer rounded-lg border border-border bg-input-background px-3 py-1 text-sm text-foreground outline-none transition-[color,box-shadow] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+      >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={o.value} value={o.value} className="bg-card text-foreground">
             {o.label}
           </option>
         ))}
@@ -64,7 +75,69 @@ export function Msg({ text }: { text: string | null }) {
   if (!text) return null;
   const error = /fail|error|invalid|not |insufficient|reached|closed|full/i.test(text);
   return (
-    <p style={{ color: error ? '#dc2626' : '#16a34a', fontSize: 14 }}>{text}</p>
+    <p
+      className={`mt-2 text-sm font-medium ${error ? 'text-destructive' : 'text-primary'}`}
+    >
+      {text}
+    </p>
+  );
+}
+
+/** Compact KPI/stat tile used on dashboards and overview pages. */
+export function Stat({
+  label,
+  value,
+  sub,
+  accent = 'primary',
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: string;
+  accent?: 'primary' | 'accent' | 'blue' | 'purple' | 'destructive';
+}) {
+  const bar: Record<string, string> = {
+    primary: 'bg-primary',
+    accent: 'bg-accent',
+    blue: 'bg-blue-400',
+    purple: 'bg-purple-400',
+    destructive: 'bg-destructive',
+  };
+  return (
+    <div className="relative bg-card border border-border rounded-xl p-4 overflow-hidden">
+      <span className={`absolute left-0 top-0 h-full w-1 ${bar[accent]}`} />
+      <p className="text-muted-foreground text-[10px] font-mono uppercase tracking-widest">
+        {label}
+      </p>
+      <p className="font-display font-bold text-3xl leading-tight mt-1 text-foreground">
+        {value}
+      </p>
+      {sub && <p className="text-muted-foreground text-xs mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+/** Section heading used at the top of pages. */
+export function PageHeader({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+      <div>
+        <h2 className="font-display font-bold text-2xl leading-none text-foreground">
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="text-muted-foreground text-xs font-mono mt-1.5">{subtitle}</p>
+        )}
+      </div>
+      {action}
+    </div>
   );
 }
 

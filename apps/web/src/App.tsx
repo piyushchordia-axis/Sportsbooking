@@ -34,6 +34,9 @@ const DashboardPage = lazy(() =>
 const NewBookingPage = lazy(() =>
   import('./pages/owner/NewBookingPage').then((m) => ({ default: m.NewBookingPage })),
 );
+const BookingsPage = lazy(() =>
+  import('./pages/owner/BookingsPage').then((m) => ({ default: m.BookingsPage })),
+);
 const OffersPage = lazy(() =>
   import('./pages/owner/OffersPage').then((m) => ({ default: m.OffersPage })),
 );
@@ -82,6 +85,7 @@ export function App() {
           {/* Owner / staff */}
           <Route path="/owner" element={owner(<DashboardPage />)} />
           <Route path="/owner/new-booking" element={owner(<NewBookingPage />)} />
+          <Route path="/owner/bookings" element={owner(<BookingsPage />)} />
           <Route path="/owner/venues" element={owner(<VenuesPage />)} />
           <Route path="/owner/packs" element={owner(<PacksPage />)} />
           <Route path="/owner/offers" element={owner(<OffersPage />)} />

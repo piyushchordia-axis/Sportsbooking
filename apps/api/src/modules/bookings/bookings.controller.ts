@@ -20,7 +20,15 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { PaymentService } from '../payments/payment.service';
 import { AvailabilityService } from './availability.service';
 import { BookingsService } from './bookings.service';
-import { AvailabilityQueryDto, ConfirmPaymentDto, CreateBookingDto } from './dto';
+import {
+  AvailabilityQueryDto,
+  ConfirmPaymentDto,
+  CreateBookingDto,
+  ListBookingsQueryDto,
+  RescheduleBookingDto,
+  UpdateBookingCustomerDto,
+  UpdateBookingStatusDto,
+} from './dto';
 
 @Controller()
 export class BookingsController {
@@ -79,5 +87,49 @@ export class BookingsController {
   @Public()
   cancel(@Param('id') id: string) {
     return this.bookings.cancel(id);
+  }
+
+  /** Owner/staff bookings directory with filters (PRD §4.3). */
+  @Get('bookings')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  list(@CurrentUser() user: RequestUser, @Query() q: ListBookingsQueryDto) {
+    return this.bookings.listForOwner(user, q);
+  }
+
+  /** Owner/staff: mark a booking completed / no-show / cancelled (PRD §4.3). */
+  @Post('bookings/:id/status')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  updateStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdateBookingStatusDto,
+  ) {
+    return this.bookings.updateStatus(id, user, dto.status);
+  }
+
+  /** Owner/staff: reschedule a booking to new slot(s) (PRD §4.3). */
+  @Post('bookings/:id/reschedule')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  reschedule(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: RescheduleBookingDto,
+  ) {
+    return this.bookings.reschedule(id, user, dto.slots);
+  }
+
+  /** Owner/staff: edit the customer name/mobile on a booking (PRD §4.3). */
+  @Post('bookings/:id/customer')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  updateCustomer(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdateBookingCustomerDto,
+  ) {
+    return this.bookings.updateCustomer(id, user, dto);
   }
 }

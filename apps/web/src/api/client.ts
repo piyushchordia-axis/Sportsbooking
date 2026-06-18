@@ -1,9 +1,12 @@
 import {
+  BookingFilters,
   BookingResponse,
+  BookingStatus,
   CalendarResponse,
   CreateBookingRequest,
   CreateCustomerRequest,
   LoginResponse,
+  OwnerBooking,
   PlayerSummary,
 } from '@sportsbooking/shared';
 
@@ -152,6 +155,24 @@ export const api = {
   addCustomer: (body: CreateCustomerRequest) => post<PlayerSummary>('/players', body),
   createTournament: (body: unknown) => post('/tournaments', body),
   settleBooking: (id: string) => post(`/bookings/${id}/settle`),
+
+  // ---- owner: booking management ----
+  listBookings: (filters: BookingFilters = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v) qs.append(k, String(v));
+    });
+    const s = qs.toString();
+    return get<OwnerBooking[]>(`/bookings${s ? `?${s}` : ''}`);
+  },
+  updateBookingStatus: (id: string, status: BookingStatus) =>
+    post<{ status: BookingStatus }>(`/bookings/${id}/status`, { status }),
+  rescheduleBooking: (
+    id: string,
+    slots: { unitId: string; start: string; end: string }[],
+  ) => post<{ rescheduled: true }>(`/bookings/${id}/reschedule`, { slots }),
+  updateBookingCustomer: (id: string, body: { name: string; mobile: string }) =>
+    post<{ name: string; mobile: string }>(`/bookings/${id}/customer`, body),
 
   // ---- super admin ----
   listGames: () => get<any[]>('/super-admin/games'),

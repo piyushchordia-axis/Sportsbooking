@@ -4,6 +4,7 @@
  * schema; these mirror the JSON the REST API exchanges.
  */
 import {
+  BookingStatus,
   DayType,
   FeatureFlag,
   PayMode,
@@ -131,6 +132,54 @@ export interface BookingResponse {
   total: number;
   lineItems: BookingLineItem[];
   razorpayOrderId?: string;
+}
+
+/** A single occupying slot on an owner's booking, with the court's name. */
+export interface OwnerBookingSlot {
+  unitId: string;
+  unitName: string;
+  start: string; // ISO
+  end: string; // ISO
+}
+
+/** A booking as seen by an owner/staff on the management screen (PRD §4.3). */
+export interface OwnerBooking {
+  id: string;
+  status: BookingStatus;
+  payMode: PayMode;
+  paymentStatus: PaymentStatus;
+  total: number;
+  venueId: string;
+  venueName: string;
+  customerId: string;
+  customerName: string | null;
+  customerMobile: string | null;
+  slots: OwnerBookingSlot[];
+  createdAt: string; // ISO
+}
+
+/** Owner bookings list filters (all optional). */
+export interface BookingFilters {
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+  venueId?: string;
+  unitId?: string;
+  status?: BookingStatus;
+  paymentStatus?: PaymentStatus;
+  q?: string; // customer name / mobile search
+}
+
+export interface UpdateBookingStatusRequest {
+  status: BookingStatus;
+}
+
+export interface RescheduleBookingRequest {
+  slots: CartSlotInput[];
+}
+
+export interface UpdateBookingCustomerRequest {
+  name: string;
+  mobile: string;
 }
 
 export interface ApiError {

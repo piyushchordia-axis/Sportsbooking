@@ -114,7 +114,7 @@ export function BarChart({ data }: { data: BarDatum[] }) {
                   y={MARGIN.top}
                   width={band}
                   height={plotH}
-                  fill={active === i ? 'rgba(255,255,255,0.04)' : 'transparent'}
+                  fill={active === i ? 'var(--row-hover)' : 'transparent'}
                 />
                 <path
                   d={roundedTopRect(bx, by, barWidth, Math.max(0, bh), BAR_RADIUS)}

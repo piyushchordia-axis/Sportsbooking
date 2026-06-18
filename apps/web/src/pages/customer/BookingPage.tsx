@@ -158,7 +158,7 @@ export function BookingPage() {
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                     active
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      : 'bg-secondary text-secondary-foreground/70 hover:text-secondary-foreground'
                   }`}
                 >
                   {u.name} <span className="opacity-70">({u.label})</span>

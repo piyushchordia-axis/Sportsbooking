@@ -8,6 +8,12 @@ import { createContext, ReactNode, useContext, useEffect, useState } from 'react
  * re-themes per owner without code changes. Defaults are the Sportline palette,
  * keeping the stadium-night look unless an owner's branding overrides it.
  * Architected subdomain-ready: a future host→owner resolver can hydrate this.
+ *
+ * Independently of branding, a dark/light MODE flips only the neutral surface
+ * tokens (background/card/text/borders/inputs) by toggling the `.dark` class on
+ * <html> (see styles.css). The initial class is set by a no-flash bootstrap
+ * script in index.html; this provider keeps React state in sync and persists
+ * the choice so it survives reloads.
  */
 const DEFAULT_BRANDING: Branding = {
   logoUrl: null,
@@ -15,6 +21,11 @@ const DEFAULT_BRANDING: Branding = {
   secondaryColor: '#162038',
   accentColor: '#F5A623',
 };
+
+export type ThemeMode = 'dark' | 'light';
+
+/** localStorage key — kept in sync with the bootstrap script in index.html. */
+const THEME_STORAGE_KEY = 'sportline-theme';
 
 /**
  * Relative luminance (WCAG) of a hex colour, used to pick a readable foreground
@@ -36,18 +47,50 @@ function luminance(hex: string): number {
 /** Dark ink for light/bright brand colours, near-white for dark ones. */
 const foregroundFor = (hex: string) => (luminance(hex) > 0.4 ? '#070b14' : '#f2f6fc');
 
+/**
+ * Resolve the initial mode. The bootstrap script in index.html has already
+ * applied the correct `.dark` class before first paint, so trust the DOM first;
+ * fall back to stored preference, then the OS preference, then dark.
+ */
+function initialMode(): ThemeMode {
+  if (typeof document !== 'undefined') {
+    if (document.documentElement.classList.contains('light')) return 'light';
+    if (document.documentElement.classList.contains('dark')) return 'dark';
+  }
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    /* localStorage unavailable — fall through */
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-color-scheme: light)').matches
+  ) {
+    return 'light';
+  }
+  return 'dark';
+}
+
 interface ThemeContextValue {
   branding: Branding;
   setBranding: (b: Branding) => void;
+  mode: ThemeMode;
+  setMode: (m: ThemeMode) => void;
+  toggleMode: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   branding: DEFAULT_BRANDING,
   setBranding: () => undefined,
+  mode: 'dark',
+  setMode: () => undefined,
+  toggleMode: () => undefined,
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
+  const [mode, setMode] = useState<ThemeMode>(initialMode);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -60,8 +103,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--ring', branding.primaryColor);
   }, [branding]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(mode);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+    } catch {
+      /* localStorage unavailable — choice simply won't persist */
+    }
+  }, [mode]);
+
+  const toggleMode = () => setMode((m) => (m === 'dark' ? 'light' : 'dark'));
+
   return (
-    <ThemeContext.Provider value={{ branding, setBranding }}>
+    <ThemeContext.Provider value={{ branding, setBranding, mode, setMode, toggleMode }}>
       {children}
     </ThemeContext.Provider>
   );

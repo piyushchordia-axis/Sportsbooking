@@ -70,7 +70,7 @@ export function LoginPage() {
       className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
         tab === id
           ? 'bg-primary text-primary-foreground'
-          : 'bg-secondary text-muted-foreground hover:text-foreground'
+          : 'bg-secondary text-secondary-foreground/70 hover:text-secondary-foreground'
       }`}
     >
       {text}

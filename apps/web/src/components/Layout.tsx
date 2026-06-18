@@ -1,7 +1,7 @@
 import { UserRole } from '@sportsbooking/shared';
 import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, LogOut } from 'lucide-react';
+import { Activity, LogOut, Moon, Sun } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -41,7 +41,7 @@ const ROLE_LABEL: Record<UserRole, string> = {
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
-  const { branding } = useTheme();
+  const { branding, mode, toggleMode } = useTheme();
   const loc = useLocation();
   const links = user ? NAV[user.role] : [];
   const [logoBroken, setLogoBroken] = useState(false);
@@ -79,7 +79,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                     active
                       ? 'bg-primary/15 text-primary'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+                      : 'text-muted-foreground hover:text-secondary-foreground hover:bg-secondary'
                   }`}
                 >
                   {l.label}
@@ -89,6 +89,14 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
 
           <div className="ml-auto flex items-center gap-3 shrink-0">
+            <button
+              onClick={toggleMode}
+              className="grid place-items-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+              title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {mode === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
             {user ? (
               <>
                 <div className="hidden sm:flex flex-col items-end leading-tight">

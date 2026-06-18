@@ -1,2 +1,3 @@
 - [External SVGs via <img> ignore currentColor](svg-img-currentcolor.md) — icon SVGs served from /public and shown via <img> must bake explicit colors, not currentColor.
 - [Tenant authz on owner/staff mutations](tenant-authz.md) — role-guarded endpoints that resolve tenant from the target entity (via withTenantBypass) must also verify user.ownerId === entity.ownerId.
+- [apps/web theming + dark/light mode](apps-web-theming.md) — `.dark` overrides only NEUTRAL tokens; brand tokens stay mode-independent; text on dark-navy `bg-secondary` must use `secondary-foreground`.

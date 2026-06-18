@@ -7,29 +7,42 @@
  * Sportline design tokens. White-label branding (see ThemeProvider) overrides
  * the source --primary / --secondary / --accent vars at runtime so the whole
  * app re-themes per owner while keeping the Sportline palette as the default.
+ *
+ * Light is the :root default; the `.dark` block below overrides only the
+ * NEUTRAL surface tokens (background / card / popover / muted / border / input
+ * + text). Brand tokens (--primary/--secondary/--accent + their foregrounds and
+ * --ring) are mode-independent and re-themed at runtime by ThemeProvider, so
+ * they live here once and stay consistent across dark/light. The dark/light
+ * mode is toggled by adding/removing `.dark` on <html> (see ThemeProvider and
+ * the no-flash bootstrap script in index.html).
  */
 :root {
   --font-size: 16px;
-  --background: #070b14;
-  --foreground: #e8edf8;
-  --card: #0d1424;
-  --card-foreground: #e8edf8;
-  --popover: #0d1424;
-  --popover-foreground: #e8edf8;
+  /* Neutral surfaces — light (default). Overridden by `.dark`. */
+  --background: #f3f5fa;
+  --foreground: #101828;
+  --card: #ffffff;
+  --card-foreground: #101828;
+  --popover: #ffffff;
+  --popover-foreground: #101828;
+  --muted: #eef1f8;
+  --muted-foreground: #5b6a85;
+  --border: rgba(13, 20, 36, 0.12);
+  --border-faint: rgba(13, 20, 36, 0.07);
+  --row-hover: rgba(13, 20, 36, 0.035);
+  --input: transparent;
+  --input-background: #eef1f8;
+  /* Brand palette (mode-independent; overridden at runtime by ThemeProvider). */
   --primary: #20d07a;
   --primary-foreground: #040a10;
   --secondary: #162038;
   --secondary-foreground: #a0b0cc;
-  --muted: #111c30;
-  --muted-foreground: #6a7d9c;
   --accent: #f5a623;
   --accent-foreground: #070b14;
+  --ring: #20d07a;
+  /* Mode-independent. */
   --destructive: #e53e5a;
   --destructive-foreground: #ffffff;
-  --border: rgba(255, 255, 255, 0.07);
-  --input: transparent;
-  --input-background: #111c30;
-  --ring: #20d07a;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: #20d07a;
@@ -38,6 +51,23 @@
   --chart-4: #a855f7;
   --chart-5: #e53e5a;
   --radius: 0.625rem;
+}
+
+/* Dark mode — the original Sportline "stadium-night" neutral surfaces. */
+.dark {
+  --background: #070b14;
+  --foreground: #e8edf8;
+  --card: #0d1424;
+  --card-foreground: #e8edf8;
+  --popover: #0d1424;
+  --popover-foreground: #e8edf8;
+  --muted: #111c30;
+  --muted-foreground: #6a7d9c;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-faint: rgba(255, 255, 255, 0.04);
+  --row-hover: rgba(255, 255, 255, 0.02);
+  --input: transparent;
+  --input-background: #111c30;
 }
 
 @theme inline {
@@ -144,12 +174,12 @@
 
   td {
     padding: 0.7rem 0.75rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--border-faint);
     color: var(--foreground);
   }
 
   tbody tr:hover {
-    background-color: rgba(255, 255, 255, 0.02);
+    background-color: var(--row-hover);
   }
 
   summary {

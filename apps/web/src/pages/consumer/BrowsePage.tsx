@@ -5,7 +5,6 @@ import { CalendarDays, Loader2, MapPin, Navigation, Search, Store } from 'lucide
 import { api, DiscoverVenue } from '../../api/client';
 import {
   EmptyState,
-  Field,
   ImageWithFallback,
   PageHeader,
   Select,
@@ -13,6 +12,8 @@ import {
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { DatePicker } from '../../components/ui/date-picker';
+import { fromISODate, toISODate } from '../../lib/date';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { useStorefront } from '../../storefront/StorefrontProvider';
 
@@ -268,9 +269,11 @@ export function BrowsePage() {
           <div className="[&_label]:mb-0">
             <Select label="" value={maxPrice} onChange={setMaxPrice} options={PRICE_TIERS} />
           </div>
-          <div className="[&_label]:mb-0">
-            <Field label="" type="date" value={date} onChange={setDate} />
-          </div>
+          <DatePicker
+            value={fromISODate(date)}
+            onChange={(d) => setDate(toISODate(d))}
+            placeholder="Any date"
+          />
         </div>
 
         {/* Location row: "Near me" toggle + optional radius selector */}

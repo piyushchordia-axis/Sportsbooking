@@ -6,25 +6,27 @@ import {
   ResolvedSlot,
   SlotStatus,
 } from '@sportsbooking/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock,
   CalendarDays,
+  Check,
   CheckCircle2,
+  ChevronDown,
   CreditCard,
   ListChecks,
+  Pencil,
   Search,
   SlidersHorizontal,
-  User,
   X,
 } from 'lucide-react';
 import { api, OwnerVenue, PaymentTxn } from '../../api/client';
+import { fromISODate, toISODate, todayISO } from '../../lib/date';
 import {
   Card,
   EmptyState,
   Field,
   InfoCard,
-  KeyVal,
   Msg,
   PageHeader,
   SectionLabel,
@@ -33,8 +35,10 @@ import {
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { cn } from '../../components/ui/utils';
 import { SearchableSelect } from '../../components/ui/combobox';
 import { Badge } from '../../components/ui/badge';
+import { DatePicker } from '../../components/ui/date-picker';
 import {
   DateRangePicker,
   type DateRangeValue,
@@ -95,14 +99,6 @@ const PAYMENT_VARIANT: Record<PaymentStatus, BadgeVariant> = {
   [PaymentStatus.FAILED]: 'destructive',
 };
 
-/** Convert a Date to a local `YYYY-MM-DD` string the bookings API expects. */
-const toISODate = (d?: Date) =>
-  d
-    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-        d.getDate(),
-      ).padStart(2, '0')}`
-    : '';
-
 const fmtDateTime = (iso: string) =>
   new Date(iso).toLocaleString([], {
     weekday: 'short',
@@ -114,8 +110,6 @@ const fmtDateTime = (iso: string) =>
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /**
  * Owner/staff booking management (PRD §4.3). A filterable directory of the
@@ -130,6 +124,7 @@ export function BookingsPage() {
   const [status, setStatus] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [q, setQ] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const from = toISODate(range.from);
   const to = toISODate(range.to);
@@ -211,6 +206,54 @@ export function BookingsPage() {
 
   const total = list.data?.length ?? 0;
 
+  // Applied non-search filters, rendered as removable chips below the toolbar so
+  // the filter state stays visible without keeping the whole panel open. Search
+  // is the always-visible field, so it clears from the field itself, not a chip.
+  const fmtShortDate = (d: Date) =>
+    d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  const dateChip =
+    range.from && range.to
+      ? `${fmtShortDate(range.from)} – ${fmtShortDate(range.to)}`
+      : range.from
+        ? `From ${fmtShortDate(range.from)}`
+        : range.to
+          ? `Until ${fmtShortDate(range.to)}`
+          : null;
+
+  const activeFilters = [
+    dateChip && { key: 'date', label: 'Dates', value: dateChip, clear: () => setRange({}) },
+    venueId && {
+      key: 'venue',
+      label: 'Venue',
+      value: venues.find((v) => v.id === venueId)?.name ?? 'Selected',
+      clear: () => pickVenue(''),
+    },
+    unitId && {
+      key: 'court',
+      label: 'Court',
+      value: venueUnits.find((u) => u.id === unitId)?.name ?? 'Selected',
+      clear: () => setUnitId(''),
+    },
+    status && {
+      key: 'status',
+      label: 'Status',
+      value: STATUS_LABEL[status as BookingStatus],
+      clear: () => setStatus(''),
+    },
+    paymentStatus && {
+      key: 'payment',
+      label: 'Payment',
+      value: PAYMENT_LABEL[paymentStatus as PaymentStatus],
+      clear: () => setPaymentStatus(''),
+    },
+  ].filter(Boolean) as {
+    key: string;
+    label: string;
+    value: string;
+    clear: () => void;
+  }[];
+  const activeCount = activeFilters.length;
+
   return (
     <div className="container">
       <PageHeader
@@ -218,102 +261,161 @@ export function BookingsPage() {
         subtitle="Review, reschedule, settle and update your bookings"
         badge={
           list.data ? (
-            <Badge variant="outline" className="tabular-nums">
+            <Badge
+              variant={hasFilters ? 'default' : 'outline'}
+              className="tabular-nums"
+            >
               {total} {total === 1 ? 'booking' : 'bookings'}
             </Badge>
           ) : undefined
         }
       />
 
-      {/* Filters */}
-      <Card className="mb-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <SectionLabel icon={SlidersHorizontal}>Filters</SectionLabel>
-          {hasFilters && (
+      {/* Toolbar. Opens calm: a primary search field + a single Filters control.
+          The other filters live in a panel that's collapsed by default, and any
+          applied filter surfaces as a removable chip — so the bookings table,
+          not a wall of controls, is the first thing you see. */}
+      <Card className="mb-4 p-0">
+        <div className="flex flex-wrap items-center gap-3 p-4">
+          <div className="relative w-full min-w-0 sm:flex-1 sm:max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={q}
+              placeholder="Search by name or mobile"
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="Search bookings by customer name or mobile"
+              className="h-10 w-full rounded-xl border border-border bg-input-background pl-9 pr-9 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+            />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ('')}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+            className={cn(
+              'ml-auto gap-2',
+              filtersOpen &&
+                'border-primary/40 bg-primary/8 text-primary hover:border-primary/50 hover:bg-primary/10',
+            )}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+            {activeCount > 0 && (
+              <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-semibold tabular-nums text-primary-foreground">
+                {activeCount}
+              </span>
+            )}
+            <ChevronDown
+              className={cn(
+                'h-4 w-4 opacity-60 transition-transform',
+                filtersOpen && 'rotate-180',
+              )}
+            />
+          </Button>
+        </div>
+
+        {filtersOpen && (
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1 border-t border-border p-4 duration-200 animate-in fade-in-0 slide-in-from-top-1 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Date range spans two columns so it reads as the primary control. */}
+            <div className="mb-3 sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Date range
+              </span>
+              <DateRangePicker
+                value={range}
+                onChange={setRange}
+                placeholder="Any date"
+                align="start"
+              />
+            </div>
+            <SearchableSelect
+              label="Venue"
+              value={venueId}
+              onChange={pickVenue}
+              options={venueOpts}
+              searchPlaceholder="Search grounds..."
+            />
+            <SearchableSelect
+              label="Court"
+              value={unitId}
+              onChange={setUnitId}
+              options={unitOpts}
+              searchPlaceholder="Search courts..."
+            />
+            <Select
+              label="Status"
+              value={status}
+              onChange={setStatus}
+              options={[
+                { value: '', label: 'All statuses' },
+                { value: BookingStatus.CONFIRMED, label: 'Confirmed' },
+                { value: BookingStatus.COMPLETED, label: 'Completed' },
+                { value: BookingStatus.NO_SHOW, label: 'No-show' },
+                { value: BookingStatus.CANCELLED, label: 'Cancelled' },
+              ]}
+            />
+            <Select
+              label="Payment"
+              value={paymentStatus}
+              onChange={setPaymentStatus}
+              options={[
+                { value: '', label: 'All payments' },
+                { value: PaymentStatus.PENDING, label: 'Pending' },
+                {
+                  value: PaymentStatus.AWAITING_VENUE_SETTLEMENT,
+                  label: 'Awaiting settlement',
+                },
+                { value: PaymentStatus.SETTLED_AT_VENUE, label: 'Settled at venue' },
+                { value: PaymentStatus.PAID, label: 'Paid' },
+                { value: PaymentStatus.REFUNDED, label: 'Refunded' },
+                { value: PaymentStatus.FAILED, label: 'Failed' },
+              ]}
+            />
+          </div>
+        )}
+
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
+            <span className="mr-0.5 text-xs font-medium text-muted-foreground">
+              Applied
+            </span>
+            {activeFilters.map((f) => (
+              <span
+                key={f.key}
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/8 py-1 pl-2.5 pr-1 text-xs"
+              >
+                <span className="text-muted-foreground">{f.label}</span>
+                <span className="font-medium text-foreground">{f.value}</span>
+                <button
+                  type="button"
+                  onClick={f.clear}
+                  aria-label={`Remove ${f.label} filter`}
+                  className="grid h-4 w-4 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-primary/15 hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
             <Button
               variant="ghost"
               size="sm"
               onClick={clearFilters}
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
-              <X className="h-3.5 w-3.5" /> Clear all
+              Clear all
             </Button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Date range spans two columns so it reads as the primary control. */}
-          <div className="mb-3 sm:col-span-2">
-            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Date range
-            </span>
-            <DateRangePicker
-              value={range}
-              onChange={setRange}
-              placeholder="Any date"
-              align="start"
-            />
           </div>
-          <SearchableSelect
-            label="Venue"
-            value={venueId}
-            onChange={pickVenue}
-            options={venueOpts}
-            searchPlaceholder="Search grounds..."
-          />
-          <SearchableSelect
-            label="Court"
-            value={unitId}
-            onChange={setUnitId}
-            options={unitOpts}
-            searchPlaceholder="Search courts..."
-          />
-          <Select
-            label="Status"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: '', label: 'All statuses' },
-              { value: BookingStatus.CONFIRMED, label: 'Confirmed' },
-              { value: BookingStatus.COMPLETED, label: 'Completed' },
-              { value: BookingStatus.NO_SHOW, label: 'No-show' },
-              { value: BookingStatus.CANCELLED, label: 'Cancelled' },
-            ]}
-          />
-          <Select
-            label="Payment"
-            value={paymentStatus}
-            onChange={setPaymentStatus}
-            options={[
-              { value: '', label: 'All payments' },
-              { value: PaymentStatus.PENDING, label: 'Pending' },
-              {
-                value: PaymentStatus.AWAITING_VENUE_SETTLEMENT,
-                label: 'Awaiting settlement',
-              },
-              { value: PaymentStatus.SETTLED_AT_VENUE, label: 'Settled at venue' },
-              { value: PaymentStatus.PAID, label: 'Paid' },
-              { value: PaymentStatus.REFUNDED, label: 'Refunded' },
-              { value: PaymentStatus.FAILED, label: 'Failed' },
-            ]}
-          />
-          <div className="sm:col-span-2">
-            <label className="mb-3 block">
-              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                Search customer
-              </span>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={q}
-                  placeholder="Name or mobile"
-                  onChange={(e) => setQ(e.target.value)}
-                  className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background pl-9 pr-3.5 py-1 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-                />
-              </div>
-            </label>
-          </div>
-        </div>
+        )}
       </Card>
 
       {/* List */}
@@ -375,7 +477,11 @@ export function BookingsPage() {
                 const first = b.slots[0];
                 const extra = b.slots.length - 1;
                 return (
-                  <TableRow key={b.id}>
+                  <TableRow
+                    key={b.id}
+                    onClick={() => setEditingId(b.id)}
+                    className="cursor-pointer"
+                  >
                     <TableCell className="px-5 py-3.5">
                       <p className="font-medium text-foreground">
                         {b.customerName ?? 'Unknown'}
@@ -423,7 +529,10 @@ export function BookingsPage() {
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => setEditingId(b.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingId(b.id);
+                        }}
                       >
                         Manage
                       </Button>
@@ -448,6 +557,18 @@ export function BookingsPage() {
   );
 }
 
+/** Compact label-over-value cell used in the booking-detail grid. */
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
 function BookingEditor({
   booking,
   venues,
@@ -461,6 +582,7 @@ function BookingEditor({
 }) {
   const [name, setName] = useState(booking.customerName ?? '');
   const [mobile, setMobile] = useState(booking.customerMobile ?? '');
+  const [editingCustomer, setEditingCustomer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -484,6 +606,7 @@ function BookingEditor({
     setRDate(booking.slots[0] ? booking.slots[0].start.slice(0, 10) : todayISO());
     setSlots([]);
     setSelected(new Set());
+    setEditingCustomer(false);
     setMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.id]);
@@ -516,8 +639,10 @@ function BookingEditor({
       setMsg(ok);
       onChanged();
       setPayKey((k) => k + 1);
+      return true;
     } catch (e) {
       setMsg((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -564,12 +689,12 @@ function BookingEditor({
   const settle = () =>
     run(() => api.settleBooking(booking.id), 'Payment recorded — settled at venue.');
 
-  const saveCustomer = () => {
+  const saveCustomer = async () => {
     if (!name.trim() || !mobile.trim()) {
       setMsg('Name and mobile are required.');
       return;
     }
-    return run(
+    const ok = await run(
       () =>
         api.updateBookingCustomer(booking.id, {
           name: name.trim(),
@@ -577,6 +702,7 @@ function BookingEditor({
         }),
       'Customer details updated.',
     );
+    if (ok) setEditingCustomer(false);
   };
 
   const loadAvailability = async () => {
@@ -631,25 +757,82 @@ function BookingEditor({
         </DialogHeader>
 
         <div className="p-5 space-y-4">
-          {/* Booking detail */}
-          <InfoCard title="Booking detail" icon={CalendarDays} accent="blue">
-            <KeyVal label="Venue" value={booking.venueName} />
-            <KeyVal label="Customer" value={booking.customerName ?? 'Unknown'} />
-            <KeyVal label="Mobile" value={booking.customerMobile ?? ''} />
-            <KeyVal
-              label="Status"
-              value={<StatusPill status={booking.status}>{STATUS_LABEL[booking.status]}</StatusPill>}
-            />
-            <KeyVal
-              label="Payment"
-              value={
+          {/* Booking detail + customer. The customer is inline-editable (a row by
+              default, fields on demand) rather than a permanent form, and the
+              facts sit in a compact 2x2 grid — venue stays in the header above. */}
+          <InfoCard
+            title="Booking detail"
+            icon={CalendarDays}
+            accent="blue"
+            action={
+              !editingCustomer && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEditingCustomer(true)}
+                  className="h-7 gap-1.5 px-2 text-xs"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit customer
+                </Button>
+              )
+            }
+          >
+            {editingCustomer ? (
+              <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+                <Field label="Name" value={name} onChange={setName} />
+                <Field label="Mobile" value={mobile} onChange={setMobile} />
+                <div className="col-span-full flex items-center gap-2">
+                  <Button size="sm" onClick={saveCustomer} disabled={busy}>
+                    <Check className="h-4 w-4" /> Save customer
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setName(booking.customerName ?? '');
+                      setMobile(booking.customerMobile ?? '');
+                      setMsg(null);
+                      setEditingCustomer(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <p className="font-display text-base font-semibold text-foreground">
+                  {booking.customerName ?? 'Unknown'}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {booking.customerMobile ?? 'No mobile on file'}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3.5 border-t border-[var(--border-faint)] pt-4">
+              <Detail label="Status">
+                <StatusPill status={booking.status}>
+                  {STATUS_LABEL[booking.status]}
+                </StatusPill>
+              </Detail>
+              <Detail label="Payment">
                 <StatusPill status={booking.paymentStatus}>
                   {PAYMENT_LABEL[booking.paymentStatus]}
                 </StatusPill>
-              }
-            />
-            <KeyVal label="Pay mode" value={PAY_MODE_LABEL[booking.payMode]} />
-            <KeyVal label="Total" value={`₹${booking.total}`} />
+              </Detail>
+              <Detail label="Pay mode">
+                <span className="text-sm font-medium text-foreground">
+                  {PAY_MODE_LABEL[booking.payMode]}
+                </span>
+              </Detail>
+              <Detail label="Total">
+                <span className="font-display text-base font-semibold text-foreground">
+                  ₹{booking.total}
+                </span>
+              </Detail>
+            </div>
           </InfoCard>
 
           {/* Payment history (gateway captures + refunds) */}
@@ -710,9 +893,13 @@ function BookingEditor({
               {booking.slots.map((s) => (
                 <span
                   key={s.start}
-                  className="px-2.5 py-1 rounded-lg bg-muted text-foreground text-xs"
+                  className="rounded-lg border border-[var(--border-faint)] bg-muted/40 px-2.5 py-1.5 text-xs"
                 >
-                  {s.unitName} · {fmtDateTime(s.start)}–{fmtTime(s.end)}
+                  <span className="font-medium text-foreground">{s.unitName}</span>
+                  <span className="text-muted-foreground">
+                    {' · '}
+                    {fmtDateTime(s.start)}–{fmtTime(s.end)}
+                  </span>
                 </span>
               ))}
               {booking.slots.length === 0 && (
@@ -766,27 +953,11 @@ function BookingEditor({
               </Button>
             </div>
             {!cancelled && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                No-show charges the venue&apos;s no-show fee to the customer.
-                Cancelling refunds the customer per the venue&apos;s cancellation
-                policy (any cancellation fee withheld), or returns pack/loyalty
-                credit.
+              <p className="mt-2.5 text-xs text-muted-foreground">
+                No-show applies the venue&apos;s fee; cancelling follows its refund
+                policy.
               </p>
             )}
-          </div>
-
-          {/* Customer */}
-          <div>
-            <SectionLabel icon={User} className="mb-2">
-              Customer details
-            </SectionLabel>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-              <Field label="Name" value={name} onChange={setName} />
-              <Field label="Mobile" value={mobile} onChange={setMobile} />
-            </div>
-            <Button variant="secondary" size="sm" onClick={saveCustomer} disabled={busy}>
-              Save customer
-            </Button>
           </div>
 
           {/* Reschedule */}
@@ -804,8 +975,17 @@ function BookingEditor({
                     options={units.map((u) => ({ value: u.id, label: u.name }))}
                   />
                 </div>
-                <div className="w-40">
-                  <Field label="Date" type="date" value={rDate} onChange={setRDate} />
+                <div className="w-44">
+                  <div className="mb-3">
+                    <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      Date
+                    </span>
+                    <DatePicker
+                      value={rDate ? fromISODate(rDate) : undefined}
+                      onChange={(d) => d && setRDate(toISODate(d))}
+                      align="start"
+                    />
+                  </div>
                 </div>
                 <Button
                   className="mb-3"

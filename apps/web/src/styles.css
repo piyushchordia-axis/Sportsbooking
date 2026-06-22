@@ -270,6 +270,23 @@
     background-color: var(--row-hover);
   }
 
+  /* react-day-picker renders the calendar as a <table>, so the data-table rules
+     above (uppercase headers, per-row borders, cell padding, row hover) leak in
+     and break the shadcn look. Neutralize them inside the calendar only; the
+     component's own utility classes own sizing, color and selection styling. */
+  .rdp-root th,
+  .rdp-root td {
+    padding: 0;
+    border: 0;
+    text-align: center;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .rdp-root tbody tr:hover {
+    background-color: transparent;
+  }
+
   summary {
     cursor: pointer;
     color: var(--primary);
@@ -416,6 +433,27 @@
       animation: none;
     }
   }
+}
+
+/*
+ * Calendar selection colors. react-day-picker puts the selection state on the
+ * day <td>, but the inner ghost <button> keeps its own `text-muted-foreground`
+ * (Tailwind utilities layer), so a selected day number would render dark on the
+ * primary fill. These rules stay unlayered to beat that utility. range_middle is
+ * listed last so a middle day — which carries both .rdp-selected and
+ * .rdp-range_middle — stays dark on the muted band.
+ */
+.rdp-root .rdp-selected button {
+  color: var(--primary-foreground);
+}
+.rdp-root .rdp-selected button:hover {
+  color: var(--primary-foreground);
+  background-color: transparent;
+}
+.rdp-root .rdp-range_middle button,
+.rdp-root .rdp-range_middle button:hover {
+  color: var(--foreground);
+  background-color: transparent;
 }
 
 /*

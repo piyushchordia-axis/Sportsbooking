@@ -30,7 +30,9 @@ import {
   StatusPill,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { DatePicker } from '../../components/ui/date-picker';
 import { Skeleton } from '../../components/ui/skeleton';
+import { fromISODate, toISODate } from '../../lib/date';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 import { useAuth } from '../../auth/AuthContext';
@@ -549,7 +551,13 @@ export function VenueDetailPage() {
 
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-48">
-            <Field label="Date" type="date" value={date} onChange={setDate} />
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Date
+            </span>
+            <DatePicker
+              value={fromISODate(date)}
+              onChange={(d) => setDate(d ? toISODate(d) : todayISO())}
+            />
           </div>
           <Button onClick={load} disabled={!unitId} className="mb-3">
             <CalendarDays className="h-4 w-4" /> Load availability

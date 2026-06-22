@@ -35,6 +35,7 @@ import {
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
 import { SearchableSelect } from '../../components/ui/combobox';
+import { DatePicker } from '../../components/ui/date-picker';
 import { Switch } from '../../components/ui/switch';
 import { Skeleton } from '../../components/ui/skeleton';
 import {
@@ -42,6 +43,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '../../components/ui/tooltip';
+import { fromISODate, toISODate } from '../../lib/date';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -379,11 +381,12 @@ export function NewBookingPage() {
                     searchPlaceholder="Search grounds..."
                   />
                   <div className="w-full sm:max-w-[12rem]">
-                    <Field
-                      label="Date"
-                      type="date"
-                      value={date}
-                      onChange={setDate}
+                    <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      Date
+                    </span>
+                    <DatePicker
+                      value={fromISODate(date)}
+                      onChange={(d) => setDate(d ? toISODate(d) : todayISO())}
                     />
                   </div>
                 </div>

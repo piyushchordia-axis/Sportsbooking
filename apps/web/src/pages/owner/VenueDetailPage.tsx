@@ -85,10 +85,12 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { SearchableSelect } from '../../components/ui/combobox';
+import { DatePicker } from '../../components/ui/date-picker';
 import {
   DateRangePicker,
   DateRangeValue,
 } from '../../components/ui/date-range-picker';
+import { fromISODate, toISODate } from '../../lib/date';
 import {
   Tooltip,
   TooltipContent,
@@ -1447,12 +1449,11 @@ function AvailabilityTab({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value || todayISO())}
-            aria-label="Schedule date"
-            className="h-9 rounded-xl border border-border bg-input-background px-3 text-sm outline-none focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+          <DatePicker
+            value={fromISODate(date)}
+            onChange={(d) => setDate(d ? toISODate(d) : todayISO())}
+            align="end"
+            className="h-9 w-44"
           />
           <Button
             variant="outline"

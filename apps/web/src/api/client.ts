@@ -363,6 +363,23 @@ export interface AuditLogParams {
   pageSize?: number;
 }
 
+/** Owner-level loyalty + referral configuration. */
+export interface LoyaltyConfig {
+  loyaltyEarnRate: number;
+  loyaltyRedeemValue: number;
+  referralReward: number;
+}
+
+/** A points/referral ledger entry for the loyalty history view. */
+export interface LoyaltyHistoryItem {
+  id: string;
+  type: string;
+  amount: string;
+  customerName: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
 /** A tournament fixture match (knockout bracket node or round-robin pairing). */
 export interface FixtureMatch {
   id: string;
@@ -996,6 +1013,14 @@ export const api = {
   settleBooking: (id: string) => post(`/bookings/${id}/settle`),
 
   // ---- owner: branding (white-label) ----
+  // ---- owner: loyalty + referral config + history ----
+  getLoyaltyConfig: () => get<LoyaltyConfig>('/me/loyalty'),
+  updateLoyaltyConfig: (body: Partial<LoyaltyConfig>) =>
+    put<LoyaltyConfig>('/me/loyalty', body),
+  loyaltyHistory: (limit?: number) =>
+    get<LoyaltyHistoryItem[]>(
+      `/me/loyalty/history${limit ? `?limit=${limit}` : ''}`,
+    ),
   getBranding: () => get<Branding>('/me/branding'),
   updateBranding: (body: Partial<Branding>) => put<Branding>('/me/branding', body),
   /** Upload a logo image (multipart); stores it and returns the updated branding. */

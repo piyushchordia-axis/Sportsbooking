@@ -31,6 +31,7 @@ import { RemindersModule } from './modules/notifications/reminders.module';
 import { SearchModule } from './modules/search/search.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { LoyaltySettingsModule } from './modules/loyalty-settings/loyalty-settings.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { StaffModule } from './modules/staff/staff.module';
@@ -67,6 +68,7 @@ import { VenuesModule } from './modules/venues/venues.module';
     SearchModule,
     AuditLogModule,
     StorageModule,
+    LoyaltySettingsModule,
   ],
   providers: [
     // JWT auth applied globally; routes opt out with @Public().

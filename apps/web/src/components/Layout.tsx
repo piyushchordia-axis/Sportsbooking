@@ -11,6 +11,7 @@ import {
   ChevronUp,
   ClipboardList,
   Gamepad2,
+  Gift,
   History,
   KeyRound,
   LayoutDashboard,
@@ -82,6 +83,7 @@ const NAV: Partial<Record<UserRole, NavNode[]>> = {
     { to: '/owner/players', label: 'Players', icon: Users },
     { to: '/owner/staff', label: 'Staff', icon: UserCog },
     { to: '/owner/tournaments', label: 'Tournaments', icon: Trophy },
+    { to: '/owner/loyalty', label: 'Loyalty', icon: Gift },
     { to: '/owner/activity', label: 'Activity', icon: History },
   ],
   [UserRole.STAFF]: [

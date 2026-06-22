@@ -41,7 +41,8 @@ export class OtpService {
   async issue(mobile: string): Promise<void> {
     await this.enforceRequestThrottle(mobile);
 
-    // STATIC_OTP pins every code to a fixed value (e.g. 0000) — a TEMPORARY
+    // STATIC_OTP pins every code to a fixed value (e.g. 000000 — use 6 digits to
+    // match the login screen's 6-digit field) — a TEMPORARY
     // launch escape so players can sign in before a live SMS provider (MSG91)
     // is wired. SECURITY: a fixed code lets anyone log in as ANY mobile number;
     // remove STATIC_OTP and configure real SMS before a public launch.

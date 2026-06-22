@@ -300,14 +300,25 @@
       0 12px 40px -12px color-mix(in srgb, var(--primary) 70%, transparent);
   }
 
-  /* Soft teal-tinted card elevation (exact Reflex values) — replaces the muddy
-     neutral gray drop shadow. Light: a faint deep-teal cast; dark: deep depth,
-     where the teal-tinted card border carries the accent glow. */
+  /* Card surface: a dark-teal radial glow from the top-left corner (Reflex look)
+     over the solid card colour, plus a soft teal-tinted drop shadow — replaces
+     the muddy neutral gray. background-image is independent of the bg-* colour,
+     so it overlays cleanly. */
   .shadow-card {
     box-shadow: 0 22px 70px rgba(18, 71, 68, 0.08);
+    background-image: radial-gradient(
+      125% 90% at 0% 0%,
+      color-mix(in oklab, var(--primary) 9%, transparent) 0%,
+      transparent 52%
+    );
   }
   :where(.dark) .shadow-card {
     box-shadow: 0 22px 70px rgba(0, 0, 0, 0.36);
+    background-image: radial-gradient(
+      125% 90% at 0% 0%,
+      color-mix(in oklab, var(--primary) 18%, transparent) 0%,
+      transparent 55%
+    );
   }
 
   /* Engineering-mesh backdrop used on the login hero panel. */

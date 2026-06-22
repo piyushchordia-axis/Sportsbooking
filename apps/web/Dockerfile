@@ -21,6 +21,6 @@ FROM nginx:1.27-alpine AS runtime
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY apps/web/nginx.conf /etc/nginx/conf.d/sportline.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8093
 HEALTHCHECK --interval=30s --timeout=4s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1/index.html >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:8093/index.html >/dev/null 2>&1 || exit 1

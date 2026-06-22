@@ -87,9 +87,13 @@ async function bootstrap() {
   );
 
   const port = process.env.API_PORT ?? 3001;
-  await app.listen(port);
+  // With host networking in production, HOST=127.0.0.1 binds loopback only so
+  // the API is not publicly exposed — the host Nginx + web tier reach it via
+  // 127.0.0.1. Defaults to 0.0.0.0 for dev / bridge networking.
+  const host = process.env.HOST ?? '0.0.0.0';
+  await app.listen(port, host);
   // eslint-disable-next-line no-console
-  console.log(`API listening on http://localhost:${port}/api`);
+  console.log(`API listening on http://${host}:${port}/api`);
 }
 
 void bootstrap();

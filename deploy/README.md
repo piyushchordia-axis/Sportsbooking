@@ -5,17 +5,22 @@ Nginx — the same pattern as the other apps on this host.
 
 ```
  Internet ──https──▶ host Nginx (:443, Certbot)
-                         │  proxy_pass 127.0.0.1:${WEB_PORT}
+                         │  proxy_pass 127.0.0.1:8093
                          ▼
-                  web container (nginx)  ──serves SPA
-                         │  proxy /api + /uploads ──▶ api container (:3001)
+                  web container (nginx, host net, 127.0.0.1:8093) ──serves SPA
+                         │  proxy /api + /uploads ──▶ 127.0.0.1:3001
                          ▼
-                  api container (NestJS) ──▶ host Postgres (Unix socket)
+                  api container (NestJS, host net, 127.0.0.1:3001)
+                         │
+                         ▼  127.0.0.1:5432 (TCP, password auth)
+                  host Postgres
 ```
 
 - **No Redis** — the app doesn't use it.
-- **Postgres** is the host's existing instance, reached over the bind-mounted
-  Unix socket (`/var/run/postgresql`); nothing is exposed over TCP.
+- **Host networking** — both containers run on the host net and bind `127.0.0.1`
+  only (nothing public). This lets the restricted `sportsbooking_app` role reach
+  Postgres on `127.0.0.1:5432` with password auth, so **RLS stays enforced** (the
+  socket route peer-maps only the admin role).
 - **TLS + the subdomain** are owned by the host Nginx (Certbot), not the containers.
 
 ## Files

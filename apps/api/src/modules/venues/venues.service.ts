@@ -77,12 +77,35 @@ export class VenuesService {
     return user.ownerId;
   }
 
-  listVenues(user: RequestUser) {
-    return this.db.withTenant((tx) =>
+  /**
+   * Map Drizzle relation keys back to the API contract the web app expects.
+   * The relational query returns relations under their names
+   * (bookableUnits/venueGames/venueSettings); the web client reads
+   * units/games/settings.
+   */
+  private shapeVenue<T extends Record<string, unknown> | null | undefined>(
+    v: T,
+  ) {
+    if (!v) return v;
+    const { bookableUnits, venueGames, venueSettings, ...rest } =
+      v as Record<string, unknown>;
+    return {
+      ...rest,
+      units: bookableUnits ?? [],
+      games: venueGames ?? [],
+      settings: Array.isArray(venueSettings)
+        ? venueSettings[0] ?? null
+        : venueSettings ?? null,
+    };
+  }
+
+  async listVenues(user: RequestUser) {
+    const rows = await this.db.withTenant((tx) =>
       tx.query.venues.findMany({
         with: { bookableUnits: true, venueGames: true },
       }),
     );
+    return rows.map((v) => this.shapeVenue(v));
   }
 
   /** Create a venue, enforcing the owner's quota (PRD §4.1). */
@@ -136,9 +159,9 @@ export class VenuesService {
 
       const venue = await tx.query.venues.findFirst({
         where: eq(venues.id, venueId),
-        with: { venueGames: true, venueSettings: true },
+        with: { venueGames: true, venueSettings: true, bookableUnits: true },
       });
-      return venue;
+      return this.shapeVenue(venue);
     });
   }
 
@@ -166,10 +189,11 @@ export class VenuesService {
           photos: dto.photos,
         })
         .where(eq(venues.id, venueId));
-      return tx.query.venues.findFirst({
+      const updated = await tx.query.venues.findFirst({
         where: eq(venues.id, venueId),
         with: { venueGames: true, venueSettings: true, bookableUnits: true },
       });
+      return this.shapeVenue(updated);
     });
   }
 

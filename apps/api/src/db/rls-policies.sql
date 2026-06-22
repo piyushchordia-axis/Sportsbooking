@@ -119,3 +119,7 @@ CREATE POLICY "tenant_isolation" ON "notifications" AS PERMISSIVE FOR ALL TO pub
 ALTER TABLE "payments" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "payments";
 CREATE POLICY "tenant_isolation" ON "payments" AS PERMISSIVE FOR ALL TO public USING ((app_bypass_rls() OR ("ownerId" = app_current_owner_id()))) WITH CHECK ((app_bypass_rls() OR ("ownerId" = app_current_owner_id())));
+
+ALTER TABLE "tournament_matches" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "tenant_isolation" ON "tournament_matches";
+CREATE POLICY "tenant_isolation" ON "tournament_matches" AS PERMISSIVE FOR ALL TO public USING ((app_bypass_rls() OR ("ownerId" = app_current_owner_id()))) WITH CHECK ((app_bypass_rls() OR ("ownerId" = app_current_owner_id())));

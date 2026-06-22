@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Injectable,
   Module,
@@ -43,6 +44,10 @@ import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { PaymentService } from '../payments/payment.service';
 import { PaymentLedgerService } from '../payments/payment-ledger.service';
+import {
+  RecordResultDto,
+  TournamentFixturesService,
+} from './tournament-fixtures.service';
 import {
   NotificationFeedModule,
   NotificationFeedService,
@@ -536,7 +541,10 @@ export class TournamentsService {
 
 @Controller('tournaments')
 export class TournamentsController {
-  constructor(private readonly tournaments: TournamentsService) {}
+  constructor(
+    private readonly tournaments: TournamentsService,
+    private readonly fixtures: TournamentFixturesService,
+  ) {}
 
   @Post()
   @UseGuards(RolesGuard, FeatureFlagGuard)
@@ -612,11 +620,52 @@ export class TournamentsController {
   ) {
     return this.tournaments.cancelRegistration(user.ownerId!, id, participantId);
   }
+
+  /** Generate the draw/schedule from the paid participants (owner only). */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Post(':id/fixtures')
+  generateFixtures(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.fixtures.generate(user.ownerId!, id);
+  }
+
+  /** Clear all fixtures so they can be regenerated (owner only). */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Delete(':id/fixtures')
+  clearFixtures(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.fixtures.clear(user.ownerId!, id);
+  }
+
+  /** The fixtures board: matches by round + standings. */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Get(':id/fixtures')
+  board(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.fixtures.getBoard(user.ownerId!, id);
+  }
+
+  /** Record a match result; advances the winner in a knockout bracket. */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Post(':id/matches/:matchId/result')
+  recordResult(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('matchId') matchId: string,
+    @Body() dto: RecordResultDto,
+  ) {
+    return this.fixtures.recordResult(user.ownerId!, id, matchId, dto);
+  }
 }
 
 @Module({
   imports: [NotificationFeedModule],
   controllers: [TournamentsController],
-  providers: [TournamentsService],
+  providers: [TournamentsService, TournamentFixturesService],
 })
 export class TournamentsModule {}

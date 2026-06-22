@@ -733,3 +733,36 @@ export const payments = pgTable("payments", {
 	index("payments_refType_refId_idx").using("btree", table.refType.asc().nullsLast(), table.refId.asc().nullsLast()),
 	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
 ]);
+
+// --- Tournament fixtures (PRD §4.x): the draw/schedule generated from paid
+// participants. A knockout match advances its winner into nextMatch/nextSlot; a
+// round-robin/league has a flat set of pairings with standings derived from
+// results. Tenant-scoped (RLS by ownerId). ---
+
+export const tournamentMatchStatus = pgEnum("TournamentMatchStatus", ['pending', 'completed'])
+
+export const tournamentMatches = pgTable("tournament_matches", {
+	id: text().primaryKey().notNull(),
+	ownerId: text().notNull(),
+	tournamentId: text().notNull(),
+	round: integer().notNull(),
+	position: integer().notNull(),
+	participantAId: text(),
+	participantBId: text(),
+	scoreA: integer(),
+	scoreB: integer(),
+	winnerId: text(),
+	status: tournamentMatchStatus().default('pending').notNull(),
+	nextMatchId: text(),
+	nextSlot: text(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("tournament_matches_ownerId_idx").using("btree", table.ownerId.asc().nullsLast()),
+	index("tournament_matches_tournamentId_idx").using("btree", table.tournamentId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.tournamentId],
+			foreignColumns: [tournaments.id],
+			name: "tournament_matches_tournamentId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
+]);

@@ -236,7 +236,7 @@ the current code. Remaining noteworthy mismatches:_
 7. **DONE (expiry)** — FORFEIT packs time-expire sessions (expiresAt = purchase + validityDays); ROLLOVER/NONE never expire. _flatRate_ pricing remains the open part of this item.
 8. P2 _(partly done)_ — ✅ add-on/court CRUD lifecycle (via the Grounds detail revamp) and ✅ a **logo-upload pipeline** (generic S3/R2-compatible storage + local dev fallback; `POST /me/branding/logo`). _Still open:_ selective per-owner game/feature-flag assignment at onboarding; game delete.
 9. P2 Add targeted-segment marketing dispatch (uses the existing segmentation + DPDP consent flags).
-10. P2 Tournament fixtures/brackets/draws and per-player team-roster capture.
+10. P2 _(partly done)_ — ✅ **fixtures / brackets / draws**: knockout single-elim bracket (seeded, byes, winner advancement) + round-robin/league with standings; generate + record results from the owner console. _Still open:_ per-player team-roster capture (only captain + team name today).
 11. P3 Surface a recurring-booking flow in the UI; add standalone loyalty/referral config + history screens.
 
 ## What's solid (what IS done)

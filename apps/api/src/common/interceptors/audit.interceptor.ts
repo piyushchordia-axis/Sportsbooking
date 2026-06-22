@@ -52,6 +52,34 @@ const ENTITY_BY_SEGMENT: Record<string, string> = {
  */
 const SKIP_AUTH_PATHS = ['/auth/refresh', '/auth/logout', '/auth/login'];
 
+/** Request-body keys whose values must never be persisted to the audit log. */
+const SENSITIVE_KEY = /pass|secret|token|otp|signature|\bpin\b|cvv|card|auth/i;
+
+/**
+ * Shallow, redacted snapshot of the submitted fields for an audited mutation —
+ * the "what changed" payload (NOT a full before/after diff). Sensitive keys are
+ * redacted; long strings truncated; arrays/objects summarised. Returns undefined
+ * when there's nothing useful to record.
+ */
+function sanitizeBody(body: unknown): Record<string, unknown> | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+    if (v === undefined) continue;
+    if (SENSITIVE_KEY.test(k)) {
+      out[k] = '[redacted]';
+    } else if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) {
+      out[k] =
+        typeof v === 'string' && v.length > 200 ? `${v.slice(0, 200)}…` : v;
+    } else if (Array.isArray(v)) {
+      out[k] = `[${v.length} item(s)]`;
+    } else {
+      out[k] = '[object]';
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /**
  * Best-effort, fire-and-forget audit logging for management mutations.
  *
@@ -126,7 +154,12 @@ export class AuditInterceptor implements NestInterceptor {
           : undefined) ??
         null;
 
-      const metadata = { method: req?.method, path };
+      const changes = sanitizeBody(req?.body);
+      const metadata = {
+        method: req?.method,
+        path,
+        ...(changes ? { changes } : {}),
+      };
 
       // Append-only log; bypass RLS so SUPER_ADMIN (no ownerId) can also write.
       void this.db

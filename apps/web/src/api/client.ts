@@ -345,7 +345,11 @@ export interface AuditLogEntry {
   action: string;
   entity: string;
   entityId: string | null;
-  metadata: { method?: string; path?: string } | null;
+  metadata: {
+    method?: string;
+    path?: string;
+    changes?: Record<string, unknown>;
+  } | null;
   createdAt: string;
 }
 

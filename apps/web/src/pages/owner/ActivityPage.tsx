@@ -191,6 +191,12 @@ export function ActivityPage() {
                             {e.entityId.slice(0, 8)}
                           </span>
                         )}
+                        {e.metadata?.changes &&
+                          Object.keys(e.metadata.changes).length > 0 && (
+                            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                              {Object.keys(e.metadata.changes).join(', ')}
+                            </span>
+                          )}
                       </TableCell>
                     </TableRow>
                   );

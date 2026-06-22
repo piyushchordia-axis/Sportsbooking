@@ -29,6 +29,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { NotificationFeedModule } from './modules/notification-feed/notification-feed.module';
 import { RemindersModule } from './modules/notifications/reminders.module';
 import { SearchModule } from './modules/search/search.module';
+import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { StaffModule } from './modules/staff/staff.module';
@@ -63,6 +64,7 @@ import { VenuesModule } from './modules/venues/venues.module';
     AmcModule,
     NotificationFeedModule,
     SearchModule,
+    AuditLogModule,
   ],
   providers: [
     // JWT auth applied globally; routes opt out with @Public().

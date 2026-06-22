@@ -336,6 +336,33 @@ export interface NotificationFeed {
   unread: number;
 }
 
+/** A single audit-trail entry (GET /audit-logs). */
+export interface AuditLogEntry {
+  id: string;
+  actorId: string;
+  actorName: string | null;
+  actorRole: string;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  metadata: { method?: string; path?: string } | null;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AuditLogParams {
+  action?: string;
+  entity?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 /** A gateway transaction (capture or refund) from the payments ledger. */
 export interface PaymentTxn {
   id: string;
@@ -913,6 +940,19 @@ export const api = {
   // ---- owner: notification feed (bell) ----
   /** Owner/staff in-app bell feed (recent items + unread count). */
   listNotifications: () => get<NotificationFeed>('/notifications'),
+  /** Owner audit trail (GET /audit-logs), filterable + paginated. */
+  listAuditLogs: (params: AuditLogParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.action) qs.append('action', params.action);
+    if (params.entity) qs.append('entity', params.entity);
+    if (params.page !== undefined) qs.append('page', String(params.page));
+    if (params.pageSize !== undefined)
+      qs.append('pageSize', String(params.pageSize));
+    const s = qs.toString();
+    return get<AuditLogPage>(`/audit-logs${s ? `?${s}` : ''}`);
+  },
+  /** Distinct entity labels for the audit-log filter dropdown. */
+  auditLogEntities: () => get<string[]>('/audit-logs/entities'),
   /** Gateway transactions (captures + refunds) for a booking/participant. */
   listPayments: (refType: string, refId: string) =>
     get<PaymentTxn[]>(

@@ -81,6 +81,9 @@ const TournamentsAdminPage = lazy(() =>
 const VenuesPage = lazy(() =>
   import('./pages/owner/VenuesPage').then((m) => ({ default: m.VenuesPage })),
 );
+const ActivityPage = lazy(() =>
+  import('./pages/owner/ActivityPage').then((m) => ({ default: m.ActivityPage })),
+);
 const OwnerVenueDetailPage = lazy(() =>
   import('./pages/owner/VenueDetailPage').then((m) => ({ default: m.VenueDetailPage })),
 );
@@ -167,6 +170,7 @@ export function App() {
           <Route path="/owner/players" element={owner(<PlayersPage />)} />
           <Route path="/owner/staff" element={owner(<StaffPage />)} />
           <Route path="/owner/tournaments" element={owner(<TournamentsAdminPage />)} />
+          <Route path="/owner/activity" element={owner(<ActivityPage />)} />
           <Route path="/admin" element={admin(<PlatformPage />)} />
           <Route path="/admin/games" element={admin(<GamesPage />)} />
           <Route path="/admin/owners" element={admin(<OwnersPage />)} />

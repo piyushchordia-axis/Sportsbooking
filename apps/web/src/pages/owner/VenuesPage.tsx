@@ -87,10 +87,8 @@ export function VenuesPage() {
   const venues = useLoad(() => api.listVenues());
   const [msg, setMsg] = useState<string | null>(null);
 
-  // new venue
-  const [vName, setVName] = useState('New Ground');
-  const [city, setCity] = useState('Bengaluru');
-  const [gameId, setGameId] = useState('');
+  // create-ground modal
+  const [createOpen, setCreateOpen] = useState(false);
 
   // edit dialogs
   const [editVenue, setEditVenue] = useState<any | null>(null);
@@ -109,7 +107,7 @@ export function VenuesPage() {
   };
 
   const gameOpts = (games.data ?? []).map((g: any) => ({ value: g.id, label: g.name }));
-  const firstGame = gameId || gameOpts[0]?.value || '';
+  const firstGame = gameOpts[0]?.value || '';
 
   const venueList = venues.data ?? [];
   const courtCount = venueList.reduce((n: number, v: any) => n + v.units.length, 0);
@@ -145,33 +143,14 @@ export function VenuesPage() {
             <StatusPill status="active">{`${courtCount} courts`}</StatusPill>
           </div>
         }
+        action={
+          <Button onClick={() => setCreateOpen(true)} disabled={gameOpts.length === 0}>
+            <Plus className="h-4 w-4" /> New ground
+          </Button>
+        }
       />
 
-      <Card
-        title="Create a ground"
-        subtitle="Add a new ground to your portfolio, then set up its courts below"
-        topAccent="primary"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="Name" value={vName} onChange={setVName} />
-          <Field label="City" value={city} onChange={setCity} />
-          <Select label="Game" value={firstGame} onChange={setGameId} options={gameOpts} />
-        </div>
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Button
-            onClick={() =>
-              wrap(
-                () => api.createVenue({ name: vName, city, gameIds: [firstGame] }),
-                'Ground created.',
-              )
-            }
-            disabled={!firstGame}
-          >
-            <Plus className="h-4 w-4" /> Create ground
-          </Button>
-        </div>
-        <Msg text={msg} />
-      </Card>
+      <Msg text={msg} />
 
       {venues.loading && venueList.length === 0 ? (
         <Card>
@@ -189,7 +168,7 @@ export function VenuesPage() {
         <Card>
           <EmptyState
             title="No grounds yet"
-            hint="Create your first ground above to start adding courts, pricing and add-ons."
+            hint='Use "New ground" to create your first ground, then add courts, pricing and add-ons.'
           />
         </Card>
       ) : (
@@ -209,6 +188,18 @@ export function VenuesPage() {
           />
         ))
       )}
+
+      <CreateGroundDialog
+        open={createOpen}
+        gameOpts={gameOpts}
+        defaultGame={firstGame}
+        onClose={() => setCreateOpen(false)}
+        onSaved={(m) => {
+          setCreateOpen(false);
+          setMsg(m);
+          venues.reload();
+        }}
+      />
 
       <EditVenueDialog
         venue={editVenue}
@@ -1180,6 +1171,89 @@ const REPAYMENT_OPTS = [
   { value: OpenMatchRepaymentMode.INFO, label: 'Info only (no ledger)' },
   { value: OpenMatchRepaymentMode.LEDGER, label: 'Track repayment (ledger)' },
 ];
+
+function CreateGroundDialog({
+  open,
+  gameOpts,
+  defaultGame,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  gameOpts: { value: string; label: string }[];
+  defaultGame: string;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}) {
+  const [name, setName] = useState('New Ground');
+  const [city, setCity] = useState('Bengaluru');
+  const [gameId, setGameId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [seeded, setSeeded] = useState(false);
+
+  // Reset the form each time the dialog opens (fresh defaults, no stale errors).
+  if (open && !seeded) {
+    setSeeded(true);
+    setName('New Ground');
+    setCity('Bengaluru');
+    setGameId(defaultGame);
+    setErr(null);
+  }
+  if (!open && seeded) setSeeded(false);
+
+  const game = gameId || defaultGame;
+
+  const save = async () => {
+    if (!game) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createVenue({ name, city, gameIds: [game] });
+      onSaved('Ground created.');
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New ground</DialogTitle>
+          <DialogDescription>
+            Add a ground to your portfolio. You can set up its courts, pricing and
+            add-ons right after.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <section className="space-y-3">
+            <SectionLabel icon={Building2}>Ground details</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Name" value={name} onChange={setName} />
+              <Field label="City" value={city} onChange={setCity} />
+            </div>
+            <Select label="Game" value={game} onChange={setGameId} options={gameOpts} />
+          </section>
+        </div>
+
+        <Msg text={err} />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!game || !name.trim() || busy}>
+            <Plus className="h-4 w-4" /> {busy ? 'Creating…' : 'Create ground'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function VenueSettingsDialog({
   venue,

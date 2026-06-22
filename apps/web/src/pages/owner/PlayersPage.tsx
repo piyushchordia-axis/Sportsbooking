@@ -95,11 +95,13 @@ function parseBulk(raw: string, defaultConsent: boolean): ParsedRow[] {
     });
 }
 
-/** Owner CRM directory with segment filter + direct add-customer (PRD §4.9). */
+/** Owner CRM directory with segment filter + add-player modal (PRD §4.9). */
 export function PlayersPage() {
   const [segment, setSegment] = useState('');
   const players = useLoad(() => api.listPlayers(segment || undefined), [segment]);
 
+  // Add-player dialog state.
+  const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [consent, setConsent] = useState(false);
@@ -141,6 +143,18 @@ export function PlayersPage() {
 
   const validRows = parsed.filter((r) => !r.error);
 
+  const resetAdd = () => {
+    setName('');
+    setMobile('');
+    setConsent(false);
+    setMsg(null);
+  };
+
+  const openAdd = () => {
+    resetAdd();
+    setAddOpen(true);
+  };
+
   const add = async () => {
     setMsg(null);
     if (!name.trim() || !mobile.trim()) {
@@ -153,12 +167,10 @@ export function PlayersPage() {
     }
     setSaving(true);
     try {
-      const created = await api.addCustomer({ name: name.trim(), mobile: mobile.trim(), consent });
-      setName('');
-      setMobile('');
-      setConsent(false);
+      await api.addCustomer({ name: name.trim(), mobile: mobile.trim(), consent });
+      resetAdd();
+      setAddOpen(false);
       players.reload();
-      setMsg(`Added ${created.name} (${created.mobile}) to your CRM`);
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -254,10 +266,16 @@ export function PlayersPage() {
         subtitle="Your customer directory, segments, and marketing reach"
         badge={<StatusPill status="active">CRM</StatusPill>}
         action={
-          <Button onClick={openCampaign} disabled={rows.length === 0}>
-            <Megaphone className="h-4 w-4" />
-            Send campaign
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={openCampaign} disabled={rows.length === 0}>
+              <Megaphone className="h-4 w-4" />
+              Send campaign
+            </Button>
+            <Button onClick={openAdd}>
+              <UserPlus className="h-4 w-4" />
+              Add player
+            </Button>
+          </div>
         }
       />
 
@@ -273,69 +291,6 @@ export function PlayersPage() {
           icon={Megaphone}
         />
       </div>
-
-      <Card
-        title="Add a customer"
-        subtitle="Add a walk-in or phone customer to your CRM. They’ll appear below even before their first booking."
-        topAccent="primary"
-        action={
-          <Button variant="outline" onClick={openBulk}>
-            <ListPlus className="h-4 w-4" />
-            Bulk add
-          </Button>
-        }
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-          <label className="block mb-1">
-            <span className="block text-xs font-medium text-muted-foreground mb-1.5">Name</span>
-            <input
-              type="text"
-              value={name}
-              placeholder="e.g. Priya Sharma"
-              onChange={(e) => setName(e.target.value)}
-              className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-            />
-          </label>
-          <label className="block mb-1">
-            <span className="block text-xs font-medium text-muted-foreground mb-1.5">Mobile</span>
-            <input
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              value={mobile}
-              placeholder="e.g. 9876543210"
-              aria-invalid={mobileBad}
-              onChange={(e) => setMobile(e.target.value)}
-              className={`flex h-10 w-full min-w-0 rounded-xl border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:ring-2 ${
-                mobileBad
-                  ? 'border-destructive/60 focus-visible:border-destructive/60 focus-visible:ring-destructive/20'
-                  : 'border-border focus-visible:border-primary/50 focus-visible:ring-primary/20'
-              }`}
-            />
-            <span className="block h-4 mt-1 text-xs text-destructive">
-              {mobileBad ? 'Enter a valid 10-digit Indian mobile number' : ''}
-            </span>
-          </label>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-elevated/40 px-3.5 py-3 mb-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Marketing consent</p>
-            <p className="text-xs text-muted-foreground">
-              Customer agrees to receive offers and updates (DPDP)
-            </p>
-          </div>
-          <Switch checked={consent} onCheckedChange={setConsent} aria-label="Marketing consent" />
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button onClick={add} disabled={saving}>
-            <UserPlus className="h-4 w-4" />
-            {saving ? 'Adding…' : 'Add customer'}
-          </Button>
-          <Msg text={msg} />
-        </div>
-      </Card>
 
       <Card
         title="Directory"
@@ -358,7 +313,7 @@ export function PlayersPage() {
         ) : !players.error && rows.length === 0 ? (
           <EmptyState
             title="No players in this segment"
-            hint="Add a customer above, or as customers book and opt in, they’ll show up in your CRM here."
+            hint="Use “Add player” to add a walk-in, or as players book and opt in, they’ll show up in your CRM here."
           />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border">
@@ -436,6 +391,102 @@ export function PlayersPage() {
           </SectionLabel>
         )}
       </Card>
+
+      {/* Add-player dialog. */}
+      <Dialog open={addOpen} onOpenChange={(o) => (o ? setAddOpen(true) : (setAddOpen(false), resetAdd()))}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add player</DialogTitle>
+            <DialogDescription>
+              Add a walk-in or phone player to your CRM. They’ll appear in the directory even before
+              their first booking.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <section className="space-y-2.5">
+              <SectionLabel>Details</SectionLabel>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                <label className="block mb-1">
+                  <span className="block text-xs font-medium text-muted-foreground mb-1.5">Name</span>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={name}
+                    placeholder="e.g. Priya Sharma"
+                    onChange={(e) => setName(e.target.value)}
+                    className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  />
+                </label>
+                <label className="block mb-1">
+                  <span className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    Mobile
+                  </span>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={mobile}
+                    placeholder="e.g. 9876543210"
+                    aria-invalid={mobileBad}
+                    onChange={(e) => setMobile(e.target.value)}
+                    className={`flex h-10 w-full min-w-0 rounded-xl border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:ring-2 ${
+                      mobileBad
+                        ? 'border-destructive/60 focus-visible:border-destructive/60 focus-visible:ring-destructive/20'
+                        : 'border-border focus-visible:border-primary/50 focus-visible:ring-primary/20'
+                    }`}
+                  />
+                  <span className="block h-4 mt-1 text-xs text-destructive">
+                    {mobileBad ? 'Enter a valid 10-digit Indian mobile number' : ''}
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-elevated/40 px-3.5 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Marketing consent</p>
+                <p className="text-xs text-muted-foreground">
+                  Player agrees to receive offers and updates (DPDP)
+                </p>
+              </div>
+              <Switch checked={consent} onCheckedChange={setConsent} aria-label="Marketing consent" />
+            </div>
+
+            <Msg text={msg} />
+          </div>
+
+          <DialogFooter className="sm:justify-between">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setAddOpen(false);
+                resetAdd();
+                openBulk();
+              }}
+            >
+              <ListPlus className="h-4 w-4" />
+              Bulk add instead
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAddOpen(false);
+                  resetAdd();
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button onClick={add} disabled={saving}>
+                <UserPlus className="h-4 w-4" />
+                {saving ? 'Adding…' : 'Add player'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Campaign / broadcast dialog — PRD-7. */}
       <Dialog open={campaignOpen} onOpenChange={setCampaignOpen}>

@@ -253,7 +253,8 @@ export function OffersPage() {
     [gameOpts],
   );
 
-  // Create form state.
+  // Create dialog + form state.
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('Weekend 10% off');
   const [type, setType] = useState<OfferType>(OfferType.PERCENT);
   const [value, setValue] = useState('10');
@@ -314,6 +315,25 @@ export function OffersPage() {
     return { ok: true, value: clamped };
   };
 
+  // Return the create form to its defaults after a successful create.
+  const resetCreate = () => {
+    setName('Weekend 10% off');
+    setType(OfferType.PERCENT);
+    setValue('10');
+    setCode('WEEKEND10');
+    setAutoApply(false);
+    setRange({});
+    setVenueIds([]);
+    setGameIds([]);
+    setSegment('');
+    setMsg(null);
+  };
+
+  const openCreate = () => {
+    resetCreate();
+    setCreateOpen(true);
+  };
+
   const create = async () => {
     setMsg(null);
     const v = validate(name, type, value, range);
@@ -335,7 +355,8 @@ export function OffersPage() {
         gameIds: gameIds.length ? gameIds : undefined,
         segment: segment || undefined,
       });
-      setMsg('Offer created.');
+      setCreateOpen(false);
+      resetCreate();
       offers.reload();
     } catch (e) {
       setMsg((e as Error).message);
@@ -445,66 +466,77 @@ export function OffersPage() {
         title="Offers"
         subtitle="Run promotions and discount codes across your venues."
         badge={<StatusPill status="active">{`${activeCount} active`}</StatusPill>}
-      />
-
-      <Card
-        title="Create an offer"
-        subtitle="Set the discount, when it runs, and who can use it."
-        topAccent="primary"
         action={
-          <Button onClick={create} disabled={creating}>
-            <Plus className="h-4 w-4" /> {creating ? 'Creating…' : 'Create offer'}
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New offer
           </Button>
         }
+      />
+
+      {/* Create dialog — same sectioned form, now off the main list. */}
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreateOpen(false);
+            resetCreate();
+          }
+        }}
       >
-        {/* Section 1 — the deal itself. */}
-        <SectionLabel icon={Tag} className="mb-3">
-          The deal
-        </SectionLabel>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-3">
-          <Field label="Name" value={name} onChange={setName} />
-          <Select
-            label="Discount type"
-            value={type}
-            onChange={(x) => setType(x as OfferType)}
-            options={[
-              { value: OfferType.PERCENT, label: 'Percentage off' },
-              { value: OfferType.FLAT, label: 'Flat amount off' },
-            ]}
-          />
-          <Field
-            label={type === OfferType.PERCENT ? 'Percent (1–100)' : 'Amount ₹'}
-            type="number"
-            value={value}
-            onChange={setValue}
-          />
-          <Field
-            label="Promo code"
-            value={code}
-            onChange={setCode}
-            placeholder="Optional"
-          />
-        </div>
-        <Labelled
-          label="Apply automatically"
-          hint="On: discount applies at checkout. Off: players must enter the code."
-          className="mb-1"
-        >
-          <label className="flex h-10 w-full max-w-xs items-center gap-3 rounded-xl border border-border bg-input-background px-3.5">
-            <Switch checked={autoApply} onCheckedChange={setAutoApply} />
-            <span className="text-sm text-foreground">
-              {autoApply ? 'Auto-applied at checkout' : 'Players enter the code'}
-            </span>
-          </label>
-        </Labelled>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create an offer</DialogTitle>
+            <DialogDescription>
+              Set the discount, when it runs, and who can use it.
+            </DialogDescription>
+          </DialogHeader>
 
-        <Separator className="my-5" />
+          {/* Section 1 — the deal itself. */}
+          <SectionLabel icon={Tag} className="mb-3">
+            The deal
+          </SectionLabel>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+            <Field label="Name" value={name} onChange={setName} />
+            <Select
+              label="Discount type"
+              value={type}
+              onChange={(x) => setType(x as OfferType)}
+              options={[
+                { value: OfferType.PERCENT, label: 'Percentage off' },
+                { value: OfferType.FLAT, label: 'Flat amount off' },
+              ]}
+            />
+            <Field
+              label={type === OfferType.PERCENT ? 'Percent (1–100)' : 'Amount ₹'}
+              type="number"
+              value={value}
+              onChange={setValue}
+            />
+            <Field
+              label="Promo code"
+              value={code}
+              onChange={setCode}
+              placeholder="Optional"
+            />
+          </div>
+          <Labelled
+            label="Apply automatically"
+            hint="On: discount applies at checkout. Off: players must enter the code."
+          >
+            <label className="flex h-10 w-full items-center gap-3 rounded-xl border border-border bg-input-background px-3.5">
+              <Switch checked={autoApply} onCheckedChange={setAutoApply} />
+              <span className="text-sm text-foreground">
+                {autoApply ? 'Auto-applied at checkout' : 'Players enter the code'}
+              </span>
+            </label>
+          </Labelled>
 
-        {/* Section 2 — when & where it applies. */}
-        <SectionLabel icon={CalendarRange} className="mb-3">
-          When &amp; where
-        </SectionLabel>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-3">
+          <Separator className="my-4" />
+
+          {/* Section 2 — when & where it applies. */}
+          <SectionLabel icon={CalendarRange} className="mb-3">
+            When &amp; where
+          </SectionLabel>
           <Labelled
             label="Validity window"
             hint="Leave empty to keep the offer always on."
@@ -515,45 +547,60 @@ export function OffersPage() {
               placeholder="Always on"
             />
           </Labelled>
-          <MultiSelect
-            label="Venues"
-            hint="Limit to specific grounds, or leave empty for all."
-            placeholder="All venues"
-            icon={MapPin}
-            options={venueOpts}
-            selected={venueIds}
-            onChange={setVenueIds}
-            loading={venues.loading}
-          />
-          <MultiSelect
-            label="Games"
-            hint="Limit to specific sports, or leave empty for all."
-            placeholder="All games"
-            icon={Tag}
-            options={gameOpts}
-            selected={gameIds}
-            onChange={setGameIds}
-            loading={games.loading}
-          />
-        </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+            <MultiSelect
+              label="Venues"
+              hint="Limit to specific grounds, or leave empty for all."
+              placeholder="All venues"
+              icon={MapPin}
+              options={venueOpts}
+              selected={venueIds}
+              onChange={setVenueIds}
+              loading={venues.loading}
+            />
+            <MultiSelect
+              label="Games"
+              hint="Limit to specific sports, or leave empty for all."
+              placeholder="All games"
+              icon={Tag}
+              options={gameOpts}
+              selected={gameIds}
+              onChange={setGameIds}
+              loading={games.loading}
+            />
+          </div>
 
-        <Separator className="my-5" />
+          <Separator className="my-4" />
 
-        {/* Section 3 — audience. */}
-        <SectionLabel icon={Target} className="mb-3">
-          Audience
-        </SectionLabel>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-3">
+          {/* Section 3 — audience. */}
+          <SectionLabel icon={Target} className="mb-3">
+            Audience
+          </SectionLabel>
           <Select
             label="Who can use it"
             value={segment}
             onChange={setSegment}
             options={SEGMENT_OPTIONS}
           />
-        </div>
 
-        <Msg text={msg} />
-      </Card>
+          <Msg text={msg} />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateOpen(false);
+                resetCreate();
+              }}
+              disabled={creating}
+            >
+              Cancel
+            </Button>
+            <Button onClick={create} disabled={creating}>
+              <Plus className="h-4 w-4" /> {creating ? 'Creating…' : 'Create offer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="mb-3 flex items-center justify-between">
         <SectionLabel icon={Tag}>All offers</SectionLabel>
@@ -567,7 +614,7 @@ export function OffersPage() {
         <Card>
           <EmptyState
             title="No offers yet"
-            hint="Create your first promotion above to start offering discounts to players."
+            hint="Create your first promotion to start offering discounts to players."
           />
         </Card>
       ) : (

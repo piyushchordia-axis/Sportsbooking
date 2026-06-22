@@ -1,5 +1,5 @@
 import { PackExpiryMode, PackPricingMode } from '@sportsbooking/shared';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import {
   CalendarClock,
   Layers,
@@ -132,50 +132,21 @@ function NumberField({
   );
 }
 
+const EMPTY_DRAFT: PackDraft = {
+  name: '',
+  sessions: 10,
+  price: 5000,
+  pricingMode: PackPricingMode.FLAT,
+  discountPct: 20,
+  expiryMode: PackExpiryMode.NONE,
+};
+
 /** Owner: membership session packs (PRD §4.4). */
 export function PacksPage() {
   const packs = useLoad(() => api.listPacks());
-  const [draft, setDraft] = useState<PackDraft>({
-    name: '',
-    sessions: 10,
-    price: 5000,
-    pricingMode: PackPricingMode.FLAT,
-    discountPct: 20,
-    expiryMode: PackExpiryMode.NONE,
-  });
   const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Pack | null>(null);
-
-  const set = <K extends keyof PackDraft>(key: K, value: PackDraft[K]) =>
-    setDraft((d) => ({ ...d, [key]: value }));
-
-  const create = async () => {
-    setMsg(null);
-    if (!draft.name.trim()) {
-      setMsg('Give the pack a name so members can recognise it.');
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.createPack({
-        name: draft.name.trim(),
-        sessions: draft.sessions,
-        price: draft.price,
-        pricingMode: draft.pricingMode,
-        discountPct:
-          draft.pricingMode === PackPricingMode.DISCOUNT ? draft.discountPct : undefined,
-        expiryMode: draft.expiryMode,
-      });
-      setMsg('Pack created.');
-      setDraft((d) => ({ ...d, name: '' }));
-      packs.reload();
-    } catch (e) {
-      setMsg((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const deactivate = async (p: Pack) => {
     if (!window.confirm(`Deactivate "${p.name}"? It will no longer be available for purchase.`)) {
@@ -200,8 +171,6 @@ export function PacksPage() {
         }, 0) / list.length
       : 0;
 
-  const discount = draft.pricingMode === PackPricingMode.DISCOUNT;
-
   return (
     <div className="container">
       <PageHeader
@@ -212,14 +181,152 @@ export function PacksPage() {
             <StatusPill status="active">{`${list.length} live`}</StatusPill>
           ) : undefined
         }
+        action={
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" /> New pack
+          </Button>
+        }
       />
 
-      {/* Create form — grouped into Basics / Pricing / Validity for clear hierarchy. */}
-      <Card
-        title="New pack"
-        subtitle="Set how many sessions members get and what they pay."
-        topAccent="primary"
-      >
+      {msg && (
+        <div className="mb-4">
+          <Msg text={msg} />
+        </div>
+      )}
+
+      {/* Live packs */}
+      {packs.loading && list.length === 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-52 rounded-2xl" />
+          ))}
+        </div>
+      ) : packs.error ? (
+        <Card>
+          <Msg text={packs.error} />
+        </Card>
+      ) : list.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="No packs yet"
+            hint="Use “New pack” above to start selling prepaid session bundles."
+          />
+        </Card>
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+            <span className="text-muted-foreground">
+              <span className="font-display font-semibold text-foreground tabular-nums">
+                {list.length}
+              </span>{' '}
+              live {list.length === 1 ? 'pack' : 'packs'}
+            </span>
+            <span className="text-muted-foreground">
+              avg{' '}
+              <span className="font-medium text-foreground tabular-nums">
+                {inr(avgPerSession)}
+              </span>{' '}
+              / session
+            </span>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {list.map((p) => (
+              <PackTicket
+                key={p.id}
+                pack={p}
+                onEdit={() => setEditing(p)}
+                onDeactivate={() => deactivate(p)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      <CreatePackDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+        onSaved={(text) => {
+          setCreating(false);
+          setMsg(text);
+          packs.reload();
+        }}
+      />
+
+      <EditPackDialog
+        pack={editing}
+        onClose={() => setEditing(null)}
+        onSaved={(text) => {
+          setEditing(null);
+          setMsg(text);
+          packs.reload();
+        }}
+      />
+    </div>
+  );
+}
+
+/** Create dialog — mirrors the edit dialog, with the form reset each time it opens. */
+function CreatePackDialog({
+  open,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}) {
+  const [draft, setDraft] = useState<PackDraft>(EMPTY_DRAFT);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Fresh form every time the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setDraft(EMPTY_DRAFT);
+      setError(null);
+    }
+  }, [open]);
+
+  const set = <K extends keyof PackDraft>(key: K, value: PackDraft[K]) =>
+    setDraft((d) => ({ ...d, [key]: value }));
+
+  const discount = draft.pricingMode === PackPricingMode.DISCOUNT;
+
+  const create = async () => {
+    setError(null);
+    if (!draft.name.trim()) {
+      setError('Give the pack a name so members can recognise it.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.createPack({
+        name: draft.name.trim(),
+        sessions: draft.sessions,
+        price: draft.price,
+        pricingMode: draft.pricingMode,
+        discountPct:
+          draft.pricingMode === PackPricingMode.DISCOUNT ? draft.discountPct : undefined,
+        expiryMode: draft.expiryMode,
+      });
+      onSaved('Pack created.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New pack</DialogTitle>
+          <DialogDescription>
+            Set how many sessions members get and what they pay.
+          </DialogDescription>
+        </DialogHeader>
+
         <div className="space-y-6">
           <section className="space-y-3">
             <SectionLabel icon={Ticket}>Basics</SectionLabel>
@@ -229,6 +336,7 @@ export function PacksPage() {
                   Pack name
                 </span>
                 <input
+                  autoFocus
                   value={draft.name}
                   placeholder="e.g. 10-Session Saver"
                   onChange={(e) => set('name', e.target.value)}
@@ -299,73 +407,19 @@ export function PacksPage() {
           </section>
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-border-faint pt-4">
-          <Msg text={msg} />
+        <Msg text={error} />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
           <Button onClick={create} disabled={busy}>
             <Plus className="h-4 w-4" />
             {busy ? 'Creating…' : 'Create pack'}
           </Button>
-        </div>
-      </Card>
-
-      {/* Live packs */}
-      {packs.loading && list.length === 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-52 rounded-2xl" />
-          ))}
-        </div>
-      ) : packs.error ? (
-        <Card>
-          <Msg text={packs.error} />
-        </Card>
-      ) : list.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="No packs yet"
-            hint="Create your first pack above to start selling prepaid session bundles."
-          />
-        </Card>
-      ) : (
-        <>
-          <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-            <span className="text-muted-foreground">
-              <span className="font-display font-semibold text-foreground tabular-nums">
-                {list.length}
-              </span>{' '}
-              live {list.length === 1 ? 'pack' : 'packs'}
-            </span>
-            <span className="text-muted-foreground">
-              avg{' '}
-              <span className="font-medium text-foreground tabular-nums">
-                {inr(avgPerSession)}
-              </span>{' '}
-              / session
-            </span>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {list.map((p) => (
-              <PackTicket
-                key={p.id}
-                pack={p}
-                onEdit={() => setEditing(p)}
-                onDeactivate={() => deactivate(p)}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      <EditPackDialog
-        pack={editing}
-        onClose={() => setEditing(null)}
-        onSaved={(text) => {
-          setEditing(null);
-          setMsg(text);
-          packs.reload();
-        }}
-      />
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -1,5 +1,5 @@
 import { FeatureFlag } from '@sportsbooking/shared';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import {
   Award,
@@ -486,37 +486,72 @@ function EditOwnerDialog({
 }
 
 /* ----------------------------------------------------------------------------
- * Page
+ * Onboard owner dialog (FE-1)
  * ------------------------------------------------------------------------- */
 
-/** Super Admin: owner onboarding & oversight (PRD §3.2, §3.3). */
-export function OwnersPage() {
-  const games = useLoad(() => api.listGames());
-  const owners = useLoad(() => api.listOwners());
+/** Default onboarding form values — reused to reset the dialog on each open. */
+const ONBOARD_DEFAULTS = {
+  name: 'New Turf Co',
+  email: 'owner2@example.com',
+  password: 'owner12345',
+  quota: '3',
+  setupFee: '',
+  amcAmount: '',
+  logoUrl: '',
+  primaryColor: '#16a34a',
+  secondaryColor: '#0f172a',
+  accentColor: '#f59e0b',
+};
 
-  // Onboarding form state
-  const [name, setName] = useState('New Turf Co');
-  const [email, setEmail] = useState('owner2@example.com');
-  const [password, setPassword] = useState('owner12345');
-  const [quota, setQuota] = useState('3');
-  const [setupFee, setSetupFee] = useState('');
-  const [amcAmount, setAmcAmount] = useState('');
+function OnboardOwnerDialog({
+  open,
+  games,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  games: GameOption[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState(ONBOARD_DEFAULTS.name);
+  const [email, setEmail] = useState(ONBOARD_DEFAULTS.email);
+  const [password, setPassword] = useState(ONBOARD_DEFAULTS.password);
+  const [quota, setQuota] = useState(ONBOARD_DEFAULTS.quota);
+  const [setupFee, setSetupFee] = useState(ONBOARD_DEFAULTS.setupFee);
+  const [amcAmount, setAmcAmount] = useState(ONBOARD_DEFAULTS.amcAmount);
   const [renewal, setRenewal] = useState<Date | undefined>(undefined);
-  const [logoUrl, setLogoUrl] = useState('');
-  const [primaryColor, setPrimaryColor] = useState('#16a34a');
-  const [secondaryColor, setSecondaryColor] = useState('#0f172a');
-  const [accentColor, setAccentColor] = useState('#f59e0b');
+  const [logoUrl, setLogoUrl] = useState(ONBOARD_DEFAULTS.logoUrl);
+  const [primaryColor, setPrimaryColor] = useState(ONBOARD_DEFAULTS.primaryColor);
+  const [secondaryColor, setSecondaryColor] = useState(ONBOARD_DEFAULTS.secondaryColor);
+  const [accentColor, setAccentColor] = useState(ONBOARD_DEFAULTS.accentColor);
   const [selectedGameIds, setSelectedGameIds] = useState<string[]>([]);
   const [flags, setFlags] = useState<string[]>(ALL_FLAGS);
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Directory / AMC
-  const [amcMsg, setAmcMsg] = useState<string | null>(null);
-  const [amcBusy, setAmcBusy] = useState(false);
-  const [editing, setEditing] = useState<OwnerRow | null>(null);
+  // Fresh form every time the dialog opens.
+  const reset = () => {
+    setName(ONBOARD_DEFAULTS.name);
+    setEmail(ONBOARD_DEFAULTS.email);
+    setPassword(ONBOARD_DEFAULTS.password);
+    setQuota(ONBOARD_DEFAULTS.quota);
+    setSetupFee(ONBOARD_DEFAULTS.setupFee);
+    setAmcAmount(ONBOARD_DEFAULTS.amcAmount);
+    setRenewal(undefined);
+    setLogoUrl(ONBOARD_DEFAULTS.logoUrl);
+    setPrimaryColor(ONBOARD_DEFAULTS.primaryColor);
+    setSecondaryColor(ONBOARD_DEFAULTS.secondaryColor);
+    setAccentColor(ONBOARD_DEFAULTS.accentColor);
+    setSelectedGameIds([]);
+    setFlags(ALL_FLAGS);
+    setMsg(null);
+    setBusy(false);
+  };
 
-  const gameList: GameOption[] = games.data ?? [];
-  const list: OwnerRow[] = owners.data ?? [];
+  useEffect(() => {
+    if (open) reset();
+  }, [open]);
 
   const toggleGame = (id: string) =>
     setSelectedGameIds((prev) =>
@@ -527,6 +562,7 @@ export function OwnersPage() {
 
   const create = async () => {
     setMsg(null);
+    setBusy(true);
     try {
       await api.createOwner({
         name,
@@ -534,7 +570,7 @@ export function OwnersPage() {
         adminPassword: password,
         venueQuota: Number(quota),
         // Empty selection = grant all catalogue games.
-        allowedGameIds: selectedGameIds.length ? selectedGameIds : gameList.map((g) => g.id),
+        allowedGameIds: selectedGameIds.length ? selectedGameIds : games.map((g) => g.id),
         featureFlags: flags,
         branding: {
           logoUrl: logoUrl || undefined,
@@ -546,12 +582,162 @@ export function OwnersPage() {
         ...(numOrUndef(amcAmount) !== undefined ? { amcAmount: numOrUndef(amcAmount) } : {}),
         ...(renewal ? { amcRenewalDate: renewal.toISOString() } : {}),
       });
-      setMsg(`Owner onboarded — login ${email} / ${password}`);
-      owners.reload();
+      // Success — refresh the directory, reset the form and close.
+      onCreated();
+      onClose();
     } catch (e) {
       setMsg((e as Error).message);
+      setBusy(false);
     }
   };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Onboard owner</DialogTitle>
+          <DialogDescription>
+            Set up an operator, their commercial terms and entitlements. They can sign in the moment
+            you finish.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* Identity */}
+          <section>
+            <SectionLabel icon={UserPlus} className="mb-4">
+              Operator
+            </SectionLabel>
+            <Field label="Business name" value={name} onChange={setName} />
+            <Field label="Contact email" value={email} onChange={setEmail} type="email" />
+            <Field label="Admin password" value={password} onChange={setPassword} />
+          </section>
+
+          {/* Commercial terms */}
+          <section>
+            <SectionLabel icon={Receipt} className="mb-3">
+              AMC &amp; commercial terms
+            </SectionLabel>
+            <div className="grid grid-cols-2 gap-3">
+              <NumberField
+                label="Setup fee"
+                value={setupFee}
+                onChange={setSetupFee}
+                step={500}
+                prefix="₹"
+              />
+              <NumberField
+                label="AMC amount"
+                value={amcAmount}
+                onChange={setAmcAmount}
+                step={500}
+                prefix="₹"
+              />
+            </div>
+            <div className="mt-3">
+              <DateField
+                label="AMC renewal date"
+                value={renewal}
+                onChange={setRenewal}
+                hint="When the next AMC payment falls due."
+              />
+            </div>
+          </section>
+
+          {/* Entitlements */}
+          <section>
+            <SectionLabel icon={SlidersHorizontal} className="mb-3">
+              Entitlements
+            </SectionLabel>
+            <NumberField
+              label="Venue quota"
+              value={quota}
+              onChange={setQuota}
+              min={1}
+              hint="Maximum venues this owner may create."
+            />
+            <p className="mb-2 mt-4 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Gamepad2 className="h-3.5 w-3.5" />
+              Allowed games
+            </p>
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              Pick the games this owner may use. Leave all unchecked to grant the full catalogue.
+            </p>
+            <GamePicker games={games} selected={selectedGameIds} onToggle={toggleGame} />
+          </section>
+
+          {/* Feature flags */}
+          <section>
+            <SectionLabel icon={Award} className="mb-3">
+              Features
+            </SectionLabel>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ALL_FLAGS.map((flag) => (
+                <FeatureToggle
+                  key={flag}
+                  flag={flag}
+                  enabled={flags.includes(flag)}
+                  onToggle={(next) => toggleFlag(flag, next)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Branding */}
+          <section>
+            <SectionLabel icon={Palette} className="mb-3">
+              Branding
+            </SectionLabel>
+            <Field
+              label="Logo URL"
+              value={logoUrl}
+              onChange={setLogoUrl}
+              placeholder="https://…/logo.png"
+            />
+            <div className="grid grid-cols-3 gap-3">
+              <ColorField label="Primary" value={primaryColor} onChange={setPrimaryColor} />
+              <ColorField label="Secondary" value={secondaryColor} onChange={setSecondaryColor} />
+              <ColorField label="Accent" value={accentColor} onChange={setAccentColor} />
+            </div>
+          </section>
+        </div>
+
+        <Msg text={msg} />
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" disabled={busy}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button onClick={create} disabled={busy}>
+            <Plus className="h-4 w-4" />
+            {busy ? 'Onboarding…' : 'Onboard owner'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+ * Page
+ * ------------------------------------------------------------------------- */
+
+/** Super Admin: owner onboarding & oversight (PRD §3.2, §3.3). */
+export function OwnersPage() {
+  const games = useLoad(() => api.listGames());
+  const owners = useLoad(() => api.listOwners());
+
+  // Onboarding dialog (FE-1)
+  const [onboardOpen, setOnboardOpen] = useState(false);
+
+  // Directory / AMC
+  const [amcMsg, setAmcMsg] = useState<string | null>(null);
+  const [amcBusy, setAmcBusy] = useState(false);
+  const [editing, setEditing] = useState<OwnerRow | null>(null);
+
+  const gameList: GameOption[] = games.data ?? [];
+  const list: OwnerRow[] = owners.data ?? [];
 
   const runAmc = async () => {
     setAmcMsg(null);
@@ -581,7 +767,16 @@ export function OwnersPage() {
 
   return (
     <div className="container">
-      <PageHeader title="Owners" subtitle="Onboard and oversee your turf operators" />
+      <PageHeader
+        title="Owners"
+        subtitle="Onboard and oversee your turf operators"
+        action={
+          <Button onClick={() => setOnboardOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Onboard owner
+          </Button>
+        }
+      />
 
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Owners" value={list.length} icon={Building2} accent="primary" />
@@ -595,203 +790,110 @@ export function OwnersPage() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        {/* Onboarding form (FE-1) */}
-        <Card
-          title="Onboard owner"
-          subtitle="Set up an operator and their entitlements"
-          topAccent="primary"
-          className="lg:col-span-2"
-        >
-          {/* Identity */}
-          <SectionLabel icon={UserPlus} className="mb-4">
-            Operator
-          </SectionLabel>
-          <Field label="Business name" value={name} onChange={setName} />
-          <Field label="Contact email" value={email} onChange={setEmail} type="email" />
-          <Field label="Admin password" value={password} onChange={setPassword} />
-
-          {/* Commercial terms */}
-          <SectionLabel icon={Receipt} className="mb-3 mt-6">
-            AMC &amp; commercial terms
-          </SectionLabel>
-          <div className="grid grid-cols-2 gap-3">
-            <NumberField label="Setup fee" value={setupFee} onChange={setSetupFee} step={500} prefix="₹" />
-            <NumberField
-              label="AMC amount"
-              value={amcAmount}
-              onChange={setAmcAmount}
-              step={500}
-              prefix="₹"
-            />
-          </div>
-          <div className="mt-3">
-            <DateField
-              label="AMC renewal date"
-              value={renewal}
-              onChange={setRenewal}
-              hint="When the next AMC payment falls due."
-            />
-          </div>
-
-          {/* Entitlements */}
-          <SectionLabel icon={SlidersHorizontal} className="mb-3 mt-6">
-            Entitlements
-          </SectionLabel>
-          <NumberField
-            label="Venue quota"
-            value={quota}
-            onChange={setQuota}
-            min={1}
-            hint="Maximum venues this owner may create."
-          />
-
-          <p className="mb-2 mt-4 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <Gamepad2 className="h-3.5 w-3.5" />
-            Allowed games
-          </p>
-          <p className="mb-2 text-[11px] text-muted-foreground">
-            Pick the games this owner may use. Leave all unchecked to grant the full catalogue.
-          </p>
-          <GamePicker games={gameList} selected={selectedGameIds} onToggle={toggleGame} />
-
-          {/* Feature flags */}
-          <SectionLabel icon={Award} className="mb-3 mt-6">
-            Features
-          </SectionLabel>
-          <div className="grid gap-2">
-            {ALL_FLAGS.map((flag) => (
-              <FeatureToggle
-                key={flag}
-                flag={flag}
-                enabled={flags.includes(flag)}
-                onToggle={(next) => toggleFlag(flag, next)}
-              />
-            ))}
-          </div>
-
-          {/* Branding */}
-          <SectionLabel icon={Palette} className="mb-3 mt-6">
-            Branding
-          </SectionLabel>
-          <Field
-            label="Logo URL"
-            value={logoUrl}
-            onChange={setLogoUrl}
-            placeholder="https://…/logo.png"
-          />
-          <div className="grid grid-cols-3 gap-3">
-            <ColorField label="Primary" value={primaryColor} onChange={setPrimaryColor} />
-            <ColorField label="Secondary" value={secondaryColor} onChange={setSecondaryColor} />
-            <ColorField label="Accent" value={accentColor} onChange={setAccentColor} />
-          </div>
-
-          <Button onClick={create} className="mt-6 w-full">
-            <Plus className="h-4 w-4" />
-            Onboard owner
+      {/* Owner directory */}
+      <Card
+        title="Owner directory"
+        subtitle="Status, capacity and AMC at a glance"
+        topAccent="blue"
+        action={
+          <Button variant="outline" onClick={runAmc} disabled={amcBusy}>
+            <RefreshCw className={`h-4 w-4 ${amcBusy ? 'animate-spin' : ''}`} />
+            {amcBusy ? 'Running…' : 'Run AMC check'}
           </Button>
-          <Msg text={msg} />
-        </Card>
-
-        {/* Owner directory */}
-        <Card
-          title="Owner directory"
-          subtitle="Status, capacity and AMC at a glance"
-          topAccent="blue"
-          className="lg:col-span-3"
-          action={
-            <Button variant="outline" onClick={runAmc} disabled={amcBusy}>
-              <RefreshCw className={`h-4 w-4 ${amcBusy ? 'animate-spin' : ''}`} />
-              {amcBusy ? 'Running…' : 'Run AMC check'}
-            </Button>
-          }
-        >
-          <Msg text={amcMsg} />
-          {owners.error ? (
-            <EmptyState
-              title="Couldn’t load owners"
-              hint="Something went wrong fetching the directory. Try the AMC check or refresh the page."
-            />
-          ) : list.length === 0 ? (
-            <EmptyState
-              title="No owners yet"
-              hint="Onboard your first owner using the form to start managing venues."
-            />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Owner</TableHead>
-                  <TableHead className="text-right">Venues</TableHead>
-                  <TableHead>AMC</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Edit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {list.map((o) => (
-                  <TableRow key={o.id}>
-                    {/* Owner identity */}
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <OwnerLogo name={o.name} logoUrl={o.logoUrl} className="h-9 w-9" />
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-foreground">{o.name}</p>
-                          {o.contactEmail && (
-                            <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                              <Mail className="h-3 w-3 shrink-0" />
-                              {o.contactEmail}
-                            </p>
-                          )}
-                        </div>
+        }
+      >
+        <Msg text={amcMsg} />
+        {owners.error ? (
+          <EmptyState
+            title="Couldn’t load owners"
+            hint="Something went wrong fetching the directory. Try the AMC check or refresh the page."
+          />
+        ) : list.length === 0 ? (
+          <EmptyState
+            title="No owners yet"
+            hint="Use “Onboard owner” to set up your first operator and start managing venues."
+          />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Owner</TableHead>
+                <TableHead className="text-right">Venues</TableHead>
+                <TableHead>AMC</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Edit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map((o) => (
+                <TableRow key={o.id}>
+                  {/* Owner identity */}
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <OwnerLogo name={o.name} logoUrl={o.logoUrl} className="h-9 w-9" />
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-foreground">{o.name}</p>
+                        {o.contactEmail && (
+                          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            {o.contactEmail}
+                          </p>
+                        )}
                       </div>
-                    </TableCell>
+                    </div>
+                  </TableCell>
 
-                    {/* Capacity */}
-                    <TableCell className="text-right">
-                      <span className="font-display font-semibold tabular-nums text-foreground">
-                        {o.venueCount}
-                        <span className="font-normal text-muted-foreground"> / {o.venueQuota}</span>
-                      </span>
-                    </TableCell>
+                  {/* Capacity */}
+                  <TableCell className="text-right">
+                    <span className="font-display font-semibold tabular-nums text-foreground">
+                      {o.venueCount}
+                      <span className="font-normal text-muted-foreground"> / {o.venueQuota}</span>
+                    </span>
+                  </TableCell>
 
-                    {/* AMC */}
-                    <TableCell>
-                      {o.amcRenewalDate ? (
-                        o.amcOverdue ? (
-                          <Badge variant="destructive">Overdue {fmtDate(o.amcRenewalDate)}</Badge>
-                        ) : (
-                          <Badge variant="outline">Due {fmtDate(o.amcRenewalDate)}</Badge>
-                        )
+                  {/* AMC */}
+                  <TableCell>
+                    {o.amcRenewalDate ? (
+                      o.amcOverdue ? (
+                        <Badge variant="destructive">Overdue {fmtDate(o.amcRenewalDate)}</Badge>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Not set</span>
-                      )}
-                    </TableCell>
+                        <Badge variant="outline">Due {fmtDate(o.amcRenewalDate)}</Badge>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not set</span>
+                    )}
+                  </TableCell>
 
-                    {/* Status */}
-                    <TableCell>
-                      <StatusPill status={o.status} />
-                    </TableCell>
+                  {/* Status */}
+                  <TableCell>
+                    <StatusPill status={o.status} />
+                  </TableCell>
 
-                    {/* Edit (FE-2) */}
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditing(o)}
-                        aria-label={`Edit ${o.name}`}
-                      >
-                        <SlidersHorizontal className="h-4 w-4" />
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Card>
-      </div>
+                  {/* Edit (FE-2) */}
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditing(o)}
+                      aria-label={`Edit ${o.name}`}
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      <OnboardOwnerDialog
+        open={onboardOpen}
+        games={gameList}
+        onClose={() => setOnboardOpen(false)}
+        onCreated={() => owners.reload()}
+      />
 
       {editing && (
         <EditOwnerDialog

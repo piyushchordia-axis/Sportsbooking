@@ -144,23 +144,13 @@ function NumberField({
 export function TournamentsAdminPage() {
   const venues = useLoad(() => api.listVenues());
   const [venueId, setVenueId] = useState('');
-  const [name, setName] = useState('');
-  const [format, setFormat] = useState<TournamentFormat>(TournamentFormat.KNOCKOUT);
-  const [regType, setRegType] = useState<RegistrationType>(RegistrationType.TEAM);
-  const [feeBasis, setFeeBasis] = useState<FeeBasis>(FeeBasis.PER_TEAM);
-  const [fee, setFee] = useState('1500');
-  const [capacity, setCapacity] = useState('16');
-  const [dates, setDates] = useState<DateRangeValue>({});
-  const [regCloses, setRegCloses] = useState(false);
-  const [regCloseDate, setRegCloseDate] = useState<DateRangeValue>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+
+  // Create-tournament modal (form state lives inside the dialog).
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     if (!venueId && venues.data?.[0]) setVenueId(venues.data[0].id);
   }, [venues.data, venueId]);
-
-  const venue = (venues.data ?? []).find((v: any) => v.id === venueId);
 
   const tournaments = useLoad<TournamentRow[]>(
     () => (venueId ? api.listOwnerTournaments(venueId) : Promise.resolve([])),
@@ -188,49 +178,6 @@ export function TournamentsAdminPage() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelMsg, setCancelMsg] = useState<string | null>(null);
 
-  const dateError =
-    dates.from && dates.to && dates.to < dates.from
-      ? 'End date cannot fall before the start date.'
-      : null;
-  const canCreate =
-    !!venueId && !!name.trim() && !!dates.from && !!dates.to && !dateError && !submitting;
-
-  const create = async () => {
-    setMsg(null);
-    if (!dates.from || !dates.to) {
-      setMsg('Pick the tournament start and end dates.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await api.createTournament({
-        venueId,
-        name: name.trim(),
-        gameId: venue?.games?.[0]?.gameId,
-        format,
-        regType,
-        feeBasis,
-        fee: Number(fee),
-        capacity: Number(capacity),
-        startDate: toISODate(dates.from),
-        endDate: toISODate(dates.to),
-        ...(regCloses && regCloseDate.from
-          ? { regCloseAt: toISODate(regCloseDate.from) }
-          : {}),
-      });
-      setMsg('Tournament created.');
-      setName('');
-      setDates({});
-      setRegCloses(false);
-      setRegCloseDate({});
-      tournaments.reload();
-    } catch (e) {
-      setMsg((e as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const confirmCancel = async () => {
     if (!pending) return;
     setCancelling(true);
@@ -256,6 +203,11 @@ export function TournamentsAdminPage() {
       <PageHeader
         title="Tournaments"
         subtitle="Set up events, take registrations, and manage entries"
+        action={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> New tournament
+          </Button>
+        }
       />
 
       {/* Overview strip — live roll-up across the selected venue. */}
@@ -278,158 +230,6 @@ export function TournamentsAdminPage() {
         />
       </div>
 
-      <Card title="Create tournament" topAccent="primary">
-        {/* Section 1: event details */}
-        <SectionLabel icon={Trophy} className="mb-3">
-          Event details
-        </SectionLabel>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="[&_label]:!mb-0">
-            <Select
-              label="Venue"
-              value={venueId}
-              onChange={setVenueId}
-              options={(venues.data ?? []).map((v: any) => ({ value: v.id, label: v.name }))}
-            />
-          </div>
-          <label className="block">
-            <span className="block text-xs font-medium text-muted-foreground mb-1.5">Name</span>
-            <input
-              value={name}
-              placeholder="e.g. Summer Smash"
-              onChange={(e) => setName(e.target.value)}
-              className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-            />
-          </label>
-        </div>
-
-        {/* Section 2: schedule — real range picker, never two date fields */}
-        <div className="mt-5 rounded-2xl border border-border bg-elevated/60 p-4">
-          <SectionLabel icon={CalendarDays} className="mb-3">
-            Schedule
-          </SectionLabel>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="block text-xs font-medium text-muted-foreground mb-1.5">
-                Tournament dates
-              </span>
-              <DateRangePicker
-                value={dates}
-                onChange={setDates}
-                placeholder="Pick start and end dates"
-              />
-              {dateError ? (
-                <span className="mt-1 block text-xs text-destructive">{dateError}</span>
-              ) : (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Choose the first and last day of play.
-                </span>
-              )}
-            </label>
-
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="block text-xs font-medium text-muted-foreground">
-                  Close registration early
-                </span>
-                <Switch
-                  checked={regCloses}
-                  onCheckedChange={setRegCloses}
-                  aria-label="Close registration before the tournament starts"
-                />
-              </div>
-              {regCloses ? (
-                <div className="mt-1.5">
-                  <DateRangePicker
-                    value={regCloseDate}
-                    onChange={(v) => setRegCloseDate({ from: v.from })}
-                    numberOfMonths={1}
-                    placeholder="Pick a cut-off date"
-                  />
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    No new entries after this date.
-                  </span>
-                </div>
-              ) : (
-                <span className="mt-1.5 block text-xs text-muted-foreground">
-                  Entries stay open until the tournament begins.
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 3: format & pricing — Selects for enums, steppers for counts */}
-        <div className="mt-5">
-          <SectionLabel icon={IndianRupee} className="mb-3">
-            Format & pricing
-          </SectionLabel>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="[&_label]:!mb-0">
-              <Select
-                label="Format"
-                value={format}
-                onChange={(x) => setFormat(x as TournamentFormat)}
-                options={Object.values(TournamentFormat).map((f) => ({
-                  value: f,
-                  label: FORMAT_LABEL[f],
-                }))}
-              />
-            </div>
-            <div className="[&_label]:!mb-0">
-              <Select
-                label="Registration"
-                value={regType}
-                onChange={(x) => setRegType(x as RegistrationType)}
-                options={Object.values(RegistrationType).map((r) => ({
-                  value: r,
-                  label: REG_TYPE_LABEL[r],
-                }))}
-              />
-            </div>
-            <div className="[&_label]:!mb-0">
-              <Select
-                label="Fee basis"
-                value={feeBasis}
-                onChange={(x) => setFeeBasis(x as FeeBasis)}
-                options={Object.values(FeeBasis).map((f) => ({
-                  value: f,
-                  label: FEE_BASIS_LABEL[f],
-                }))}
-              />
-            </div>
-            <NumberField
-              label="Entry fee"
-              value={fee}
-              onChange={setFee}
-              min={0}
-              step={50}
-              prefix={<IndianRupee className="h-4 w-4" />}
-              hint={feeBasis === FeeBasis.PER_TEAM ? 'Charged per team' : 'Charged per player'}
-            />
-            <NumberField
-              label="Capacity"
-              value={capacity}
-              onChange={setCapacity}
-              min={2}
-              hint={regType === RegistrationType.TEAM ? 'Maximum teams' : 'Maximum players'}
-            />
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-end gap-3 border-t border-border pt-4">
-          <Msg text={msg} />
-          <Button onClick={create} disabled={!canCreate}>
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-            Create tournament
-          </Button>
-        </div>
-      </Card>
-
       <Card title="Participants" subtitle="View entries, cancel and refund registrations" topAccent="accent">
         <div className="mb-4">
           <SectionLabel icon={Users}>Manage entries</SectionLabel>
@@ -451,7 +251,7 @@ export function TournamentsAdminPage() {
         ) : !(tournaments.data ?? []).length ? (
           <EmptyState
             title="No tournaments yet"
-            hint="Create a tournament above to start taking registrations."
+            hint="Use “New tournament” to set up an event and start taking registrations."
           />
         ) : (
           <div className="space-y-5">
@@ -618,6 +418,271 @@ export function TournamentsAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateTournamentDialog
+        open={createOpen}
+        venues={venues.data ?? []}
+        defaultVenueId={venueId}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false);
+          tournaments.reload();
+        }}
+      />
     </div>
+  );
+}
+
+/* ── Create tournament dialog ───────────────────────────────────────────── */
+
+/** The create-tournament form, hosted in a modal opened from the page header. */
+function CreateTournamentDialog({
+  open,
+  venues,
+  defaultVenueId,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  venues: any[];
+  defaultVenueId: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [venueId, setVenueId] = useState('');
+  const [name, setName] = useState('');
+  const [format, setFormat] = useState<TournamentFormat>(TournamentFormat.KNOCKOUT);
+  const [regType, setRegType] = useState<RegistrationType>(RegistrationType.TEAM);
+  const [feeBasis, setFeeBasis] = useState<FeeBasis>(FeeBasis.PER_TEAM);
+  const [fee, setFee] = useState('1500');
+  const [capacity, setCapacity] = useState('16');
+  const [dates, setDates] = useState<DateRangeValue>({});
+  const [regCloses, setRegCloses] = useState(false);
+  const [regCloseDate, setRegCloseDate] = useState<DateRangeValue>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Reset to a fresh draft each time the modal opens.
+  useEffect(() => {
+    if (open) {
+      setVenueId(defaultVenueId || venues[0]?.id || '');
+      setName('');
+      setFormat(TournamentFormat.KNOCKOUT);
+      setRegType(RegistrationType.TEAM);
+      setFeeBasis(FeeBasis.PER_TEAM);
+      setFee('1500');
+      setCapacity('16');
+      setDates({});
+      setRegCloses(false);
+      setRegCloseDate({});
+      setMsg(null);
+    }
+  }, [open, defaultVenueId, venues]);
+
+  const venue = venues.find((v: any) => v.id === venueId);
+
+  const dateError =
+    dates.from && dates.to && dates.to < dates.from
+      ? 'End date cannot fall before the start date.'
+      : null;
+  const canCreate =
+    !!venueId && !!name.trim() && !!dates.from && !!dates.to && !dateError && !submitting;
+
+  const create = async () => {
+    setMsg(null);
+    if (!dates.from || !dates.to) {
+      setMsg('Pick the tournament start and end dates.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.createTournament({
+        venueId,
+        name: name.trim(),
+        gameId: venue?.games?.[0]?.gameId,
+        format,
+        regType,
+        feeBasis,
+        fee: Number(fee),
+        capacity: Number(capacity),
+        startDate: toISODate(dates.from),
+        endDate: toISODate(dates.to),
+        ...(regCloses && regCloseDate.from
+          ? { regCloseAt: toISODate(regCloseDate.from) }
+          : {}),
+      });
+      onCreated();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && !submitting && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Create tournament</DialogTitle>
+          <DialogDescription>
+            Set up a new event at one of your venues and open it for registrations.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Section 1: event details */}
+        <SectionLabel icon={Trophy} className="mb-3">
+          Event details
+        </SectionLabel>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="[&_label]:!mb-0">
+            <Select
+              label="Venue"
+              value={venueId}
+              onChange={setVenueId}
+              options={venues.map((v: any) => ({ value: v.id, label: v.name }))}
+            />
+          </div>
+          <label className="block">
+            <span className="block text-xs font-medium text-muted-foreground mb-1.5">Name</span>
+            <input
+              value={name}
+              placeholder="e.g. Summer Smash"
+              onChange={(e) => setName(e.target.value)}
+              className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background px-3.5 py-1 text-sm text-foreground transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+            />
+          </label>
+        </div>
+
+        {/* Section 2: schedule — real range picker, never two date fields */}
+        <div className="mt-5 rounded-2xl border border-border bg-elevated/60 p-4">
+          <SectionLabel icon={CalendarDays} className="mb-3">
+            Schedule
+          </SectionLabel>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="block text-xs font-medium text-muted-foreground mb-1.5">
+                Tournament dates
+              </span>
+              <DateRangePicker
+                value={dates}
+                onChange={setDates}
+                placeholder="Pick start and end dates"
+              />
+              {dateError ? (
+                <span className="mt-1 block text-xs text-destructive">{dateError}</span>
+              ) : (
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Choose the first and last day of play.
+                </span>
+              )}
+            </label>
+
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="block text-xs font-medium text-muted-foreground">
+                  Close registration early
+                </span>
+                <Switch
+                  checked={regCloses}
+                  onCheckedChange={setRegCloses}
+                  aria-label="Close registration before the tournament starts"
+                />
+              </div>
+              {regCloses ? (
+                <div className="mt-1.5">
+                  <DateRangePicker
+                    value={regCloseDate}
+                    onChange={(v) => setRegCloseDate({ from: v.from })}
+                    numberOfMonths={1}
+                    placeholder="Pick a cut-off date"
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    No new entries after this date.
+                  </span>
+                </div>
+              ) : (
+                <span className="mt-1.5 block text-xs text-muted-foreground">
+                  Entries stay open until the tournament begins.
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: format & pricing — Selects for enums, steppers for counts */}
+        <div className="mt-5">
+          <SectionLabel icon={IndianRupee} className="mb-3">
+            Format & pricing
+          </SectionLabel>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="[&_label]:!mb-0">
+              <Select
+                label="Format"
+                value={format}
+                onChange={(x) => setFormat(x as TournamentFormat)}
+                options={Object.values(TournamentFormat).map((f) => ({
+                  value: f,
+                  label: FORMAT_LABEL[f],
+                }))}
+              />
+            </div>
+            <div className="[&_label]:!mb-0">
+              <Select
+                label="Registration"
+                value={regType}
+                onChange={(x) => setRegType(x as RegistrationType)}
+                options={Object.values(RegistrationType).map((r) => ({
+                  value: r,
+                  label: REG_TYPE_LABEL[r],
+                }))}
+              />
+            </div>
+            <div className="[&_label]:!mb-0">
+              <Select
+                label="Fee basis"
+                value={feeBasis}
+                onChange={(x) => setFeeBasis(x as FeeBasis)}
+                options={Object.values(FeeBasis).map((f) => ({
+                  value: f,
+                  label: FEE_BASIS_LABEL[f],
+                }))}
+              />
+            </div>
+            <NumberField
+              label="Entry fee"
+              value={fee}
+              onChange={setFee}
+              min={0}
+              step={50}
+              prefix={<IndianRupee className="h-4 w-4" />}
+              hint={feeBasis === FeeBasis.PER_TEAM ? 'Charged per team' : 'Charged per player'}
+            />
+            <NumberField
+              label="Capacity"
+              value={capacity}
+              onChange={setCapacity}
+              min={2}
+              hint={regType === RegistrationType.TEAM ? 'Maximum teams' : 'Maximum players'}
+            />
+          </div>
+        </div>
+
+        <Msg text={msg} />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={create} disabled={!canCreate}>
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            Create tournament
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

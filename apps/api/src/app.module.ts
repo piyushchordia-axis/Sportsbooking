@@ -26,7 +26,9 @@ import { LedgerModule } from './modules/ledger/ledger.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { NotificationFeedModule } from './modules/notification-feed/notification-feed.module';
 import { RemindersModule } from './modules/notifications/reminders.module';
+import { SearchModule } from './modules/search/search.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { StaffModule } from './modules/staff/staff.module';
@@ -59,6 +61,8 @@ import { VenuesModule } from './modules/venues/venues.module';
     TournamentsModule,
     ReportsModule,
     AmcModule,
+    NotificationFeedModule,
+    SearchModule,
   ],
   providers: [
     // JWT auth applied globally; routes opt out with @Public().

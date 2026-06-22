@@ -93,7 +93,7 @@ function Kpi({
 }) {
   const color = ACCENT[accent];
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-primary/12 dark:border-primary/16 bg-card p-5 shadow-card">
       <span
         className="absolute inset-x-0 top-0 h-1"
         style={{ backgroundColor: color }}

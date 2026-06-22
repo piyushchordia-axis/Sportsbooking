@@ -51,7 +51,7 @@ export function Card({
   return (
     <section
       className={cn(
-        'relative bg-card border border-border rounded-2xl p-5 mb-4 overflow-hidden',
+        'relative bg-card border border-primary/12 dark:border-primary/16 rounded-2xl p-5 mb-4 overflow-hidden shadow-card',
         className,
       )}
     >
@@ -97,7 +97,7 @@ export function InfoCard({
   return (
     <section
       className={cn(
-        'relative bg-card border border-border rounded-2xl overflow-hidden',
+        'relative bg-card border border-primary/12 dark:border-primary/16 rounded-2xl overflow-hidden shadow-card',
         className,
       )}
     >
@@ -375,7 +375,7 @@ export function Stat({
   icon?: LucideIcon;
 }) {
   return (
-    <div className="rounded-2xl bg-card border border-border p-5">
+    <div className="rounded-2xl bg-card border border-primary/12 dark:border-primary/16 p-5 shadow-card">
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           {label}

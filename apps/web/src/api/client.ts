@@ -308,6 +308,72 @@ export interface Addon {
   active: boolean;
 }
 
+/** In-app notification kinds, mirroring the API NotificationType enum. */
+export type NotificationFeedType =
+  | 'booking_created'
+  | 'booking_cancelled'
+  | 'tournament_registration'
+  | 'open_match_join'
+  | 'amc_reminder'
+  | 'general';
+
+/** A single notification in the owner/staff bell feed (GET /notifications). */
+export interface NotificationItem {
+  id: string;
+  type: NotificationFeedType;
+  title: string;
+  body: string | null;
+  /** In-app route to open when the notification is clicked; null if none. */
+  link: string | null;
+  /** ISO timestamp the notification was read, or null while unread. */
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** The bell feed response: recent items plus the unread count. */
+export interface NotificationFeed {
+  items: NotificationItem[];
+  unread: number;
+}
+
+/** A venue hit in the global search (GET /search). */
+export interface SearchVenueResult {
+  id: string;
+  name: string;
+  city: string | null;
+}
+
+/** A player hit in the global search (GET /search). */
+export interface SearchPlayerResult {
+  customerId: string;
+  name: string | null;
+  mobile: string | null;
+}
+
+/** A tournament hit in the global search (GET /search). */
+export interface SearchTournamentResult {
+  id: string;
+  name: string;
+}
+
+/** A booking hit in the global search (GET /search). */
+export interface SearchBookingResult {
+  id: string;
+  customerName: string | null;
+  venueName: string | null;
+  /** ISO start time of the booking's earliest slot, or null. */
+  startsAt: string | null;
+  status: string;
+}
+
+/** Grouped results from the owner/staff global search (GET /search). */
+export interface SearchResults {
+  venues: SearchVenueResult[];
+  players: SearchPlayerResult[];
+  tournaments: SearchTournamentResult[];
+  bookings: SearchBookingResult[];
+}
+
 /** Block a court for maintenance / private use (POST /venues/block). */
 export interface BlockSlotsInput {
   unitId: string;
@@ -633,6 +699,20 @@ export const api = {
   ) => post<{ rescheduled: true }>(`/bookings/${id}/reschedule`, { slots }),
   updateBookingCustomer: (id: string, body: { name: string; mobile: string }) =>
     post<{ name: string; mobile: string }>(`/bookings/${id}/customer`, body),
+
+  // ---- owner: notification feed (bell) ----
+  /** Owner/staff in-app bell feed (recent items + unread count). */
+  listNotifications: () => get<NotificationFeed>('/notifications'),
+  /** Mark a single notification read. */
+  markNotificationRead: (id: string) =>
+    post<void>(`/notifications/${id}/read`),
+  /** Mark every unread notification read. */
+  markAllNotificationsRead: () => post<void>('/notifications/read-all'),
+
+  // ---- owner: global search ----
+  /** Owner/staff quick-search across venues, players, tournaments, bookings. */
+  search: (q: string) =>
+    get<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
 
   // ---- open matches / find players (customer) ----
   listOpenMatches: (venueId?: string) =>

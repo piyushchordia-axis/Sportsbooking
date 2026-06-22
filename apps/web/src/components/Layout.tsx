@@ -1,9 +1,10 @@
 import { UserRole } from '@sportsbooking/shared';
-import { ReactNode, useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Bell,
+  BellOff,
   Building2,
   CalendarPlus,
   ChevronDown,
@@ -12,7 +13,7 @@ import {
   Gamepad2,
   KeyRound,
   LayoutDashboard,
-  LifeBuoy,
+  Loader2,
   Lock,
   LogOut,
   type LucideIcon,
@@ -20,8 +21,6 @@ import {
   Palette,
   PanelLeft,
   Search,
-  Send,
-  Settings,
   Sun,
   Tag,
   Ticket,
@@ -29,7 +28,7 @@ import {
   UserCog,
   Users,
 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, type NotificationItem, type SearchResults } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { initials } from '../lib/imagery';
@@ -95,12 +94,6 @@ const NAV: Partial<Record<UserRole, NavNode[]>> = {
   ],
 };
 
-const SYSTEM: { label: string; icon: LucideIcon }[] = [
-  { label: 'Support', icon: LifeBuoy },
-  { label: 'Feedback', icon: Send },
-  { label: 'Settings', icon: Settings },
-];
-
 const ROLE_LABEL: Record<UserRole, string> = {
   [UserRole.CUSTOMER]: 'Player',
   [UserRole.OWNER]: 'Owner',
@@ -114,6 +107,23 @@ const COLLAPSE_KEY = 'reflex-sidebar-collapsed';
 // for every child route (e.g. Dashboard showing active on /owner/players).
 const isActive = (path: string, to: string) =>
   path === to || (to.split('/').filter(Boolean).length >= 2 && path.startsWith(to + '/'));
+
+// Compact "time-ago" label for the notification feed (e.g. "just now", "5m",
+// "3h", "2d"); falls back to a short date once past a week.
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diff = Date.now() - then;
+  const sec = Math.round(diff / 1000);
+  if (sec < 45) return 'just now';
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -131,9 +141,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const [userMenu, setUserMenu] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [toast, setToast] = useState<string | null>(null);
   const [logoBroken, setLogoBroken] = useState(false);
-  const [search, setSearch] = useState('');
 
   useEffect(() => setLogoBroken(false), [branding.logoUrl]);
   useEffect(() => {
@@ -156,11 +164,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const nav = NAV[user.role] ?? [];
   const groupHasActive = (g: NavGroup) => g.children.some((c) => isActive(loc.pathname, c.to));
   const groupOpen = (g: NavGroup) => openGroups[g.label] ?? groupHasActive(g);
-
-  const flash = (label: string) => {
-    setToast(`${label} is coming soon.`);
-    window.setTimeout(() => setToast(null), 2600);
-  };
 
   const leafClass = (active: boolean) =>
     cn(
@@ -310,22 +313,6 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="relative border-t border-border p-3">
           {userMenu && (
             <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl border border-border bg-popover p-1 shadow-2xl">
-              {SYSTEM.map((s) => {
-                const Icon = s.icon;
-                return (
-                  <button
-                    key={s.label}
-                    onClick={() => {
-                      setUserMenu(false);
-                      flash(s.label);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
-                  >
-                    <Icon className="h-4 w-4" /> {s.label}
-                  </button>
-                );
-              })}
-              <div className="my-1 h-px bg-border" />
               <button
                 onClick={() => {
                   setUserMenu(false);
@@ -379,36 +366,10 @@ export function Layout({ children }: { children: ReactNode }) {
             <PanelLeft className="h-4 w-4" />
           </button>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              flash('Universal search');
-            }}
-            className="relative hidden sm:block flex-1 max-w-2xl"
-          >
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search venues, bookings, players…"
-              aria-label="Search the console (coming soon)"
-              className="h-10 w-full rounded-xl border border-border bg-input-background pl-10 pr-20 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-            />
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Soon
-            </span>
-          </form>
+          <GlobalSearch />
 
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={() => flash('Notifications')}
-              className="relative grid h-9 w-9 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground hover:border-primary/40"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
-            </button>
+            <NotificationBell />
             <button
               onClick={toggleMode}
               className="grid h-9 w-9 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground hover:border-primary/40"
@@ -426,15 +387,395 @@ export function Layout({ children }: { children: ReactNode }) {
         <main className="flex-1">{children}</main>
       </div>
 
-      {/* Coming-soon toast */}
-      {toast && (
-        <div className="fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-xl border border-border bg-popover px-4 py-2.5 text-sm font-medium text-popover-foreground shadow-2xl">
-          {toast}
-        </div>
-      )}
-
       <ChangePasswordDialog open={pwOpen} onOpenChange={setPwOpen} />
     </div>
+  );
+}
+
+/**
+ * The topbar "bell": owner/staff in-app notification center. Fetches the feed on
+ * mount and again each time the panel opens, shows an unread-count badge, and
+ * lets the user mark items read individually or all at once. Clicking an item
+ * marks it read and follows its link when present.
+ */
+function NotificationBell() {
+  const navigate = useNavigate();
+  const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const feed = await api.listNotifications();
+      setItems(feed.items);
+      setUnread(feed.unread);
+    } catch {
+      // Leave the last-known feed in place on a transient failure.
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Initial unread badge on mount, then refresh whenever the panel opens.
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  // Dismiss the panel on an outside click or Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const markAll = async () => {
+    try {
+      await api.markAllNotificationsRead();
+    } catch {
+      /* ignore — refetch reflects the real state */
+    }
+    await load();
+  };
+
+  const openItem = async (n: NotificationItem) => {
+    if (!n.readAt) {
+      // Optimistically clear the unread treatment, then persist.
+      setItems((prev) =>
+        prev.map((it) => (it.id === n.id ? { ...it, readAt: new Date().toISOString() } : it)),
+      );
+      setUnread((u) => Math.max(0, u - 1));
+      try {
+        await api.markNotificationRead(n.id);
+      } catch {
+        /* ignore — the next open refetches the truth */
+      }
+    }
+    setOpen(false);
+    if (n.link) navigate(n.link);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative grid h-9 w-9 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground hover:border-primary/40"
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <Bell className="h-4 w-4" />
+        {unread > 0 && (
+          <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground ring-2 ring-background">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-popover-foreground">Notifications</span>
+              {unread > 0 && (
+                <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold leading-none text-primary">
+                  {unread} new
+                </span>
+              )}
+            </div>
+            <button
+              onClick={markAll}
+              disabled={unread === 0}
+              className="text-xs font-semibold text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
+            >
+              Mark all read
+            </button>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto hide-scrollbar">
+            {loading && items.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </div>
+            ) : items.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+                <span className="grid h-10 w-10 place-items-center rounded-full bg-muted text-muted-foreground">
+                  <BellOff className="h-5 w-5" />
+                </span>
+                <p className="text-sm font-medium text-foreground">You&apos;re all caught up</p>
+                <p className="text-xs text-muted-foreground">
+                  New bookings and activity will show up here.
+                </p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {items.map((n) => {
+                  const isUnread = !n.readAt;
+                  return (
+                    <li key={n.id}>
+                      <button
+                        onClick={() => openItem(n)}
+                        className={cn(
+                          'relative flex w-full flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-muted',
+                          isUnread && 'bg-primary/[0.06]',
+                        )}
+                      >
+                        {isUnread && (
+                          <span className="absolute left-1.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary" />
+                        )}
+                        <div className="flex items-baseline justify-between gap-2 pl-2">
+                          <span
+                            className={cn(
+                              'truncate text-sm',
+                              isUnread
+                                ? 'font-semibold text-foreground'
+                                : 'font-medium text-muted-foreground',
+                            )}
+                          >
+                            {n.title}
+                          </span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                            {relativeTime(n.createdAt)}
+                          </span>
+                        </div>
+                        {n.body && (
+                          <p className="line-clamp-2 pl-2 text-xs text-muted-foreground">{n.body}</p>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One clickable group in the search dropdown, keyed by category. */
+interface SearchGroupSpec {
+  key: keyof SearchResults;
+  label: string;
+  icon: LucideIcon;
+}
+const SEARCH_GROUPS: SearchGroupSpec[] = [
+  { key: 'venues', label: 'Grounds', icon: Building2 },
+  { key: 'players', label: 'Players', icon: Users },
+  { key: 'tournaments', label: 'Tournaments', icon: Trophy },
+  { key: 'bookings', label: 'Bookings', icon: ClipboardList },
+];
+
+const totalHits = (r: SearchResults) =>
+  r.venues.length + r.players.length + r.tournaments.length + r.bookings.length;
+
+/**
+ * Owner/staff global quick-search in the topbar. Debounces input (~300ms), only
+ * queries at two or more characters, and renders grouped, clickable results that
+ * navigate into the relevant console section and close the dropdown.
+ */
+function GlobalSearch() {
+  const navigate = useNavigate();
+  const ref = useRef<HTMLDivElement>(null);
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<SearchResults | null>(null);
+
+  const term = q.trim();
+  const active = term.length >= 2;
+
+  // Debounced search: a fresh keystroke resets the timer; stale responses are
+  // discarded via the `cancelled` latch so out-of-order replies can't flicker.
+  useEffect(() => {
+    if (!active) {
+      setResults(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.search(term);
+        if (!cancelled) setResults(res);
+      } catch {
+        if (!cancelled) setResults({ venues: [], players: [], tournaments: [], bookings: [] });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [term, active]);
+
+  // Dismiss the dropdown on an outside click or Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const go = (path: string) => {
+    setOpen(false);
+    navigate(path);
+  };
+
+  const rows = (key: keyof SearchResults) => {
+    if (!results) return null;
+    switch (key) {
+      case 'venues':
+        return results.venues.map((v) => (
+          <SearchRow
+            key={v.id}
+            icon={Building2}
+            title={v.name}
+            sub={v.city ?? undefined}
+            onClick={() => go('/owner/venues')}
+          />
+        ));
+      case 'players':
+        return results.players.map((p) => (
+          <SearchRow
+            key={p.customerId}
+            icon={Users}
+            title={p.name ?? 'Unnamed player'}
+            sub={p.mobile ?? undefined}
+            onClick={() => go('/owner/players')}
+          />
+        ));
+      case 'tournaments':
+        return results.tournaments.map((t) => (
+          <SearchRow
+            key={t.id}
+            icon={Trophy}
+            title={t.name}
+            onClick={() => go('/owner/tournaments')}
+          />
+        ));
+      case 'bookings':
+        return results.bookings.map((b) => (
+          <SearchRow
+            key={b.id}
+            icon={ClipboardList}
+            title={b.customerName ?? 'Booking'}
+            sub={
+              [b.venueName, b.startsAt ? relativeTime(b.startsAt) : null]
+                .filter(Boolean)
+                .join(' · ') || undefined
+            }
+            onClick={() => go('/owner/bookings')}
+          />
+        ));
+      default:
+        return null;
+    }
+  };
+
+  const hasResults = results !== null && totalHits(results) > 0;
+
+  return (
+    <div className="relative hidden sm:block flex-1 max-w-2xl" ref={ref}>
+      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search venues, bookings, players…"
+        aria-label="Search the console"
+        className="h-10 w-full rounded-xl border border-border bg-input-background pl-10 pr-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+      />
+
+      {open && active && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">
+          {loading && !results ? (
+            <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+            </div>
+          ) : !hasResults ? (
+            <div className="px-4 py-8 text-center">
+              <p className="text-sm font-medium text-foreground">No results for &ldquo;{term}&rdquo;</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Try a venue, player name, or mobile number.
+              </p>
+            </div>
+          ) : (
+            <div className="max-h-[70vh] overflow-y-auto hide-scrollbar py-1">
+              {SEARCH_GROUPS.map((g) => {
+                const groupRows = rows(g.key);
+                if (!results || results[g.key].length === 0) return null;
+                const GroupIcon = g.icon;
+                return (
+                  <div key={g.key} className="py-1">
+                    <div className="flex items-center gap-2 px-4 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                      <GroupIcon className="h-3 w-3" />
+                      {g.label}
+                    </div>
+                    {groupRows}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A single clickable result row inside the search dropdown. */
+function SearchRow({
+  icon: Icon,
+  title,
+  sub,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  sub?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-muted"
+    >
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+        {sub && <span className="block truncate text-xs text-muted-foreground">{sub}</span>}
+      </span>
+    </button>
   );
 }
 

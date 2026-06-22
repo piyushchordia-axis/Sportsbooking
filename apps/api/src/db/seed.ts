@@ -25,6 +25,7 @@ import {
   gameCatalogue,
   ledgerTxns,
   membershipPacks,
+  notifications,
   openMatches,
   openMatchJoinRequests,
   ownerCustomers,
@@ -85,6 +86,7 @@ async function seed(tx: DbTx) {
 
   // ---- reset (children -> parents) so the seed is re-runnable ------------
   await tx.delete(auditLogs);
+  await tx.delete(notifications);
   await tx.delete(openMatchJoinRequests);
   await tx.delete(openMatches);
   await tx.delete(tournamentParticipants);
@@ -628,6 +630,63 @@ async function seed(tx: DbTx) {
   const suspendedOwnerId = randomUUID();
   await tx.insert(owners).values({ id: suspendedOwnerId, name: 'Old Town Courts', contactEmail: 'admin@oldtown.local', contactMobile: '+919900000004', status: 'suspended', venueQuota: 2, allowedGameIds: [pickleballId], updatedAt: new Date() });
   await tx.insert(users).values({ id: randomUUID(), role: 'owner', ownerId: suspendedOwnerId, name: 'Old Town Admin', email: 'admin@oldtown.local', passwordHash: ownerPass });
+
+  // ---- in-app notifications (owner bell feed) --------------------------
+  // A mix of types for the Smash Arena owner; a few left unread (readAt null)
+  // so the bell shows an unread badge, the rest marked read recently.
+  const hoursAgo = (n: number) => new Date(Date.now() - n * 60 * 60 * 1000);
+  await tx.insert(notifications).values([
+    {
+      id: randomUUID(),
+      ownerId,
+      type: 'booking_created',
+      title: 'New booking — Court A',
+      body: 'Aarav Sharma booked Court A at Indiranagar for this evening (6:00 PM).',
+      link: '/owner/bookings',
+      readAt: null,
+      createdAt: hoursAgo(1),
+    },
+    {
+      id: randomUUID(),
+      ownerId,
+      type: 'tournament_registration',
+      title: 'New tournament registration',
+      body: 'Meera Rao registered for the Indiranagar Pickleball Open.',
+      link: '/owner/tournaments',
+      readAt: null,
+      createdAt: hoursAgo(5),
+    },
+    {
+      id: randomUUID(),
+      ownerId,
+      type: 'booking_cancelled',
+      title: 'Booking cancelled — Court B',
+      body: 'Diya Patel cancelled her Court B booking. A refund has been issued.',
+      link: '/owner/bookings',
+      readAt: null,
+      createdAt: hoursAgo(20),
+    },
+    {
+      id: randomUUID(),
+      ownerId,
+      type: 'amc_reminder',
+      title: 'AMC renewal due soon',
+      body: 'Your annual maintenance charge of ₹12,000 is due in 200 days. Renew to avoid service interruption.',
+      link: '/owner/dashboard',
+      readAt: hoursAgo(30),
+      createdAt: daysAgo(2),
+    },
+    {
+      id: randomUUID(),
+      ownerId,
+      type: 'general',
+      title: 'Weekly summary is ready',
+      body: 'Your venues hosted 14 bookings last week. Tap to view the full breakdown.',
+      link: '/owner/dashboard',
+      readAt: hoursAgo(48),
+      createdAt: daysAgo(3),
+    },
+  ]);
 
   // ---- audit log (PRD §7) ----------------------------------------------
   await tx.insert(auditLogs).values([

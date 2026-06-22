@@ -300,6 +300,16 @@
       0 12px 40px -12px color-mix(in srgb, var(--primary) 70%, transparent);
   }
 
+  /* Soft teal-tinted card elevation (exact Reflex values) — replaces the muddy
+     neutral gray drop shadow. Light: a faint deep-teal cast; dark: deep depth,
+     where the teal-tinted card border carries the accent glow. */
+  .shadow-card {
+    box-shadow: 0 22px 70px rgba(18, 71, 68, 0.08);
+  }
+  :where(.dark) .shadow-card {
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.36);
+  }
+
   /* Engineering-mesh backdrop used on the login hero panel. */
   .grid-backdrop {
     background-image:

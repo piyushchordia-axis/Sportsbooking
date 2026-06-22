@@ -6,7 +6,6 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Ban,
   CalendarDays,
   CheckCircle2,
   IndianRupee,
@@ -366,7 +365,6 @@ export function TournamentsAdminPage() {
                                         setPending({ t, p });
                                       }}
                                     >
-                                      <Ban className="h-4 w-4" />
                                       Cancel &amp; refund
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>

@@ -187,7 +187,7 @@ function KpiTile({
 }) {
   const color = ACCENT[accent];
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-border bg-elevated p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
+    <div className="group relative overflow-hidden rounded-2xl border border-primary/12 dark:border-primary/16 bg-elevated p-4 shadow-card transition-shadow sm:p-5">
       <span
         className="absolute inset-x-0 top-0 h-0.5 opacity-70"
         style={{ backgroundColor: color }}
@@ -219,7 +219,7 @@ function KpiSkeleton({ count }: { count: number }) {
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-border bg-elevated p-5">
+        <div key={i} className="rounded-2xl border border-primary/12 dark:border-primary/16 bg-elevated p-5 shadow-card">
           <div className="flex items-start justify-between">
             <Skeleton className="h-3 w-20" />
             <Skeleton className="h-8 w-8 rounded-xl" />
@@ -336,7 +336,7 @@ export function DashboardPage() {
       {data && (
         <div className="space-y-8">
           {/* Hero band — the two headline figures, with supporting context. */}
-          <Card topAccent="primary" className="bg-card shadow-sm">
+          <Card topAccent="primary" className="bg-card">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <SectionLabel icon={BarChart3}>Owner overview</SectionLabel>
@@ -431,7 +431,7 @@ export function DashboardPage() {
               <Card
                 title="Revenue by ground"
                 subtitle="Paid revenue per ground over the selected range"
-                className="bg-card shadow-sm"
+                className="bg-card"
               >
                 <ChartContainer config={revenueChartConfig} className="aspect-auto h-72 w-full">
                   <ReBarChart
@@ -479,7 +479,7 @@ export function DashboardPage() {
                 </ChartContainer>
               </Card>
             ) : (
-              <Card title="Revenue by ground" className="bg-card shadow-sm">
+              <Card title="Revenue by ground" className="bg-card">
                 <EmptyState
                   title="No revenue yet"
                   hint="Revenue will appear here once paid bookings are recorded for your grounds."
@@ -491,7 +491,7 @@ export function DashboardPage() {
               <Card
                 title="Booking rhythm"
                 subtitle="How bookings spread across the hours of the day"
-                className="bg-card shadow-sm"
+                className="bg-card"
               >
                 <ChartContainer config={hourChartConfig} className="aspect-auto h-72 w-full">
                   <AreaChart
@@ -526,7 +526,7 @@ export function DashboardPage() {
                 </ChartContainer>
               </Card>
             ) : (
-              <Card title="Booking rhythm" className="bg-card shadow-sm">
+              <Card title="Booking rhythm" className="bg-card">
                 <EmptyState
                   title="No bookings to chart"
                   hint="Once players start booking slots, you'll see the busiest hours here."
@@ -586,7 +586,7 @@ export function DashboardPage() {
               <Card
                 title="Top grounds"
                 subtitle="Your highest-earning grounds"
-                className="bg-card shadow-sm xl:col-span-2"
+                className="bg-card xl:col-span-2"
               >
                 <ul className="space-y-3">
                   {topGrounds.map((v, i) => (
@@ -626,7 +626,7 @@ export function DashboardPage() {
               <Card
                 title="Per-ground revenue"
                 subtitle="Full breakdown of revenue and bookings by ground"
-                className="bg-card shadow-sm xl:col-span-3"
+                className="bg-card xl:col-span-3"
               >
                 <Table>
                   <TableHeader>

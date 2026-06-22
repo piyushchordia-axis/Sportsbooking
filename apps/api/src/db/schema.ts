@@ -646,3 +646,24 @@ export const venueGames = pgTable("venue_games", {
    FROM venues v
   WHERE ((v.id = venue_games."venueId") AND (v."ownerId" = app_current_owner_id())))))`  }),
 ]);
+
+export const notificationType = pgEnum("NotificationType", ['booking_created', 'booking_cancelled', 'tournament_registration', 'open_match_join', 'amc_reminder', 'general'])
+
+export const notifications = pgTable("notifications", {
+	id: text().primaryKey().notNull(),
+	ownerId: text().notNull(),
+	type: notificationType().notNull(),
+	title: text().notNull(),
+	body: text(),
+	link: text(),
+	readAt: timestamp({ precision: 3, mode: 'date' }),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("notifications_ownerId_idx").using("btree", table.ownerId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.ownerId],
+			foreignColumns: [owners.id],
+			name: "notifications_ownerId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
+]);

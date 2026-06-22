@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { openMatches, openMatchJoinRequests, users, owners, tournaments, tournamentParticipants, ownerCustomers, playerProfiles, venues, bookableUnits, gameCatalogue, pricingRules, slots, bookings, venueSettings, bookingAddons, addons, membershipPacks, offers, ledgerTxns, referrals, auditLogs, venueGames } from "./schema";
+import { openMatches, openMatchJoinRequests, users, owners, tournaments, tournamentParticipants, ownerCustomers, playerProfiles, venues, bookableUnits, gameCatalogue, pricingRules, slots, bookings, venueSettings, bookingAddons, addons, membershipPacks, offers, ledgerTxns, referrals, auditLogs, venueGames, notifications } from "./schema";
 
 export const openMatchJoinRequestsRelations = relations(openMatchJoinRequests, ({one}) => ({
 	openMatch: one(openMatches, {
@@ -63,6 +63,14 @@ export const ownersRelations = relations(owners, ({many}) => ({
 	tournaments: many(tournaments),
 	offers: many(offers),
 	auditLogs: many(auditLogs),
+	notifications: many(notifications),
+}));
+
+export const notificationsRelations = relations(notifications, ({one}) => ({
+	owner: one(owners, {
+		fields: [notifications.ownerId],
+		references: [owners.id]
+	}),
 }));
 
 export const tournamentParticipantsRelations = relations(tournamentParticipants, ({one}) => ({

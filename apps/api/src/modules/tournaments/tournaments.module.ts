@@ -42,6 +42,10 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
 import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { PaymentService } from '../payments/payment.service';
+import {
+  NotificationFeedModule,
+  NotificationFeedService,
+} from '../notification-feed/notification-feed.module';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { Decimal } from '../../db/money';
@@ -91,6 +95,7 @@ export class TournamentsService {
     private readonly db: DbService,
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
+    private readonly feed: NotificationFeedService,
   ) {}
 
   create(user: RequestUser, dto: CreateTournamentDto) {
@@ -253,6 +258,11 @@ export class TournamentsService {
       // mobile so cancelRegistration() can always resolve a ledger customer.
       await this.captureCaptain(tx, t.ownerId, dto);
 
+      // Owner in-app feed (the "bell"). Best-effort and fire-and-forget:
+      // createForOwner runs in its OWN tenant transaction and never throws, so a
+      // feed write can never roll back or fail the registration.
+      void this.notifyOwnerTournamentRegistration(t.ownerId, t.name, dto);
+
       return {
         participantId: participant.id,
         razorpayOrderId: order.id,
@@ -261,6 +271,31 @@ export class TournamentsService {
     });
 
     return result;
+  }
+
+  /**
+   * Best-effort owner in-app notification for a new tournament entry. Never
+   * awaited in a way that affects the registration tx (createForOwner swallows
+   * its own errors and uses its own tenant transaction).
+   */
+  private async notifyOwnerTournamentRegistration(
+    ownerId: string,
+    tournamentName: string,
+    dto: RegisterDto,
+  ): Promise<void> {
+    const team = dto.teamName?.trim();
+    const captain = dto.captainName?.trim();
+    const who = team
+      ? captain
+        ? `${team} (captain ${captain})`
+        : team
+      : captain || 'A participant';
+    await this.feed.createForOwner(ownerId, {
+      type: 'tournament_registration',
+      title: 'New tournament entry',
+      body: `${who} registered for ${tournamentName}.`,
+      link: '/owner/tournaments',
+    });
   }
 
   /**
@@ -551,6 +586,7 @@ export class TournamentsController {
 }
 
 @Module({
+  imports: [NotificationFeedModule],
   controllers: [TournamentsController],
   providers: [TournamentsService],
 })

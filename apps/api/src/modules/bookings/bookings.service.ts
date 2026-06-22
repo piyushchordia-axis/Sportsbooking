@@ -50,6 +50,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { LoyaltyService, pointsLane } from '../loyalty/loyalty.service';
 import { MembershipsService } from '../memberships/memberships.service';
 import { NotificationService } from '../notifications/notification.service';
+import { NotificationFeedService } from '../notification-feed/notification-feed.module';
 import { PaymentService } from '../payments/payment.service';
 import { PricingService } from '../pricing/pricing.service';
 import { ReferralService } from '../referral/referral.service';
@@ -123,6 +124,7 @@ export class BookingsService {
     private readonly payments: PaymentService,
     private readonly notifications: NotificationService,
     private readonly ledger: LedgerService,
+    private readonly feed: NotificationFeedService,
   ) {}
 
   /**
@@ -510,6 +512,16 @@ export class BookingsService {
         slotInputs.length,
       );
 
+      // Owner in-app feed (the "bell"). Best-effort: createForOwner runs in its
+      // OWN tenant transaction and never throws, and we fire-and-forget it so a
+      // feed write can never roll back or fail the booking.
+      void this.notifyOwnerBookingCreated(
+        ownerId,
+        customerId,
+        venue.name,
+        slotInputs,
+      );
+
       const lineItems = [
         { label: `${slotInputs.length} slot(s)`, amount: Number(slotSubtotal) },
         ...addons.map((a) => ({ label: a.name, amount: Number(a.price) })),
@@ -801,6 +813,15 @@ export class BookingsService {
       }
     }
 
+    // Venue name for the owner feed notification (best-effort; bypass read).
+    const venueRow = await this.db.withTenantBypass((tx) =>
+      tx.query.venues.findFirst({
+        where: eq(venues.id, booking.venueId),
+        columns: { name: true },
+      }),
+    );
+    const venueName = venueRow?.name ?? '';
+
     return this.db.withTenantId(booking.ownerId, async (tx) => {
       const fresh = await tx.query.bookings.findFirst({
         where: eq(bookings.id, bookingId),
@@ -906,6 +927,16 @@ export class BookingsService {
             : `Gateway refund ${refund.gatewayId}`,
         });
       }
+
+      // Owner in-app feed. Best-effort and fire-and-forget so it can never roll
+      // back or fail the cancellation; only fired for an actual cancellation
+      // (the idempotent already-cancelled path above returns before this).
+      void this.notifyOwnerBookingCancelled(
+        fresh.ownerId,
+        fresh.customerId,
+        venueName,
+        fresh.slots,
+      );
       return { cancelled: true as const };
     });
   }
@@ -1721,6 +1752,82 @@ export class BookingsService {
         }`,
       );
     }
+  }
+
+  /** Resolve a human-friendly customer label for a notification body. */
+  private async customerLabel(customerId: string): Promise<string> {
+    try {
+      const customer = await this.db.withTenantBypass((tx) =>
+        tx.query.users.findFirst({
+          where: eq(users.id, customerId),
+          columns: { name: true, mobile: true },
+        }),
+      );
+      return customer?.name?.trim() || customer?.mobile?.trim() || 'A customer';
+    } catch {
+      return 'A customer';
+    }
+  }
+
+  /** Format an ISO start time for a notification body (local-ish, concise). */
+  private formatSlotTime(iso: string): string {
+    const dt = DateTime.fromISO(iso);
+    return dt.isValid ? dt.toFormat('d LLL, h:mm a') : iso;
+  }
+
+  /**
+   * Best-effort owner in-app notification for a newly created booking. Never
+   * awaited in a way that affects the booking tx (createForOwner swallows its
+   * own errors and uses its own tenant transaction).
+   */
+  private async notifyOwnerBookingCreated(
+    ownerId: string,
+    customerId: string,
+    venueName: string,
+    slotInputs: { unitId: string; start: string; end: string }[],
+  ): Promise<void> {
+    const who = await this.customerLabel(customerId);
+    const when = slotInputs.length ? this.formatSlotTime(slotInputs[0].start) : '';
+    const slotPart =
+      slotInputs.length > 1 ? `${slotInputs.length} slots` : '1 slot';
+    const body =
+      `${who} booked ${slotPart} at ${venueName}` +
+      (when ? ` (${when})` : '') +
+      '.';
+    await this.feed.createForOwner(ownerId, {
+      type: 'booking_created',
+      title: 'New booking',
+      body,
+      link: '/owner/bookings',
+    });
+  }
+
+  /**
+   * Best-effort owner in-app notification for a cancelled booking. Same
+   * best-effort contract as {@link notifyOwnerBookingCreated}.
+   */
+  private async notifyOwnerBookingCancelled(
+    ownerId: string,
+    customerId: string,
+    venueName: string,
+    slots: { startsAt: Date }[],
+  ): Promise<void> {
+    const who = await this.customerLabel(customerId);
+    const first = slots
+      .map((s) => s.startsAt.getTime())
+      .sort((a, b) => a - b)[0];
+    const when =
+      first != null ? this.formatSlotTime(new Date(first).toISOString()) : '';
+    const body =
+      `${who}'s booking at ${venueName} was cancelled` +
+      (when ? ` (${when})` : '') +
+      '.';
+    await this.feed.createForOwner(ownerId, {
+      type: 'booking_cancelled',
+      title: 'Booking cancelled',
+      body,
+      link: '/owner/bookings',
+    });
   }
 
   private async capturePlayer(

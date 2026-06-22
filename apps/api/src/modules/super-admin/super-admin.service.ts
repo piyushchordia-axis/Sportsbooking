@@ -21,6 +21,7 @@ import {
   bookableUnits,
   gameCatalogue,
   owners,
+  tournaments,
   users,
   venueGames,
   venues,
@@ -135,7 +136,7 @@ export class SuperAdminService {
     // venue_games / bookable_unit are tenant-scoped under RLS, so count
     // references across all tenants with the bypass context.
     const refs = await this.db.withTenantBypass(async (tx) => {
-      const [venueRefs, unitRefs] = await Promise.all([
+      const [venueRefs, unitRefs, tournamentRefs] = await Promise.all([
         tx
           .select({ c: count() })
           .from(venueGames)
@@ -144,12 +145,16 @@ export class SuperAdminService {
           .select({ c: count() })
           .from(bookableUnits)
           .where(eq(bookableUnits.gameId, id)),
+        tx
+          .select({ c: count() })
+          .from(tournaments)
+          .where(eq(tournaments.gameId, id)),
       ]);
-      return venueRefs[0].c + unitRefs[0].c;
+      return venueRefs[0].c + unitRefs[0].c + tournamentRefs[0].c;
     });
     if (refs > 0) {
       throw new BadRequestException(
-        'Cannot delete game: it is still referenced by one or more venues. Remove the game from all venues first.',
+        'Cannot delete game: it is still referenced by one or more venues or tournaments. Remove it from them first.',
       );
     }
     return (

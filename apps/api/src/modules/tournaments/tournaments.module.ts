@@ -42,6 +42,7 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
 import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { PaymentService } from '../payments/payment.service';
+import { PaymentLedgerService } from '../payments/payment-ledger.service';
 import {
   NotificationFeedModule,
   NotificationFeedService,
@@ -94,6 +95,7 @@ export class TournamentsService {
   constructor(
     private readonly db: DbService,
     private readonly payments: PaymentService,
+    private readonly paymentLedger: PaymentLedgerService,
     private readonly ledger: LedgerService,
     private readonly feed: NotificationFeedService,
   ) {}
@@ -363,7 +365,7 @@ export class TournamentsService {
       }
       // Idempotency: if already paid, return without re-processing.
       if (p.paid) return p;
-      return (
+      const updated = (
         await tx
           .update(tournamentParticipants)
           .set({
@@ -376,6 +378,21 @@ export class TournamentsService {
           .where(eq(tournamentParticipants.id, participantId))
           .returning()
       )[0];
+
+      // Record the gateway capture (only when a real payment id was supplied).
+      if (razorpayPaymentId) {
+        await this.paymentLedger.record(tx, {
+          ownerId,
+          refType: 'tournament_participant',
+          refId: participantId,
+          type: 'capture',
+          gatewayId: razorpayPaymentId,
+          amount: t.fee,
+          status: 'captured',
+        });
+      }
+
+      return updated;
     });
   }
 
@@ -435,6 +452,7 @@ export class TournamentsService {
 
     const fee = Number(t.fee);
     let gatewayId = '';
+    let refundStatus = 'skipped';
     if (fee > 0) {
       // BUG-3: refund against the captured gateway payment id (mirrors
       // booking.razorpayPaymentId). Fall back to the order id, then the
@@ -444,6 +462,7 @@ export class TournamentsService {
         p.razorpayPaymentId ?? p.razorpayOrderId ?? participantId;
       const res = await this.payments.refund(refundRef, fee);
       gatewayId = res.id;
+      refundStatus = res.status;
     }
 
     return this.db.withTenantId(t.ownerId, async (tx) => {
@@ -493,6 +512,16 @@ export class TournamentsService {
           note: gatewayId
             ? `Tournament refund ${gatewayId} (₹${fee})`
             : `Tournament refund (₹${fee})`,
+        });
+        await this.paymentLedger.record(tx, {
+          ownerId: t.ownerId,
+          customerId: customer.id,
+          refType: 'tournament_participant',
+          refId: participantId,
+          type: 'refund',
+          gatewayId,
+          amount: fee,
+          status: refundStatus,
         });
       }
 

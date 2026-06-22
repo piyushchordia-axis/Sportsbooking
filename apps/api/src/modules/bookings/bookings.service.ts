@@ -52,6 +52,7 @@ import { MembershipsService } from '../memberships/memberships.service';
 import { NotificationService } from '../notifications/notification.service';
 import { NotificationFeedService } from '../notification-feed/notification-feed.module';
 import { PaymentService } from '../payments/payment.service';
+import { PaymentLedgerService } from '../payments/payment-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
 import { ReferralService } from '../referral/referral.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
@@ -122,6 +123,7 @@ export class BookingsService {
     private readonly loyalty: LoyaltyService,
     private readonly referral: ReferralService,
     private readonly payments: PaymentService,
+    private readonly paymentLedger: PaymentLedgerService,
     private readonly notifications: NotificationService,
     private readonly ledger: LedgerService,
     private readonly feed: NotificationFeedService,
@@ -646,6 +648,21 @@ export class BookingsService {
         })
         .where(eq(bookings.id, bookingId));
 
+      // Record the gateway capture (prepay handshake only — pay-at-venue is cash,
+      // not a gateway transaction).
+      if (razorpayPaymentId && fresh.payMode === PayMode.PREPAY) {
+        await this.paymentLedger.record(tx, {
+          ownerId: fresh.ownerId,
+          customerId: fresh.customerId,
+          refType: 'booking',
+          refId: bookingId,
+          type: 'capture',
+          gatewayId: razorpayPaymentId,
+          amount: fresh.total,
+          status: 'captured',
+        });
+      }
+
       await this.loyalty.earn(
         tx,
         fresh.ownerId,
@@ -791,8 +808,12 @@ export class BookingsService {
 
     // Resolve the gateway refund (network call) BEFORE the tx so the
     // transaction stays short. We re-check status inside the tx for idempotency.
-    let refund: { amount: Decimal; gatewayId: string; fee: Decimal } | null =
-      null;
+    let refund: {
+      amount: Decimal;
+      gatewayId: string;
+      fee: Decimal;
+      status: string;
+    } | null = null;
     const isPaid =
       booking.status !== BookingStatus.CANCELLED &&
       booking.payMode === PayMode.PREPAY &&
@@ -807,9 +828,9 @@ export class BookingsService {
           booking.razorpayPaymentId as string,
           Number(refundable),
         );
-        refund = { amount: refundable, gatewayId: res.id, fee };
+        refund = { amount: refundable, gatewayId: res.id, fee, status: res.status };
       } else {
-        refund = { amount: dec(0), gatewayId: '', fee };
+        refund = { amount: dec(0), gatewayId: '', fee, status: 'skipped' };
       }
     }
 
@@ -912,7 +933,8 @@ export class BookingsService {
         }
       }
 
-      // Record the gateway refund on the append-only cash ledger.
+      // Record the gateway refund on the append-only cash ledger, and on the
+      // payments ledger with the gateway id + status (reconcilable).
       if (refund && refund.amount.greaterThan(0)) {
         await this.ledger.post(tx, {
           ownerId: fresh.ownerId,
@@ -925,6 +947,17 @@ export class BookingsService {
           note: refund.fee.greaterThan(0)
             ? `Gateway refund ${refund.gatewayId} (₹${refund.amount} after ₹${refund.fee} cancellation fee)`
             : `Gateway refund ${refund.gatewayId}`,
+        });
+        await this.paymentLedger.record(tx, {
+          ownerId: fresh.ownerId,
+          customerId: fresh.customerId,
+          refType: 'booking',
+          refId: bookingId,
+          type: 'refund',
+          gatewayId: refund.gatewayId,
+          amount: refund.amount.toString(),
+          fee: refund.fee.toString(),
+          status: refund.status,
         });
       }
 

@@ -1,20 +1,25 @@
 import {
   BadRequestException,
   Controller,
+  Get,
   Headers,
   Logger,
   Post,
+  Query,
   RawBodyRequest,
   Req,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Request } from 'express';
 import { eq } from 'drizzle-orm';
+import { UserRole } from '@sportsbooking/shared';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { DbService } from '../../db/db.service';
 import { bookings as bookingsTable } from '../../db/schema';
 import { BookingsService } from '../bookings/bookings.service';
 import { PaymentService } from './payment.service';
+import { PaymentLedgerService } from './payment-ledger.service';
 
 /**
  * Server-to-server Razorpay webhook (PRD §7). Razorpay POSTs payment events and
@@ -28,12 +33,23 @@ export class PaymentsController {
 
   constructor(
     private readonly payments: PaymentService,
+    private readonly paymentLedger: PaymentLedgerService,
     private readonly db: DbService,
     // BookingsService isn't exported by its module; resolve it lazily from the
     // app container so the webhook can reuse the idempotent confirm logic
     // without creating a module-level circular import.
     private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Owner/staff gateway transaction history (captures + refunds), optionally
+   * scoped to one booking or tournament participant. Tenant-isolated via RLS.
+   */
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  @Get()
+  list(@Query('refType') refType?: string, @Query('refId') refId?: string) {
+    return this.paymentLedger.list({ refType, refId });
+  }
 
   @Public()
   @Post('webhook')

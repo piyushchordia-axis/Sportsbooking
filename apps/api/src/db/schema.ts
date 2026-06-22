@@ -705,3 +705,31 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 }, (table) => [
 	index("password_reset_tokens_expiresAt_idx").using("btree", table.expiresAt.asc().nullsLast()),
 ]);
+
+// --- Payments ledger: an append-only record of real gateway money movement
+// (captures + refunds) with the gateway id and status, linked to the booking or
+// tournament participant. The booking/participant rows already carry
+// razorpayOrderId/razorpayPaymentId; this table additionally captures the refund
+// gateway id + status (previously discarded) so refunds are reconcilable and
+// trackable. Tenant-scoped (RLS by ownerId). ---
+
+export const paymentTxnType = pgEnum("PaymentTxnType", ['capture', 'refund'])
+
+export const payments = pgTable("payments", {
+	id: text().primaryKey().notNull(),
+	ownerId: text().notNull(),
+	customerId: text(),
+	refType: text().notNull(),
+	refId: text().notNull(),
+	type: paymentTxnType().notNull(),
+	gatewayId: text(),
+	amount: numeric({ precision: 12, scale:  2 }).notNull(),
+	fee: numeric({ precision: 12, scale:  2 }).default('0').notNull(),
+	status: text().notNull(),
+	note: text(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("payments_ownerId_idx").using("btree", table.ownerId.asc().nullsLast()),
+	index("payments_refType_refId_idx").using("btree", table.refType.asc().nullsLast(), table.refId.asc().nullsLast()),
+	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
+]);

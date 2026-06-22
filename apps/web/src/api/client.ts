@@ -336,6 +336,20 @@ export interface NotificationFeed {
   unread: number;
 }
 
+/** A gateway transaction (capture or refund) from the payments ledger. */
+export interface PaymentTxn {
+  id: string;
+  refType: string;
+  refId: string;
+  type: 'capture' | 'refund';
+  gatewayId: string | null;
+  amount: string;
+  fee: string;
+  status: string;
+  note: string | null;
+  createdAt: string;
+}
+
 /** A venue hit in the global search (GET /search). */
 export interface SearchVenueResult {
   id: string;
@@ -899,6 +913,11 @@ export const api = {
   // ---- owner: notification feed (bell) ----
   /** Owner/staff in-app bell feed (recent items + unread count). */
   listNotifications: () => get<NotificationFeed>('/notifications'),
+  /** Gateway transactions (captures + refunds) for a booking/participant. */
+  listPayments: (refType: string, refId: string) =>
+    get<PaymentTxn[]>(
+      `/payments?refType=${encodeURIComponent(refType)}&refId=${encodeURIComponent(refId)}`,
+    ),
   /** Mark a single notification read. */
   markNotificationRead: (id: string) =>
     post<void>(`/notifications/${id}/read`),

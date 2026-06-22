@@ -18,7 +18,7 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { api, OwnerVenue } from '../../api/client';
+import { api, OwnerVenue, PaymentTxn } from '../../api/client';
 import {
   Card,
   EmptyState,
@@ -473,6 +473,8 @@ function BookingEditor({
   );
   const [slots, setSlots] = useState<ResolvedSlot[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [payments, setPayments] = useState<PaymentTxn[]>([]);
+  const [payKey, setPayKey] = useState(0);
 
   // Reset all editor state when switching to a different booking.
   useEffect(() => {
@@ -485,6 +487,19 @@ function BookingEditor({
     setMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.id]);
+
+  // Load the gateway payment history (captures + refunds); refreshes after an
+  // action (payKey) so a just-issued refund appears.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listPayments('booking', booking.id)
+      .then((rows) => alive && setPayments(rows))
+      .catch(() => alive && setPayments([]));
+    return () => {
+      alive = false;
+    };
+  }, [booking.id, payKey]);
 
   const cancelled = booking.status === BookingStatus.CANCELLED;
   const canSettle =
@@ -500,6 +515,7 @@ function BookingEditor({
       await fn();
       setMsg(ok);
       onChanged();
+      setPayKey((k) => k + 1);
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -635,6 +651,55 @@ function BookingEditor({
             <KeyVal label="Pay mode" value={PAY_MODE_LABEL[booking.payMode]} />
             <KeyVal label="Total" value={`₹${booking.total}`} />
           </InfoCard>
+
+          {/* Payment history (gateway captures + refunds) */}
+          {payments.length > 0 && (
+            <div>
+              <SectionLabel icon={CreditCard} className="mb-2">
+                Payment history
+              </SectionLabel>
+              <div className="space-y-1.5">
+                {payments.map((p) => {
+                  const isRefund = p.type === 'refund';
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-muted px-3 py-2 text-sm"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={
+                            'shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ' +
+                            (isRefund
+                              ? 'bg-amber-500/15 text-amber-500'
+                              : 'bg-primary/15 text-primary')
+                          }
+                        >
+                          {isRefund ? 'Refund' : 'Capture'}
+                        </span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {fmtDateTime(p.createdAt)}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-3">
+                        {Number(p.fee) > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            fee ₹{p.fee}
+                          </span>
+                        )}
+                        <span className="tabular-nums font-medium text-foreground">
+                          {isRefund ? '−' : ''}₹{p.amount}
+                        </span>
+                        <span className="text-xs capitalize text-muted-foreground">
+                          {p.status}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Current slots */}
           <div>

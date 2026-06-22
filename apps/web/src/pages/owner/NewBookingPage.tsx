@@ -30,11 +30,11 @@ import {
   Msg,
   PageHeader,
   SectionLabel,
-  Select,
   StatusPill,
   Stepper,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { SearchableSelect } from '../../components/ui/combobox';
 import { Switch } from '../../components/ui/switch';
 import { Skeleton } from '../../components/ui/skeleton';
 import {
@@ -371,11 +371,12 @@ export function NewBookingPage() {
                 accent="primary"
               >
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Select
+                  <SearchableSelect
                     label="Ground"
                     value={venueId}
                     onChange={pickVenue}
                     options={venues.map((v) => ({ value: v.id, label: v.name }))}
+                    searchPlaceholder="Search grounds..."
                   />
                   <div className="w-full sm:max-w-[12rem]">
                     <Field

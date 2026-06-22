@@ -28,6 +28,7 @@ import {
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { SearchableSelect } from '../../components/ui/combobox';
 import { Switch } from '../../components/ui/switch';
 import {
   DateRangePicker,
@@ -554,11 +555,12 @@ function CreateTournamentDialog({
         </SectionLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="[&_label]:!mb-0">
-            <Select
+            <SearchableSelect
               label="Venue"
               value={venueId}
               onChange={setVenueId}
               options={venues.map((v: any) => ({ value: v.id, label: v.name }))}
+              searchPlaceholder="Search venues..."
             />
           </div>
           <label className="block">

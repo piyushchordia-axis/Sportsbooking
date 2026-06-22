@@ -33,6 +33,7 @@ import {
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { SearchableSelect } from '../../components/ui/combobox';
 import { Badge } from '../../components/ui/badge';
 import {
   DateRangePicker,
@@ -253,8 +254,20 @@ export function BookingsPage() {
               align="start"
             />
           </div>
-          <Select label="Venue" value={venueId} onChange={pickVenue} options={venueOpts} />
-          <Select label="Court" value={unitId} onChange={setUnitId} options={unitOpts} />
+          <SearchableSelect
+            label="Venue"
+            value={venueId}
+            onChange={pickVenue}
+            options={venueOpts}
+            searchPlaceholder="Search grounds..."
+          />
+          <SearchableSelect
+            label="Court"
+            value={unitId}
+            onChange={setUnitId}
+            options={unitOpts}
+            searchPlaceholder="Search courts..."
+          />
           <Select
             label="Status"
             value={status}

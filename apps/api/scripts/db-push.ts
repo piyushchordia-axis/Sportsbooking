@@ -63,17 +63,27 @@ async function main(): Promise<void> {
     join(__dirname, '..', 'src', 'db', 'rls-policies.sql'),
     'utf8',
   );
-  const roleSetupSql = readFileSync(
-    join(__dirname, '..', 'src', 'db', 'role-setup.sql'),
-    'utf8',
-  );
+  // SKIP_APP_ROLE=true runs the app as the admin/owner role (RLS bypassed for
+  // the table owner) instead of the restricted runtime role — used when the
+  // admin role lacks CREATEROLE. Tenant isolation then rests on the app-code
+  // ownerId/customerId filtering. Skips creating sportsbooking_app + its grants.
+  const skipAppRole = process.env.SKIP_APP_ROLE === 'true';
+  const roleSetupSql = skipAppRole
+    ? ''
+    : readFileSync(join(__dirname, '..', 'src', 'db', 'role-setup.sql'), 'utf8');
   const adminClient = new Client({ connectionString: databaseUrl });
   await adminClient.connect();
   try {
     console.log('Applying RLS policy bodies (src/db/rls-policies.sql)...');
     await adminClient.query(rlsPoliciesSql);
-    console.log('Applying runtime role + grants (src/db/role-setup.sql)...');
-    await adminClient.query(roleSetupSql);
+    if (skipAppRole) {
+      console.log(
+        'SKIP_APP_ROLE=true — skipping the restricted runtime role; the app runs as the admin/owner role (RLS bypassed for the owner).',
+      );
+    } else {
+      console.log('Applying runtime role + grants (src/db/role-setup.sql)...');
+      await adminClient.query(roleSetupSql);
+    }
   } finally {
     await adminClient.end();
   }

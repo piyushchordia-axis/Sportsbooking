@@ -36,6 +36,7 @@ function isValidMobile(raw: string): boolean {
 export function TournamentsPage() {
   const [venueId, setVenueId] = useState('');
   const [team, setTeam] = useState('');
+  const [roster, setRoster] = useState('');
   const [name, setName] = useState('Captain');
   const [mobile, setMobile] = useState('+919800000099');
   const [msg, setMsg] = useState<string | null>(null);
@@ -75,10 +76,15 @@ export function TournamentsPage() {
     }
     setRegistering(id);
     try {
+      const rosterList = roster
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const res = await api.registerTournament(id, {
         captainName: name,
         captainMobile: mobile,
         teamName: team || undefined,
+        roster: rosterList.length ? rosterList : undefined,
       });
       setMyEntries((m) => ({ ...m, [id]: res.participantId }));
 
@@ -176,6 +182,21 @@ export function TournamentsPage() {
           </div>
           <Field label="Team (optional)" value={team} onChange={setTeam} />
         </div>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-foreground">
+            Team roster <span className="text-muted-foreground">(optional)</span>
+          </span>
+          <textarea
+            value={roster}
+            onChange={(e) => setRoster(e.target.value)}
+            rows={3}
+            placeholder={'One player per line\nAarav Sharma\nMeera Rao'}
+            className="w-full rounded-xl border border-border bg-input-background px-3.5 py-2.5 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+          />
+          <span className="mt-1 block text-xs text-muted-foreground">
+            For team events — list your players, one per line.
+          </span>
+        </label>
       </Card>
 
       <SectionLabel icon={Trophy} className="mb-3">

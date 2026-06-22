@@ -880,7 +880,12 @@ export const api = {
     get<any[]>(`/tournaments/manage/venue/${venueId}`),
   registerTournament: (
     id: string,
-    body: { captainName: string; captainMobile: string; teamName?: string },
+    body: {
+      captainName: string;
+      captainMobile: string;
+      teamName?: string;
+      roster?: string[];
+    },
   ) => post<{ participantId: string; razorpayOrderId: string; fee: number }>(
     `/tournaments/${id}/register`,
     body,

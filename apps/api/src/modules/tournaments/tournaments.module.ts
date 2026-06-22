@@ -22,6 +22,7 @@ import {
   UserRole,
 } from '@sportsbooking/shared';
 import {
+  IsArray,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -83,12 +84,21 @@ class RegisterDto {
   @IsString() captainName!: string;
   @IsString() captainMobile!: string;
   @IsOptional() @IsString() teamName?: string;
+  /** Team-event roster: player names (TEAM regType). */
+  @IsOptional() @IsArray() @IsString({ each: true }) roster?: string[];
 }
 
 class ConfirmParticipantDto {
   // Optional so the dev mock confirm (no real gateway handshake) keeps working;
   // when present it is the captured gateway payment id persisted for refunds.
   @IsOptional() @IsString() razorpayPaymentId?: string;
+}
+
+/** Trim + drop empty roster entries; null when none provided. */
+function normalizeRoster(roster?: string[]): string[] | null {
+  if (!roster) return null;
+  const cleaned = roster.map((s) => s.trim()).filter(Boolean);
+  return cleaned.length ? cleaned : null;
 }
 
 /**
@@ -244,6 +254,7 @@ export class TournamentsService {
             teamName: dto.teamName,
             captainName: dto.captainName,
             captainMobile: dto.captainMobile,
+            roster: normalizeRoster(dto.roster),
             paid: false,
             idempotencyKey,
           })

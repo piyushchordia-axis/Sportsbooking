@@ -119,6 +119,7 @@ export const tournamentParticipants = pgTable("tournament_participants", {
 	teamName: text(),
 	captainName: text().notNull(),
 	captainMobile: text().notNull(),
+	roster: text().array(),
 	paid: boolean().default(false).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	razorpayOrderId: text(),

@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CalendarResponse, ResolvedSlot, SlotStatus } from '@sportsbooking/shared';
+import { and, eq, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { bookableUnits, slots as slotsTable } from '../../db/schema';
 import { PricingService } from '../pricing/pricing.service';
 
 /**
@@ -13,29 +15,30 @@ import { PricingService } from '../pricing/pricing.service';
 @Injectable()
 export class AvailabilityService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly pricing: PricingService,
   ) {}
 
   async calendar(unitId: string, date: string): Promise<CalendarResponse> {
     // Public discovery spans tenants, so read under bypass scoped to the unit.
-    return this.prisma.withTenantBypass(async (tx) => {
-      const unit = await tx.bookableUnit.findUnique({
-        where: { id: unitId },
-        include: { venue: true, game: true },
+    return this.db.withTenantBypass(async (tx) => {
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: eq(bookableUnits.id, unitId),
+        with: { venue: true, gameCatalogue: true },
       });
       if (!unit) throw new NotFoundException('Unit not found');
 
-      const granularity = unit.game.slotGranularityMin;
+      const granularity = unit.gameCatalogue.slotGranularityMin;
       const dayStart = DateTime.fromISO(`${date}T${unit.venue.openTime}`);
       const dayEnd = DateTime.fromISO(`${date}T${unit.venue.closeTime}`);
 
       // existing occupying slots for the day
-      const occupied = await tx.slot.findMany({
-        where: {
-          unitId,
-          startsAt: { gte: dayStart.toJSDate(), lt: dayEnd.toJSDate() },
-        },
+      const occupied = await tx.query.slots.findMany({
+        where: and(
+          eq(slotsTable.unitId, unitId),
+          gte(slotsTable.startsAt, dayStart.toJSDate()),
+          lt(slotsTable.startsAt, dayEnd.toJSDate()),
+        ),
       });
       const occupiedByStart = new Map(
         occupied.map((s) => [s.startsAt.toISOString(), s]),

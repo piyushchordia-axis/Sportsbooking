@@ -4,9 +4,22 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { and, count, eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { Decimal, money } from '../../db/money';
+import {
+  bookableUnits,
+  bookings,
+  owners,
+  pricingRules,
+  slots,
+  venueGames,
+  venueSettings,
+  venues,
+} from '../../db/schema';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { OpenMatchRepaymentMode } from '@sportsbooking/shared';
 import {
@@ -20,7 +33,7 @@ import {
 } from './dto';
 
 /**
- * Schema defaults for VenueSettings (mirrors prisma defaults), used when no
+ * Schema defaults for VenueSettings (mirrors schema defaults), used when no
  * settings row exists yet. The cancellation template maps to a (free window,
  * penalty) policy enforced in bookings.service.ts CANCELLATION_TEMPLATES.
  */
@@ -39,13 +52,25 @@ const CANCELLATION_TEMPLATE_HELP: Record<string, string> = {
   strict: 'Free cancellation up to 24h before; 100% penalty after',
 };
 
+/** Postgres SQLSTATE for a unique-constraint violation (was Prisma P2002). */
+const PG_UNIQUE_VIOLATION = '23505';
+/** Postgres SQLSTATE for a foreign-key violation (was Prisma P2003). */
+const PG_FK_VIOLATION = '23503';
+
+/** Narrow an unknown error to a pg driver error carrying a SQLSTATE `code`. */
+function pgErrorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? (err as { code?: string }).code
+    : undefined;
+}
+
 /**
  * Owner-facing venue, unit, pricing-grid and slot-blocking management
  * (PRD §4.1, §4.2, §4.3). All reads/writes run under the owner's tenant scope.
  */
 @Injectable()
 export class VenuesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   private ownerId(user: RequestUser): string {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
@@ -53,19 +78,25 @@ export class VenuesService {
   }
 
   listVenues(user: RequestUser) {
-    return this.prisma.withTenant((tx) =>
-      tx.venue.findMany({ include: { units: true, games: true } }),
+    return this.db.withTenant((tx) =>
+      tx.query.venues.findMany({
+        with: { bookableUnits: true, venueGames: true },
+      }),
     );
   }
 
   /** Create a venue, enforcing the owner's quota (PRD §4.1). */
   async createVenue(user: RequestUser, dto: CreateVenueDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const owner = await tx.owner.findUnique({ where: { id: ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const owner = await tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+      });
       if (!owner) throw new NotFoundException('Owner not found');
-      const count = await tx.venue.count();
-      if (count >= owner.venueQuota) {
+      const venueCount = (
+        await tx.select({ c: count() }).from(venues)
+      )[0].c;
+      if (venueCount >= owner.venueQuota) {
         throw new ConflictException(
           `Venue quota (${owner.venueQuota}) reached`,
         );
@@ -73,29 +104,39 @@ export class VenuesService {
       // Only allow games the owner is entitled to (PRD §2.2). An EMPTY
       // allowedGameIds means "all catalogue games allowed" (see
       // super-admin.service), so only enforce the filter when it's non-empty.
-      if (owner.allowedGameIds.length > 0) {
+      const allowedGameIds = owner.allowedGameIds ?? [];
+      if (allowedGameIds.length > 0) {
         const disallowed = dto.gameIds.filter(
-          (g) => !owner.allowedGameIds.includes(g),
+          (g) => !allowedGameIds.includes(g),
         );
         if (disallowed.length) {
           throw new BadRequestException('Game not in owner entitlement');
         }
       }
-      const venue = await tx.venue.create({
-        data: {
-          ownerId,
-          name: dto.name,
-          geoLat: dto.geoLat,
-          geoLng: dto.geoLng,
-          address: dto.address,
-          city: dto.city,
-          contactPhone: dto.contactPhone,
-          openTime: dto.openTime ?? '06:00',
-          closeTime: dto.closeTime ?? '23:00',
-          games: { create: dto.gameIds.map((gameId) => ({ gameId })) },
-          settings: { create: {} },
-        },
-        include: { games: true, settings: true },
+      const venueId = randomUUID();
+      await tx.insert(venues).values({
+        id: venueId,
+        ownerId,
+        name: dto.name,
+        geoLat: dto.geoLat,
+        geoLng: dto.geoLng,
+        address: dto.address,
+        city: dto.city,
+        contactPhone: dto.contactPhone,
+        openTime: dto.openTime ?? '06:00',
+        closeTime: dto.closeTime ?? '23:00',
+      });
+      if (dto.gameIds.length > 0) {
+        await tx
+          .insert(venueGames)
+          .values(dto.gameIds.map((gameId) => ({ venueId, gameId })));
+      }
+      // DB-8: every venue gets a settings row at creation time.
+      await tx.insert(venueSettings).values({ venueId });
+
+      const venue = await tx.query.venues.findFirst({
+        where: eq(venues.id, venueId),
+        with: { venueGames: true, venueSettings: true },
       });
       return venue;
     });
@@ -104,14 +145,16 @@ export class VenuesService {
   /** Update a venue's editable fields (PRD §4.1). Tenant-scoped. */
   async updateVenue(user: RequestUser, venueId: string, dto: UpdateVenueDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone,
       // which is bypassed when the app connects as a superuser.
-      const venue = await tx.venue.findFirst({ where: { id: venueId, ownerId } });
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      });
       if (!venue) throw new NotFoundException('Venue not found');
-      return tx.venue.update({
-        where: { id: venueId },
-        data: {
+      await tx
+        .update(venues)
+        .set({
           name: dto.name,
           geoLat: dto.geoLat,
           geoLng: dto.geoLng,
@@ -121,8 +164,11 @@ export class VenuesService {
           openTime: dto.openTime,
           closeTime: dto.closeTime,
           photos: dto.photos,
-        },
-        include: { games: true, settings: true, units: true },
+        })
+        .where(eq(venues.id, venueId));
+      return tx.query.venues.findFirst({
+        where: eq(venues.id, venueId),
+        with: { venueGames: true, venueSettings: true, bookableUnits: true },
       });
     });
   }
@@ -134,31 +180,41 @@ export class VenuesService {
    */
   async deleteVenue(user: RequestUser, venueId: string) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const venue = await tx.venue.findFirst({ where: { id: venueId, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      });
       if (!venue) throw new NotFoundException('Venue not found');
 
       const [unitCount, bookingCount] = await Promise.all([
-        tx.bookableUnit.count({ where: { venueId } }),
-        tx.booking.count({ where: { venueId } }),
+        tx
+          .select({ c: count() })
+          .from(bookableUnits)
+          .where(eq(bookableUnits.venueId, venueId))
+          .then((r) => r[0].c),
+        tx
+          .select({ c: count() })
+          .from(bookings)
+          .where(eq(bookings.venueId, venueId))
+          .then((r) => r[0].c),
       ]);
 
       if (unitCount > 0 || bookingCount > 0) {
-        const updated = await tx.venue.update({
-          where: { id: venueId },
-          data: { active: false },
-        });
+        const updated = (
+          await tx
+            .update(venues)
+            .set({ active: false })
+            .where(eq(venues.id, venueId))
+            .returning()
+        )[0];
         return { deactivated: true, venue: updated };
       }
 
       // Leaf venue: only the cascade-safe venue_games / settings rows attach.
       try {
-        await tx.venue.delete({ where: { id: venueId } });
+        await tx.delete(venues).where(eq(venues.id, venueId));
       } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2003'
-        ) {
+        if (pgErrorCode(err) === PG_FK_VIOLATION) {
           throw new BadRequestException(
             'Venue has dependent records and cannot be deleted; deactivate it instead',
           );
@@ -171,37 +227,51 @@ export class VenuesService {
 
   async addUnit(user: RequestUser, venueId: string, dto: CreateUnitDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Ensure the venue belongs to this owner before attaching a unit.
-      const venue = await tx.venue.findFirst({ where: { id: venueId, ownerId } });
-      if (!venue) throw new NotFoundException('Venue not found');
-      return tx.bookableUnit.create({
-        data: {
-          venueId,
-          ownerId,
-          name: dto.name,
-          label: dto.label,
-          gameId: dto.gameId,
-          capacity: dto.capacity,
-        },
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
       });
+      if (!venue) throw new NotFoundException('Venue not found');
+      return (
+        await tx
+          .insert(bookableUnits)
+          .values({
+            id: randomUUID(),
+            venueId,
+            ownerId,
+            name: dto.name,
+            label: dto.label,
+            gameId: dto.gameId,
+            capacity: dto.capacity,
+          })
+          .returning()
+      )[0];
     });
   }
 
   /** Update a bookable unit's name/label/capacity (PRD §4.1). Tenant-scoped. */
   async updateUnit(user: RequestUser, unitId: string, dto: UpdateUnitDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const unit = await tx.bookableUnit.findFirst({ where: { id: unitId, ownerId } });
-      if (!unit) throw new NotFoundException('Unit not found');
-      return tx.bookableUnit.update({
-        where: { id: unitId },
-        data: {
-          name: dto.name,
-          label: dto.label,
-          capacity: dto.capacity,
-        },
+    return this.db.withTenant(async (tx) => {
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
       });
+      if (!unit) throw new NotFoundException('Unit not found');
+      return (
+        await tx
+          .update(bookableUnits)
+          .set({
+            name: dto.name,
+            label: dto.label,
+            capacity: dto.capacity,
+          })
+          .where(eq(bookableUnits.id, unitId))
+          .returning()
+      )[0];
     });
   }
 
@@ -212,29 +282,39 @@ export class VenuesService {
    */
   async deleteUnit(user: RequestUser, unitId: string) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const unit = await tx.bookableUnit.findFirst({ where: { id: unitId, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
+      });
       if (!unit) throw new NotFoundException('Unit not found');
 
       // A Slot row exists once a unit is booked or blocked; any slot means the
       // unit carries history we must not orphan.
-      const slotCount = await tx.slot.count({ where: { unitId } });
+      const slotCount = (
+        await tx
+          .select({ c: count() })
+          .from(slots)
+          .where(eq(slots.unitId, unitId))
+      )[0].c;
       if (slotCount > 0) {
-        const updated = await tx.bookableUnit.update({
-          where: { id: unitId },
-          data: { active: false },
-        });
+        const updated = (
+          await tx
+            .update(bookableUnits)
+            .set({ active: false })
+            .where(eq(bookableUnits.id, unitId))
+            .returning()
+        )[0];
         return { deactivated: true, unit: updated };
       }
 
       // Leaf unit: only pricing rules attach, which cascade safely.
       try {
-        await tx.bookableUnit.delete({ where: { id: unitId } });
+        await tx.delete(bookableUnits).where(eq(bookableUnits.id, unitId));
       } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2003'
-        ) {
+        if (pgErrorCode(err) === PG_FK_VIOLATION) {
           throw new BadRequestException(
             'Unit has dependent records and cannot be deleted; deactivate it instead',
           );
@@ -248,22 +328,35 @@ export class VenuesService {
   /** Replace the weekly price grid for a unit (PRD §4.2). */
   async setPricing(user: RequestUser, unitId: string, rules: PricingRuleDto[]) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const unit = await tx.bookableUnit.findFirst({ where: { id: unitId, ownerId } });
-      if (!unit) throw new NotFoundException('Unit not found');
-      await tx.pricingRule.deleteMany({ where: { unitId } });
-      await tx.pricingRule.createMany({
-        data: rules.map((r) => ({
-          unitId,
-          ownerId,
-          dayType: r.dayType,
-          timeBand: r.timeBand,
-          dateOverride: r.dateOverride ? new Date(r.dateOverride) : null,
-          minDuration: r.minDuration,
-          price: new Prisma.Decimal(r.price),
-        })),
+    return this.db.withTenant(async (tx) => {
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
       });
-      return tx.pricingRule.findMany({ where: { unitId } });
+      if (!unit) throw new NotFoundException('Unit not found');
+      await tx.delete(pricingRules).where(eq(pricingRules.unitId, unitId));
+      if (rules.length > 0) {
+        await tx.insert(pricingRules).values(
+          rules.map((r) => ({
+            id: randomUUID(),
+            unitId,
+            ownerId,
+            dayType: r.dayType,
+            timeBand: r.timeBand,
+            // `date` column is string-mode: store the date portion only.
+            dateOverride: r.dateOverride
+              ? new Date(r.dateOverride).toISOString().slice(0, 10)
+              : null,
+            minDuration: r.minDuration,
+            price: money(new Decimal(r.price)),
+          })),
+        );
+      }
+      return tx.query.pricingRules.findMany({
+        where: eq(pricingRules.unitId, unitId),
+      });
     });
   }
 
@@ -274,20 +367,28 @@ export class VenuesService {
    */
   async getSettings(user: RequestUser, venueId: string) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const venue = await tx.venue.findFirst({ where: { id: venueId, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      });
       if (!venue) throw new NotFoundException('Venue not found');
 
-      const settings = await tx.venueSettings.findUnique({
-        where: { venueId },
+      const settings = await tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, venueId),
       });
 
       const resolved = settings
         ? {
             cancellationTemplate: settings.cancellationTemplate,
-            noShowFee: settings.noShowFee.toNumber(),
-            loyaltyEarnRate: settings.loyaltyEarnRate?.toNumber() ?? null,
-            loyaltyRedeemValue: settings.loyaltyRedeemValue?.toNumber() ?? null,
+            noShowFee: Number(settings.noShowFee),
+            loyaltyEarnRate:
+              settings.loyaltyEarnRate === null
+                ? null
+                : Number(settings.loyaltyEarnRate),
+            loyaltyRedeemValue:
+              settings.loyaltyRedeemValue === null
+                ? null
+                : Number(settings.loyaltyRedeemValue),
             openMatchRepaymentMode: settings.openMatchRepaymentMode,
           }
         : { ...VENUE_SETTINGS_DEFAULTS };
@@ -303,49 +404,59 @@ export class VenuesService {
 
   /**
    * Upsert a venue's settings, tenant-scoped (PRD §4.1). Only provided fields
-   * are written; decimals are coerced to Prisma.Decimal.
+   * are written; decimals are coerced to fixed 2dp strings for numeric columns.
    */
   async updateSettings(user: RequestUser, venueId: string, dto: SettingsDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
-      const venue = await tx.venue.findFirst({ where: { id: venueId, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      });
       if (!venue) throw new NotFoundException('Venue not found');
 
       const writable: {
         cancellationTemplate?: string;
-        noShowFee?: Prisma.Decimal;
-        loyaltyEarnRate?: Prisma.Decimal;
-        loyaltyRedeemValue?: Prisma.Decimal;
+        noShowFee?: string;
+        loyaltyEarnRate?: string;
+        loyaltyRedeemValue?: string;
         openMatchRepaymentMode?: OpenMatchRepaymentMode;
       } = {};
       if (dto.cancellationTemplate !== undefined) {
         writable.cancellationTemplate = dto.cancellationTemplate;
       }
       if (dto.noShowFee !== undefined) {
-        writable.noShowFee = new Prisma.Decimal(dto.noShowFee);
+        writable.noShowFee = money(new Decimal(dto.noShowFee));
       }
       if (dto.loyaltyEarnRate !== undefined) {
-        writable.loyaltyEarnRate = new Prisma.Decimal(dto.loyaltyEarnRate);
+        writable.loyaltyEarnRate = new Decimal(dto.loyaltyEarnRate).toFixed(4);
       }
       if (dto.loyaltyRedeemValue !== undefined) {
-        writable.loyaltyRedeemValue = new Prisma.Decimal(dto.loyaltyRedeemValue);
+        writable.loyaltyRedeemValue = money(new Decimal(dto.loyaltyRedeemValue));
       }
       if (dto.openMatchRepaymentMode !== undefined) {
         writable.openMatchRepaymentMode = dto.openMatchRepaymentMode;
       }
 
-      const settings = await tx.venueSettings.upsert({
-        where: { venueId },
-        create: { venueId, ...writable },
-        update: writable,
-      });
+      const settings = (
+        await tx
+          .insert(venueSettings)
+          .values({ venueId, ...writable })
+          .onConflictDoUpdate({ target: venueSettings.venueId, set: writable })
+          .returning()
+      )[0];
 
       return {
         venueId,
         cancellationTemplate: settings.cancellationTemplate,
-        noShowFee: settings.noShowFee.toNumber(),
-        loyaltyEarnRate: settings.loyaltyEarnRate?.toNumber() ?? null,
-        loyaltyRedeemValue: settings.loyaltyRedeemValue?.toNumber() ?? null,
+        noShowFee: Number(settings.noShowFee),
+        loyaltyEarnRate:
+          settings.loyaltyEarnRate === null
+            ? null
+            : Number(settings.loyaltyEarnRate),
+        loyaltyRedeemValue:
+          settings.loyaltyRedeemValue === null
+            ? null
+            : Number(settings.loyaltyRedeemValue),
         openMatchRepaymentMode: settings.openMatchRepaymentMode,
         cancellationTemplateHelp:
           CANCELLATION_TEMPLATE_HELP[settings.cancellationTemplate] ?? null,
@@ -356,16 +467,19 @@ export class VenuesService {
   /** Block a range of slots for maintenance/private use (PRD §4.3). */
   async block(user: RequestUser, dto: BlockSlotsDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone,
       // which is bypassed when the app connects as a superuser. Prevents blocking
       // another tenant's unit (SEC-6).
-      const unit = await tx.bookableUnit.findFirst({
-        where: { id: dto.unitId, ownerId },
-        include: { game: true },
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, dto.unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
+        with: { gameCatalogue: true },
       });
       if (!unit) throw new NotFoundException('Unit not found');
-      const granularity = unit.game.slotGranularityMin;
+      const granularity = unit.gameCatalogue.slotGranularityMin;
 
       let cursor = DateTime.fromISO(dto.start);
       const end = DateTime.fromISO(dto.end);
@@ -373,22 +487,23 @@ export class VenuesService {
       while (cursor < end) {
         const next = cursor.plus({ minutes: granularity });
         try {
-          const slot = await tx.slot.create({
-            data: {
-              unitId: dto.unitId,
-              ownerId,
-              startsAt: cursor.toJSDate(),
-              endsAt: next.toJSDate(),
-              status: 'blocked',
-              blockReason: dto.reason,
-            },
-          });
+          const slot = (
+            await tx
+              .insert(slots)
+              .values({
+                id: randomUUID(),
+                unitId: dto.unitId,
+                ownerId,
+                startsAt: cursor.toJSDate(),
+                endsAt: next.toJSDate(),
+                status: 'blocked',
+                blockReason: dto.reason,
+              })
+              .returning()
+          )[0];
           created.push(slot.id);
         } catch (err) {
-          if (
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === 'P2002'
-          ) {
+          if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
             throw new ConflictException(
               `Slot at ${cursor.toISO()} is already booked/blocked`,
             );

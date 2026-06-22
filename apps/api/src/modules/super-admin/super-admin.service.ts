@@ -13,7 +13,18 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PrismaService } from '../../prisma/prisma.service';
+import { randomUUID } from 'node:crypto';
+import { asc, count, desc, eq } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import { dec, money } from '../../db/money';
+import {
+  bookableUnits,
+  gameCatalogue,
+  owners,
+  users,
+  venueGames,
+  venues,
+} from '../../db/schema';
 import {
   CreateGameDto,
   CreateOwnerDto,
@@ -67,42 +78,52 @@ export class UpdateOwnerDto {
  */
 @Injectable()
 export class SuperAdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   // ---- Game catalogue (PRD §3.1) ----
   listGames() {
-    return this.prisma.gameCatalogue.findMany({ orderBy: { name: 'asc' } });
-  }
-
-  createGame(dto: CreateGameDto) {
-    return this.prisma.gameCatalogue.create({
-      data: {
-        name: dto.name,
-        iconUrl: dto.iconUrl,
-        slotGranularityMin: dto.slotGranularityMin,
-        unitLabel: dto.unitLabel,
-        minPlayers: dto.minPlayers,
-        maxPlayers: dto.maxPlayers,
-        defaultOpenTime: dto.defaultOpenTime ?? '06:00',
-        defaultCloseTime: dto.defaultCloseTime ?? '23:00',
-      },
+    // game_catalogue is a global (non-tenant) table: read it directly.
+    return this.db.db.query.gameCatalogue.findMany({
+      orderBy: asc(gameCatalogue.name),
     });
   }
 
-  updateGame(id: string, dto: UpdateGameDto) {
-    return this.prisma.gameCatalogue.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        iconUrl: dto.iconUrl,
-        slotGranularityMin: dto.slotGranularityMin,
-        unitLabel: dto.unitLabel,
-        minPlayers: dto.minPlayers,
-        maxPlayers: dto.maxPlayers,
-        defaultOpenTime: dto.defaultOpenTime,
-        defaultCloseTime: dto.defaultCloseTime,
-      },
-    });
+  async createGame(dto: CreateGameDto) {
+    return (
+      await this.db.db
+        .insert(gameCatalogue)
+        .values({
+          id: randomUUID(),
+          name: dto.name,
+          iconUrl: dto.iconUrl,
+          slotGranularityMin: dto.slotGranularityMin,
+          unitLabel: dto.unitLabel,
+          minPlayers: dto.minPlayers,
+          maxPlayers: dto.maxPlayers,
+          defaultOpenTime: dto.defaultOpenTime ?? '06:00',
+          defaultCloseTime: dto.defaultCloseTime ?? '23:00',
+        })
+        .returning()
+    )[0];
+  }
+
+  async updateGame(id: string, dto: UpdateGameDto) {
+    return (
+      await this.db.db
+        .update(gameCatalogue)
+        .set({
+          name: dto.name,
+          iconUrl: dto.iconUrl,
+          slotGranularityMin: dto.slotGranularityMin,
+          unitLabel: dto.unitLabel,
+          minPlayers: dto.minPlayers,
+          maxPlayers: dto.maxPlayers,
+          defaultOpenTime: dto.defaultOpenTime,
+          defaultCloseTime: dto.defaultCloseTime,
+        })
+        .where(eq(gameCatalogue.id, id))
+        .returning()
+    )[0];
   }
 
   /**
@@ -113,59 +134,78 @@ export class SuperAdminService {
   async deleteGame(id: string) {
     // venue_games / bookable_unit are tenant-scoped under RLS, so count
     // references across all tenants with the bypass context.
-    const refs = await this.prisma.withTenantBypass(async (tx) => {
+    const refs = await this.db.withTenantBypass(async (tx) => {
       const [venueRefs, unitRefs] = await Promise.all([
-        tx.venueGame.count({ where: { gameId: id } }),
-        tx.bookableUnit.count({ where: { gameId: id } }),
+        tx
+          .select({ c: count() })
+          .from(venueGames)
+          .where(eq(venueGames.gameId, id)),
+        tx
+          .select({ c: count() })
+          .from(bookableUnits)
+          .where(eq(bookableUnits.gameId, id)),
       ]);
-      return venueRefs + unitRefs;
+      return venueRefs[0].c + unitRefs[0].c;
     });
     if (refs > 0) {
       throw new BadRequestException(
         'Cannot delete game: it is still referenced by one or more venues. Remove the game from all venues first.',
       );
     }
-    return this.prisma.gameCatalogue.delete({ where: { id } });
+    return (
+      await this.db.db
+        .delete(gameCatalogue)
+        .where(eq(gameCatalogue.id, id))
+        .returning()
+    )[0];
   }
 
   // ---- Owner onboarding (PRD §3.2) ----
   async createOwner(dto: CreateOwnerDto) {
-    return this.prisma.withTenantBypass(async (tx) => {
-      const owner = await tx.owner.create({
-        data: {
-          name: dto.name,
-          contactEmail: dto.contactEmail,
-          contactMobile: dto.contactMobile,
-          status: OwnerStatus.ACTIVE,
-          venueQuota: dto.venueQuota,
-          // When allowedGameIds is omitted, keep the current behaviour (all
-          // games => empty restriction set, the schema default). When provided,
-          // assign exactly that set.
-          allowedGameIds: dto.allowedGameIds ?? undefined,
-          featureFlags: dto.featureFlags,
-          // White-label branding (PRD §4.10). Omitted colour fields fall back
-          // to the schema defaults via `undefined`.
-          logoUrl: dto.branding?.logoUrl,
-          primaryColor: dto.branding?.primaryColor ?? undefined,
-          secondaryColor: dto.branding?.secondaryColor ?? undefined,
-          accentColor: dto.branding?.accentColor ?? undefined,
-          setupFee: dto.setupFee,
-          amcAmount: dto.amcAmount,
-          amcRenewalDate: dto.amcRenewalDate
-            ? new Date(dto.amcRenewalDate)
-            : undefined,
-        },
-      });
+    return this.db.withTenantBypass(async (tx) => {
+      const owner = (
+        await tx
+          .insert(owners)
+          .values({
+            id: randomUUID(),
+            name: dto.name,
+            contactEmail: dto.contactEmail,
+            contactMobile: dto.contactMobile,
+            status: OwnerStatus.ACTIVE,
+            venueQuota: dto.venueQuota,
+            // When allowedGameIds is omitted, keep the current behaviour (all
+            // games => empty restriction set, the schema default). When provided,
+            // assign exactly that set.
+            allowedGameIds: dto.allowedGameIds ?? undefined,
+            featureFlags: dto.featureFlags,
+            // White-label branding (PRD §4.10). Omitted colour fields fall back
+            // to the schema defaults via `undefined`.
+            logoUrl: dto.branding?.logoUrl,
+            primaryColor: dto.branding?.primaryColor ?? undefined,
+            secondaryColor: dto.branding?.secondaryColor ?? undefined,
+            accentColor: dto.branding?.accentColor ?? undefined,
+            setupFee:
+              dto.setupFee !== undefined ? money(dec(dto.setupFee)) : undefined,
+            amcAmount:
+              dto.amcAmount !== undefined
+                ? money(dec(dto.amcAmount))
+                : undefined,
+            amcRenewalDate: dto.amcRenewalDate
+              ? new Date(dto.amcRenewalDate)
+              : undefined,
+            updatedAt: new Date(),
+          })
+          .returning()
+      )[0];
 
       // Provision the owner-admin login (PRD §3.2 step 5).
-      await tx.user.create({
-        data: {
-          role: UserRole.OWNER,
-          ownerId: owner.id,
-          name: `${dto.name} Admin`,
-          email: dto.contactEmail,
-          passwordHash: await bcrypt.hash(dto.adminPassword, 10),
-        },
+      await tx.insert(users).values({
+        id: randomUUID(),
+        role: UserRole.OWNER,
+        ownerId: owner.id,
+        name: `${dto.name} Admin`,
+        email: dto.contactEmail,
+        passwordHash: await bcrypt.hash(dto.adminPassword, 10),
       });
 
       return owner;
@@ -174,20 +214,27 @@ export class SuperAdminService {
 
   // ---- Oversight (PRD §3.3) ----
   async listOwners() {
-    return this.prisma.withTenantBypass(async (tx) => {
-      const owners = await tx.owner.findMany({
-        include: { _count: { select: { venues: true } } },
-        orderBy: { createdAt: 'desc' },
+    return this.db.withTenantBypass(async (tx) => {
+      const ownerRows = await tx.query.owners.findMany({
+        orderBy: desc(owners.createdAt),
       });
+      // Count venues per owner in one grouped query (replaces Prisma _count).
+      const venueCounts = await tx
+        .select({ ownerId: venues.ownerId, c: count() })
+        .from(venues)
+        .groupBy(venues.ownerId);
+      const countByOwner = new Map(
+        venueCounts.map((v) => [v.ownerId, v.c]),
+      );
       const now = Date.now();
-      return owners.map((o) => ({
+      return ownerRows.map((o) => ({
         id: o.id,
         name: o.name,
         status: o.status,
         contactEmail: o.contactEmail,
         logoUrl: o.logoUrl,
         venueQuota: o.venueQuota,
-        venueCount: o._count.venues,
+        venueCount: countByOwner.get(o.id) ?? 0,
         allowedGameIds: o.allowedGameIds,
         featureFlags: o.featureFlags,
         amcRenewalDate: o.amcRenewalDate?.toISOString() ?? null,
@@ -204,15 +251,15 @@ export class SuperAdminService {
    * under the RLS-bypass context. Returns the same shape as listOwners entries.
    */
   async updateOwner(ownerId: string, dto: UpdateOwnerDto) {
-    return this.prisma.withTenantBypass(async (tx) => {
-      const data: Record<string, unknown> = {};
+    return this.db.withTenantBypass(async (tx) => {
+      const data: Partial<typeof owners.$inferInsert> = {};
 
       if (dto.venueQuota !== undefined) data.venueQuota = dto.venueQuota;
       if (dto.allowedGameIds !== undefined)
         data.allowedGameIds = dto.allowedGameIds;
       if (dto.featureFlags !== undefined) data.featureFlags = dto.featureFlags;
-      if (dto.setupFee !== undefined) data.setupFee = dto.setupFee;
-      if (dto.amcAmount !== undefined) data.amcAmount = dto.amcAmount;
+      if (dto.setupFee !== undefined) data.setupFee = money(dec(dto.setupFee));
+      if (dto.amcAmount !== undefined) data.amcAmount = money(dec(dto.amcAmount));
       if (dto.amcRenewalDate !== undefined)
         data.amcRenewalDate = dto.amcRenewalDate
           ? new Date(dto.amcRenewalDate)
@@ -229,11 +276,22 @@ export class SuperAdminService {
           data.accentColor = dto.branding.accentColor;
       }
 
-      const o = await tx.owner.update({
-        where: { id: ownerId },
-        data,
-        include: { _count: { select: { venues: true } } },
-      });
+      // Owner.updatedAt was Prisma @updatedAt; bump it on every write.
+      data.updatedAt = new Date();
+
+      const o = (
+        await tx
+          .update(owners)
+          .set(data)
+          .where(eq(owners.id, ownerId))
+          .returning()
+      )[0];
+
+      const venueRows = await tx
+        .select({ c: count() })
+        .from(venues)
+        .where(eq(venues.ownerId, ownerId));
+      const venueCount = venueRows[0].c;
 
       const now = Date.now();
       return {
@@ -243,7 +301,7 @@ export class SuperAdminService {
         contactEmail: o.contactEmail,
         logoUrl: o.logoUrl,
         venueQuota: o.venueQuota,
-        venueCount: o._count.venues,
+        venueCount,
         allowedGameIds: o.allowedGameIds,
         featureFlags: o.featureFlags,
         amcRenewalDate: o.amcRenewalDate?.toISOString() ?? null,
@@ -260,11 +318,15 @@ export class SuperAdminService {
         ).join(', ')}.`,
       );
     }
-    return this.prisma.withTenantBypass((tx) =>
-      tx.owner.update({
-        where: { id: ownerId },
-        data: { status: status as OwnerStatus },
-      }),
+    return this.db.withTenantBypass(
+      async (tx) =>
+        (
+          await tx
+            .update(owners)
+            .set({ status: status as OwnerStatus, updatedAt: new Date() })
+            .where(eq(owners.id, ownerId))
+            .returning()
+        )[0],
     );
   }
 }

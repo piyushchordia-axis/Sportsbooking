@@ -3,7 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   LedgerTxnType,
   PackExpiryMode,
@@ -12,7 +13,10 @@ import {
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { PaymentService } from '../payments/payment.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { Decimal, dec, money } from '../../db/money';
+import { ledgerTxns, membershipPacks } from '../../db/schema';
 import { CreatePackDto, UpdatePackDto } from './dto';
 
 export function packLane(packId: string): string {
@@ -21,7 +25,7 @@ export function packLane(packId: string): string {
 
 export interface PackApplication {
   /** rupee value the pack covers/discounts on the slot subtotal */
-  discount: Prisma.Decimal;
+  discount: Decimal;
   /** sessions to debit (one per slot) */
   sessions: number;
 }
@@ -35,7 +39,7 @@ export interface PackApplication {
 @Injectable()
 export class MembershipsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly ledger: LedgerService,
     // Resolved by Nest DI (PaymentsModule is @Global). Optional only so unit
     // tests can construct the service without a payments stub; production always
@@ -49,24 +53,29 @@ export class MembershipsService {
     if (dto.pricingMode === PackPricingMode.DISCOUNT && dto.discountPct == null) {
       throw new BadRequestException('discountPct required for discount packs');
     }
-    return this.prisma.withTenant((tx) =>
-      tx.membershipPack.create({
-        data: {
-          ownerId,
-          name: dto.name,
-          sessions: dto.sessions,
-          price: new Prisma.Decimal(dto.price),
-          validityDays: dto.validityDays,
-          expiryMode: dto.expiryMode,
-          pricingMode: dto.pricingMode,
-          discountPct:
-            dto.discountPct != null ? new Prisma.Decimal(dto.discountPct) : null,
-          flatRate:
-            dto.flatRate != null ? new Prisma.Decimal(dto.flatRate) : null,
-          venueIds: dto.venueIds ?? [],
-          unitIds: dto.unitIds ?? [],
-        },
-      }),
+    return this.db.withTenant(
+      async (tx) =>
+        (
+          await tx
+            .insert(membershipPacks)
+            .values({
+              id: randomUUID(),
+              ownerId,
+              name: dto.name,
+              sessions: dto.sessions,
+              price: money(dec(dto.price)),
+              validityDays: dto.validityDays,
+              expiryMode: dto.expiryMode,
+              pricingMode: dto.pricingMode,
+              discountPct:
+                dto.discountPct != null ? money(dec(dto.discountPct)) : null,
+              flatRate:
+                dto.flatRate != null ? money(dec(dto.flatRate)) : null,
+              venueIds: dto.venueIds ?? [],
+              unitIds: dto.unitIds ?? [],
+            })
+            .returning()
+        )[0],
     );
   }
 
@@ -77,13 +86,16 @@ export class MembershipsService {
    */
   updatePack(user: RequestUser, packId: string, dto: UpdatePackDto) {
     const ownerId = user.ownerId!;
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Explicit owner scoping (defense-in-depth): the dev DATABASE_URL connects
       // as a superuser that BYPASSES RLS, so a findUnique({ id }) here would let
       // an owner mutate another tenant's pack. MembershipPack carries a
       // denormalised ownerId — scope on it and 404 if not owned.
-      const pack = await tx.membershipPack.findFirst({
-        where: { id: packId, ownerId },
+      const pack = await tx.query.membershipPacks.findFirst({
+        where: and(
+          eq(membershipPacks.id, packId),
+          eq(membershipPacks.ownerId, ownerId),
+        ),
       });
       if (!pack) throw new NotFoundException('Pack not found');
 
@@ -98,25 +110,31 @@ export class MembershipsService {
         throw new BadRequestException('discountPct required for discount packs');
       }
 
-      const data: Prisma.MembershipPackUpdateInput = {};
+      const data: Partial<typeof membershipPacks.$inferInsert> = {};
       if (dto.name !== undefined) data.name = dto.name;
       if (dto.sessions !== undefined) data.sessions = dto.sessions;
-      if (dto.price !== undefined) data.price = new Prisma.Decimal(dto.price);
+      if (dto.price !== undefined) data.price = money(dec(dto.price));
       if (dto.validityDays !== undefined) data.validityDays = dto.validityDays;
       if (dto.expiryMode !== undefined) data.expiryMode = dto.expiryMode;
       if (dto.pricingMode !== undefined) data.pricingMode = dto.pricingMode;
       if (dto.discountPct !== undefined) {
         data.discountPct =
-          dto.discountPct != null ? new Prisma.Decimal(dto.discountPct) : null;
+          dto.discountPct != null ? money(dec(dto.discountPct)) : null;
       }
       if (dto.flatRate !== undefined) {
         data.flatRate =
-          dto.flatRate != null ? new Prisma.Decimal(dto.flatRate) : null;
+          dto.flatRate != null ? money(dec(dto.flatRate)) : null;
       }
       if (dto.venueIds !== undefined) data.venueIds = dto.venueIds;
       if (dto.unitIds !== undefined) data.unitIds = dto.unitIds;
 
-      return tx.membershipPack.update({ where: { id: packId }, data });
+      return (
+        await tx
+          .update(membershipPacks)
+          .set(data)
+          .where(eq(membershipPacks.id, packId))
+          .returning()
+      )[0];
     });
   }
 
@@ -128,31 +146,41 @@ export class MembershipsService {
    */
   deactivatePack(user: RequestUser, packId: string) {
     const ownerId = user.ownerId!;
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Explicit owner scoping (defense-in-depth): superuser dev connection
       // bypasses RLS, so scope the lookup on the denormalised ownerId and 404
       // if the pack belongs to another tenant before soft-deactivating.
-      const pack = await tx.membershipPack.findFirst({
-        where: { id: packId, ownerId },
+      const pack = await tx.query.membershipPacks.findFirst({
+        where: and(
+          eq(membershipPacks.id, packId),
+          eq(membershipPacks.ownerId, ownerId),
+        ),
       });
       if (!pack) throw new NotFoundException('Pack not found');
-      return tx.membershipPack.update({
-        where: { id: packId },
-        data: { active: false },
-      });
+      return (
+        await tx
+          .update(membershipPacks)
+          .set({ active: false })
+          .where(eq(membershipPacks.id, packId))
+          .returning()
+      )[0];
     });
   }
 
   listPacks(user: RequestUser) {
-    return this.prisma.withTenant((tx) =>
-      tx.membershipPack.findMany({ where: { active: true } }),
+    return this.db.withTenant((tx) =>
+      tx.query.membershipPacks.findMany({
+        where: eq(membershipPacks.active, true),
+      }),
     );
   }
 
   /** Customer-facing: active packs offered by a given owner. */
   listPacksForOwner(ownerId: string) {
-    return this.prisma.withTenantId(ownerId, (tx) =>
-      tx.membershipPack.findMany({ where: { active: true } }),
+    return this.db.withTenantId(ownerId, (tx) =>
+      tx.query.membershipPacks.findMany({
+        where: eq(membershipPacks.active, true),
+      }),
     );
   }
 
@@ -179,14 +207,17 @@ export class MembershipsService {
       throw new BadRequestException('Payment service unavailable');
     }
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
+    return this.db.withTenantId(ownerId, async (tx) => {
       // Owner scoping (defense-in-depth, mirrors SEC-4 in evaluatePack): the dev
       // DB connects as a superuser that BYPASSES RLS, and `ownerId` here comes
       // from a customer-supplied URL param, so a findUnique({ id }) would let a
       // customer buy another tenant's pack into a mismatched tenant context.
       // MembershipPack carries a denormalised ownerId — scope on it.
-      const pack = await tx.membershipPack.findFirst({
-        where: { id: packId, ownerId },
+      const pack = await tx.query.membershipPacks.findFirst({
+        where: and(
+          eq(membershipPacks.id, packId),
+          eq(membershipPacks.ownerId, ownerId),
+        ),
       });
       if (!pack || !pack.active) throw new NotFoundException('Pack not found');
 
@@ -236,14 +267,14 @@ export class MembershipsService {
       // (correctly) treated as a replay. A dedicated `gatewayPaymentId` column
       // with a unique index should replace this once migrations are in scope.
       if (gatewayPaymentId) {
-        const existing = await tx.ledgerTxn.findFirst({
-          where: {
-            customerId,
-            lane: packLane(packId),
-            type: LedgerTxnType.PACK_BUY,
-            refId: gatewayPaymentId,
-          },
-          orderBy: { createdAt: 'desc' },
+        const existing = await tx.query.ledgerTxns.findFirst({
+          where: and(
+            eq(ledgerTxns.customerId, customerId),
+            eq(ledgerTxns.lane, packLane(packId)),
+            eq(ledgerTxns.type, LedgerTxnType.PACK_BUY),
+            eq(ledgerTxns.refId, gatewayPaymentId),
+          ),
+          orderBy: desc(ledgerTxns.createdAt),
         });
         if (existing) {
           const balance = await this.ledger.balance(
@@ -294,26 +325,31 @@ export class MembershipsService {
     ownerId: string,
     customerId: string,
     packId: string,
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     venueId: string,
     unitIds: string[],
     slotCount: number,
-    slotSubtotal: Prisma.Decimal,
+    slotSubtotal: Decimal,
   ): Promise<PackApplication> {
     // Tenant scoping (SEC-4): the dev DB connects as a superuser that BYPASSES
     // RLS, so a findUnique({ id }) here would let another tenant's pack fund a
     // booking. MembershipPack carries a denormalised ownerId — scope on it and
     // 404 if the pack belongs to another owner.
-    const pack = await tx.membershipPack.findFirst({
-      where: { id: packId, ownerId },
+    const pack = await tx.query.membershipPacks.findFirst({
+      where: and(
+        eq(membershipPacks.id, packId),
+        eq(membershipPacks.ownerId, ownerId),
+      ),
     });
     if (!pack || !pack.active) throw new NotFoundException('Pack not found');
 
     // scope check (PRD §4.4): empty arrays = all venues/units
-    if (pack.venueIds.length && !pack.venueIds.includes(venueId)) {
+    const packVenueIds = pack.venueIds ?? [];
+    const packUnitIds = pack.unitIds ?? [];
+    if (packVenueIds.length && !packVenueIds.includes(venueId)) {
       throw new BadRequestException('Pack not valid at this venue');
     }
-    if (pack.unitIds.length && !unitIds.every((u) => pack.unitIds.includes(u))) {
+    if (packUnitIds.length && !unitIds.every((u) => packUnitIds.includes(u))) {
       throw new BadRequestException('Pack not valid for these courts');
     }
 
@@ -323,13 +359,13 @@ export class MembershipsService {
       pack.validityDays != null &&
       pack.expiryMode === PackExpiryMode.FORFEIT
     ) {
-      const lastBuy = await tx.ledgerTxn.findFirst({
-        where: {
-          customerId,
-          lane: packLane(packId),
-          type: LedgerTxnType.PACK_BUY,
-        },
-        orderBy: { createdAt: 'desc' },
+      const lastBuy = await tx.query.ledgerTxns.findFirst({
+        where: and(
+          eq(ledgerTxns.customerId, customerId),
+          eq(ledgerTxns.lane, packLane(packId)),
+          eq(ledgerTxns.type, LedgerTxnType.PACK_BUY),
+        ),
+        orderBy: desc(ledgerTxns.createdAt),
       });
       if (lastBuy) {
         const expiresAt = new Date(lastBuy.createdAt);
@@ -345,32 +381,32 @@ export class MembershipsService {
       throw new BadRequestException('Not enough pack sessions');
     }
 
-    let discount: Prisma.Decimal;
+    let discount: Decimal;
     if (pack.pricingMode === PackPricingMode.FLAT) {
       // Flat-rate pack covers the configured flatRate per session, capped at the
       // actual slot subtotal. A null flatRate keeps the legacy "covers all"
       // behaviour so dynamic price is fully absorbed.
       if (pack.flatRate != null) {
-        const covered = pack.flatRate.mul(slotCount);
+        const covered = dec(pack.flatRate).mul(slotCount);
         discount = covered.lessThan(slotSubtotal) ? covered : slotSubtotal;
       } else {
         discount = slotSubtotal;
       }
     } else {
-      const pct = pack.discountPct ?? new Prisma.Decimal(0);
+      const pct = pack.discountPct != null ? dec(pack.discountPct) : dec(0);
       // Round the percent-discount intermediate to 2dp (currency precision) so
       // the rupee discount matches the @db.Decimal(12,2) ledger/amount columns.
       discount = slotSubtotal
         .mul(pct)
         .div(100)
-        .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
     }
     return { discount, sessions: slotCount };
   }
 
   /** Debit pack sessions for a committed booking. */
   debitSessions(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
     packId: string,
@@ -391,7 +427,7 @@ export class MembershipsService {
 
   /** Cancellation returns the session credit, not cash (PRD §4.4, §6.3). */
   refundSessions(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
     packId: string,

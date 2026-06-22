@@ -13,7 +13,9 @@ import {
   UserRole,
 } from '@sportsbooking/shared';
 import * as bcrypt from 'bcryptjs';
-import { PrismaService } from '../../prisma/prisma.service';
+import { eq } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import { owners, users } from '../../db/schema';
 import { NotificationService } from '../notifications/notification.service';
 import { JwtPayload } from './jwt.strategy';
 import { OtpService } from './otp.service';
@@ -57,7 +59,7 @@ export class AuthService {
   private readonly resetTokens = new Map<string, ResetEntry>();
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly otp: OtpService,
@@ -76,32 +78,36 @@ export class AuthService {
     }
 
     // Customers are global; super admin bypasses RLS to upsert by mobile.
-    const user = await this.prisma.withTenantBypass(async (tx) => {
-      const existing = await tx.user.findUnique({
-        where: { mobile: dto.mobile },
+    const user = await this.db.withTenantBypass(async (tx) => {
+      const existing = await tx.query.users.findFirst({
+        where: eq(users.mobile, dto.mobile),
       });
       if (existing) return existing;
-      return tx.user.create({
-        data: {
-          role: UserRole.CUSTOMER,
-          name: dto.name ?? 'Player',
-          mobile: dto.mobile,
-        },
-      });
+      return (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: UserRole.CUSTOMER,
+            name: dto.name ?? 'Player',
+            mobile: dto.mobile,
+          })
+          .returning()
+      )[0];
     });
 
     return this.issueTokens({
       sub: user.id,
       role: user.role as UserRole,
       ownerId: user.ownerId,
-      assignedVenueIds: user.assignedVenueIds,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
     }, user.name);
   }
 
   /** Owner/staff email + password login (PRD §2.1). */
   async staffLogin(dto: StaffLoginDto): Promise<LoginResponse> {
-    const user = await this.prisma.withTenantBypass((tx) =>
-      tx.user.findUnique({ where: { email: dto.email } }),
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.email, dto.email) }),
     );
     if (!user || !user.passwordHash || !user.active) {
       throw new UnauthorizedException('Invalid credentials');
@@ -116,7 +122,7 @@ export class AuthService {
       sub: user.id,
       role: user.role as UserRole,
       ownerId: user.ownerId,
-      assignedVenueIds: user.assignedVenueIds,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
     }, user.name);
   }
 
@@ -142,8 +148,8 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token has been revoked');
     }
 
-    const user = await this.prisma.withTenantBypass((tx) =>
-      tx.user.findUnique({ where: { id: payload.sub } }),
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.id, payload.sub) }),
     );
     if (!user || !user.active) {
       throw new UnauthorizedException('User is no longer active');
@@ -160,7 +166,7 @@ export class AuthService {
       sub: user.id,
       role: user.role as UserRole,
       ownerId: user.ownerId,
-      assignedVenueIds: user.assignedVenueIds,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
     });
   }
 
@@ -187,8 +193,8 @@ export class AuthService {
     currentPassword: string,
     newPassword: string,
   ): Promise<{ updated: true }> {
-    const user = await this.prisma.withTenantBypass((tx) =>
-      tx.user.findUnique({ where: { id: userId } }),
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.id, userId) }),
     );
     if (!user || !user.passwordHash || !PASSWORD_ROLES.includes(user.role as UserRole)) {
       // Customers (OTP-only) and users without a password cannot use this.
@@ -199,8 +205,8 @@ export class AuthService {
     if (!ok) throw new BadRequestException('Current password is incorrect');
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.prisma.withTenantBypass((tx) =>
-      tx.user.update({ where: { id: user.id }, data: { passwordHash } }),
+    await this.db.withTenantBypass((tx) =>
+      tx.update(users).set({ passwordHash }).where(eq(users.id, user.id)),
     );
     return { updated: true };
   }
@@ -211,8 +217,8 @@ export class AuthService {
    * so callers cannot probe which emails exist.
    */
   async requestPasswordReset(email: string): Promise<{ sent: true }> {
-    const user = await this.prisma.withTenantBypass((tx) =>
-      tx.user.findUnique({ where: { email } }),
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.email, email) }),
     );
 
     if (
@@ -254,8 +260,8 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.prisma.withTenantBypass((tx) =>
-      tx.user.update({ where: { id: entry.userId }, data: { passwordHash } }),
+    await this.db.withTenantBypass((tx) =>
+      tx.update(users).set({ passwordHash }).where(eq(users.id, entry.userId)),
     );
     this.resetTokens.delete(token);
     return { updated: true };
@@ -268,10 +274,10 @@ export class AuthService {
    */
   private async assertOwnerNotSuspended(ownerId: string | null): Promise<void> {
     if (!ownerId) return;
-    const owner = await this.prisma.withTenantBypass((tx) =>
-      tx.owner.findUnique({
-        where: { id: ownerId },
-        select: { status: true },
+    const owner = await this.db.withTenantBypass((tx) =>
+      tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+        columns: { status: true },
       }),
     );
     if (owner?.status === OwnerStatus.SUSPENDED) {

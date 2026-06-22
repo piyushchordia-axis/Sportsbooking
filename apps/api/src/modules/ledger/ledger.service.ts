@@ -1,14 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { LedgerTxnType } from '@sportsbooking/shared';
-import { PrismaService } from '../../prisma/prisma.service';
+import type { DbTx } from '../../db';
+import { Decimal, dec, money } from '../../db/money';
+import { ledgerTxns } from '../../db/schema';
 
 export interface LedgerPost {
   ownerId: string;
   customerId: string;
   type: LedgerTxnType;
   /** signed amount: positive = credit, negative = debit */
-  amount: Prisma.Decimal | number;
+  amount: Decimal | number | string;
   /**
    * balance lane, e.g. "pack:<packId>" | "points:<ownerId>" |
    * "credit:<ownerId>" | "cash" | "dues" (SEC-5: points/credit are per-owner).
@@ -27,14 +30,12 @@ export interface LedgerPost {
  */
 @Injectable()
 export class LedgerService {
-  constructor(private readonly prisma: PrismaService) {}
-
   /** Current derived balance for a lane (sum is cached as balanceAfter). */
   async balance(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     customerId: string,
     lane: string,
-  ): Promise<Prisma.Decimal> {
+  ): Promise<Decimal> {
     // Deterministic latest-row read: two rows can share the same createdAt
     // (same millisecond), so add a stable tiebreaker on id to guarantee a
     // single, well-defined "latest" row regardless of insertion timing.
@@ -46,48 +47,47 @@ export class LedgerService {
     // this moot for writes (posts on a lane are serialized), so this only
     // matters for read-time tie resolution between historically equal-timestamp
     // rows.
-    const last = await tx.ledgerTxn.findFirst({
-      where: { customerId, lane },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    const last = await tx.query.ledgerTxns.findFirst({
+      where: and(
+        eq(ledgerTxns.customerId, customerId),
+        eq(ledgerTxns.lane, lane),
+      ),
+      orderBy: [desc(ledgerTxns.createdAt), desc(ledgerTxns.id)],
     });
-    return last?.balanceAfter ?? new Prisma.Decimal(0);
+    return last ? dec(last.balanceAfter) : dec(0);
   }
 
   /** Append a transaction; returns the new balanceAfter. Throws on overdraft. */
-  async post(
-    tx: Prisma.TransactionClient,
-    entry: LedgerPost,
-  ): Promise<Prisma.Decimal> {
+  async post(tx: DbTx, entry: LedgerPost): Promise<Decimal> {
     // Serialize concurrent posts on the same (customer, lane) within their
     // transactions. pg_advisory_xact_lock blocks until any other txn holding
     // the same lock key commits/rolls back, so the read-modify-append below is
     // race-free even for posts landing in the same millisecond. The lock is
     // tied to the transaction and released automatically on commit/rollback.
-    await tx.$executeRaw`
+    await tx.execute(sql`
       SELECT pg_advisory_xact_lock(
         hashtext(${entry.customerId} || ':' || ${entry.lane})
       )
-    `;
+    `);
     const current = await this.balance(tx, entry.customerId, entry.lane);
-    const delta = new Prisma.Decimal(entry.amount);
+    const delta = dec(entry.amount);
     const next = current.add(delta);
     if (next.lessThan(0)) {
       throw new Error(
         `Ledger overdraft on lane ${entry.lane}: ${current} + ${delta} < 0`,
       );
     }
-    await tx.ledgerTxn.create({
-      data: {
-        ownerId: entry.ownerId,
-        customerId: entry.customerId,
-        type: entry.type,
-        amount: delta,
-        balanceAfter: next,
-        lane: entry.lane,
-        refType: entry.refType,
-        refId: entry.refId,
-        note: entry.note,
-      },
+    await tx.insert(ledgerTxns).values({
+      id: randomUUID(),
+      ownerId: entry.ownerId,
+      customerId: entry.customerId,
+      type: entry.type,
+      amount: money(delta),
+      balanceAfter: money(next),
+      lane: entry.lane,
+      refType: entry.refType,
+      refId: entry.refId,
+      note: entry.note,
     });
     return next;
   }

@@ -10,13 +10,15 @@ import {
 } from '@nestjs/common';
 import { UserRole } from '@sportsbooking/shared';
 import { IsHexColor, IsOptional, IsString } from 'class-validator';
+import { eq } from 'drizzle-orm';
 import {
   CurrentUser,
   RequestUser,
 } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { owners } from '../../db/schema';
 
 class UpdateBrandingDto {
   @IsOptional() @IsString() logoUrl?: string;
@@ -39,20 +41,21 @@ interface BrandingResponse {
  */
 @Injectable()
 export class OwnerSettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   /** Return the authenticated owner's current branding. */
   getBranding(ownerId: string): Promise<BrandingResponse> {
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const owner = await tx.owner.findUniqueOrThrow({
-        where: { id: ownerId },
-        select: {
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const owner = await tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+        columns: {
           logoUrl: true,
           primaryColor: true,
           secondaryColor: true,
           accentColor: true,
         },
       });
+      if (!owner) throw new BadRequestException('Owner not found');
       return owner;
     });
   }
@@ -62,22 +65,27 @@ export class OwnerSettingsService {
     ownerId: string,
     dto: UpdateBrandingDto,
   ): Promise<BrandingResponse> {
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const owner = await tx.owner.update({
-        where: { id: ownerId },
-        data: {
-          logoUrl: dto.logoUrl,
-          primaryColor: dto.primaryColor,
-          secondaryColor: dto.secondaryColor,
-          accentColor: dto.accentColor,
-        },
-        select: {
-          logoUrl: true,
-          primaryColor: true,
-          secondaryColor: true,
-          accentColor: true,
-        },
-      });
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const data: Partial<typeof owners.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (dto.logoUrl !== undefined) data.logoUrl = dto.logoUrl;
+      if (dto.primaryColor !== undefined) data.primaryColor = dto.primaryColor;
+      if (dto.secondaryColor !== undefined)
+        data.secondaryColor = dto.secondaryColor;
+      if (dto.accentColor !== undefined) data.accentColor = dto.accentColor;
+
+      const [owner] = await tx
+        .update(owners)
+        .set(data)
+        .where(eq(owners.id, ownerId))
+        .returning({
+          logoUrl: owners.logoUrl,
+          primaryColor: owners.primaryColor,
+          secondaryColor: owners.secondaryColor,
+          accentColor: owners.accentColor,
+        });
+      if (!owner) throw new BadRequestException('Owner not found');
       return owner;
     });
   }

@@ -6,7 +6,7 @@ import { runWithTenant } from './tenant-context';
 
 /**
  * Establishes the AsyncLocalStorage tenant store for the request lifetime so
- * PrismaService.withTenant() can set RLS session vars. Reads the JWT (if any)
+ * DbService.withTenant() can set RLS session vars. Reads the JWT (if any)
  * to determine ownerId / bypass. Auth enforcement still happens in JwtAuthGuard;
  * this only seeds tenant context.
  */

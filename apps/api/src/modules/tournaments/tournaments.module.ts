@@ -10,7 +10,8 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import {
   FeatureFlag,
   FeeBasis,
@@ -41,7 +42,15 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
 import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { PaymentService } from '../payments/payment.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { Decimal } from '../../db/money';
+import {
+  ownerCustomers,
+  tournamentParticipants,
+  tournaments,
+  users,
+} from '../../db/schema';
 
 /** Cash lane: a positive balance is money owed back to the customer. */
 const CASH_LANE = 'cash';
@@ -79,40 +88,56 @@ class ConfirmParticipantDto {
 @Injectable()
 export class TournamentsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
   ) {}
 
   create(user: RequestUser, dto: CreateTournamentDto) {
-    return this.prisma.withTenant((tx) =>
-      tx.tournament.create({
-        data: {
-          ownerId: user.ownerId!,
-          venueId: dto.venueId,
-          name: dto.name,
-          gameId: dto.gameId,
-          format: dto.format,
-          startDate: new Date(dto.startDate),
-          endDate: new Date(dto.endDate),
-          capacity: dto.capacity,
-          regType: dto.regType,
-          feeBasis: dto.feeBasis,
-          fee: new Prisma.Decimal(dto.fee),
-          regCloseAt: dto.regCloseAt ? new Date(dto.regCloseAt) : null,
-        },
-      }),
+    return this.db.withTenant(
+      async (tx) =>
+        (
+          await tx
+            .insert(tournaments)
+            .values({
+              id: randomUUID(),
+              ownerId: user.ownerId!,
+              venueId: dto.venueId,
+              name: dto.name,
+              gameId: dto.gameId,
+              format: dto.format,
+              // `date` columns are string-mode: store the date portion only.
+              startDate: new Date(dto.startDate).toISOString().slice(0, 10),
+              endDate: new Date(dto.endDate).toISOString().slice(0, 10),
+              capacity: dto.capacity,
+              regType: dto.regType,
+              feeBasis: dto.feeBasis,
+              fee: new Decimal(dto.fee).toFixed(2),
+              regCloseAt: dto.regCloseAt ? new Date(dto.regCloseAt) : null,
+            })
+            .returning()
+        )[0],
     );
   }
 
   /** Public listing for discovery. Participant PII is NOT exposed here. */
   list(venueId: string) {
-    return this.prisma.withTenantBypass((tx) =>
-      tx.tournament.findMany({
-        where: { venueId },
-        include: { _count: { select: { participants: true } } },
-      }),
-    );
+    return this.db.withTenantBypass(async (tx) => {
+      const rows = await tx.query.tournaments.findMany({
+        where: eq(tournaments.venueId, venueId),
+        extras: {
+          participantCount: sql<number>`(
+            SELECT COUNT(*)::int FROM ${tournamentParticipants}
+            WHERE ${tournamentParticipants.tournamentId} = ${tournaments.id}
+          )`.as('participant_count'),
+        },
+      });
+      // Preserve the Prisma `_count.participants` shape consumed by the client.
+      return rows.map(({ participantCount, ...t }) => ({
+        ...t,
+        _count: { participants: Number(participantCount) },
+      }));
+    });
   }
 
   /**
@@ -122,16 +147,23 @@ export class TournamentsService {
    * unlike the public `list()` which omits participant detail.
    */
   listForOwner(venueId: string) {
-    return this.prisma.withTenant((tx) =>
-      tx.tournament.findMany({
-        where: { venueId },
-        include: {
-          _count: { select: { participants: true } },
-          participants: { orderBy: { createdAt: 'asc' } },
+    return this.db.withTenant(async (tx) => {
+      const rows = await tx.query.tournaments.findMany({
+        where: eq(tournaments.venueId, venueId),
+        with: {
+          tournamentParticipants: {
+            orderBy: asc(tournamentParticipants.createdAt),
+          },
         },
-        orderBy: { createdAt: 'desc' },
-      }),
-    );
+        orderBy: desc(tournaments.createdAt),
+      });
+      // Preserve the Prisma `participants` + `_count.participants` shape.
+      return rows.map(({ tournamentParticipants: participants, ...t }) => ({
+        ...t,
+        participants,
+        _count: { participants: participants.length },
+      }));
+    });
   }
 
   /**
@@ -139,8 +171,8 @@ export class TournamentsService {
    * without live keys), and capture the captain into the player DB.
    */
   async register(tournamentId: string, dto: RegisterDto) {
-    const t = await this.prisma.withTenantBypass((tx) =>
-      tx.tournament.findUnique({ where: { id: tournamentId } }),
+    const t = await this.db.withTenantBypass((tx) =>
+      tx.query.tournaments.findFirst({ where: eq(tournaments.id, tournamentId) }),
     );
     if (!t) throw new NotFoundException('Tournament not found');
     if (t.regCloseAt && t.regCloseAt < new Date()) {
@@ -157,12 +189,16 @@ export class TournamentsService {
     // concurrent registrations both pass a stale count and over-fill the
     // tournament / double-charge. The whole create runs in one tx so the count
     // and the insert are atomic.
-    const result = await this.prisma.withTenantId(t.ownerId, async (tx) => {
+    const result = await this.db.withTenantId(t.ownerId, async (tx) => {
       // Reuse an existing unpaid registration for the same captain (retry /
       // double-submit) so we never create a duplicate participant or order.
-      const existing = await tx.tournamentParticipant.findFirst({
-        where: { tournamentId, idempotencyKey, paid: false },
-        orderBy: { createdAt: 'asc' },
+      const existing = await tx.query.tournamentParticipants.findFirst({
+        where: and(
+          eq(tournamentParticipants.tournamentId, tournamentId),
+          eq(tournamentParticipants.idempotencyKey, idempotencyKey),
+          eq(tournamentParticipants.paid, false),
+        ),
+        orderBy: asc(tournamentParticipants.createdAt),
       });
       if (existing) {
         // Capture/refresh the captain CRM row on the retry too (idempotent).
@@ -177,23 +213,30 @@ export class TournamentsService {
         };
       }
 
-      const count = await tx.tournamentParticipant.count({
-        where: { tournamentId },
-      });
+      const count = (
+        await tx
+          .select({ c: sql<number>`COUNT(*)::int` })
+          .from(tournamentParticipants)
+          .where(eq(tournamentParticipants.tournamentId, tournamentId))
+      )[0].c;
       if (count >= t.capacity) {
         throw new BadRequestException('Tournament is full');
       }
 
-      const participant = await tx.tournamentParticipant.create({
-        data: {
-          tournamentId,
-          teamName: dto.teamName,
-          captainName: dto.captainName,
-          captainMobile: dto.captainMobile,
-          paid: false,
-          idempotencyKey,
-        },
-      });
+      const participant = (
+        await tx
+          .insert(tournamentParticipants)
+          .values({
+            id: randomUUID(),
+            tournamentId,
+            teamName: dto.teamName,
+            captainName: dto.captainName,
+            captainMobile: dto.captainMobile,
+            paid: false,
+            idempotencyKey,
+          })
+          .returning()
+      )[0];
 
       const order = await this.payments.createOrder(
         Number(t.fee),
@@ -201,10 +244,10 @@ export class TournamentsService {
       );
       // Persist the order id so a retried register reuses it and so confirm can
       // validate the handshake order against the participant (BUG-3).
-      await tx.tournamentParticipant.update({
-        where: { id: participant.id },
-        data: { razorpayOrderId: order.id },
-      });
+      await tx
+        .update(tournamentParticipants)
+        .set({ razorpayOrderId: order.id })
+        .where(eq(tournamentParticipants.id, participant.id));
 
       // Capture the captain into the owner CRM (PRD §4.7); upserts a User by
       // mobile so cancelRegistration() can always resolve a ledger customer.
@@ -225,30 +268,34 @@ export class TournamentsService {
    * the owner CRM. register() relies on this so every paid registration has a
    * resolvable User row, which keeps the refund ledger balanced (BUG-4).
    */
-  private async captureCaptain(
-    tx: Prisma.TransactionClient,
-    ownerId: string,
-    dto: RegisterDto,
-  ) {
-    const user = await tx.user.findUnique({
-      where: { mobile: dto.captainMobile },
+  private async captureCaptain(tx: DbTx, ownerId: string, dto: RegisterDto) {
+    const user = await tx.query.users.findFirst({
+      where: eq(users.mobile, dto.captainMobile),
     });
     const customer =
       user ??
-      (await tx.user.create({
-        data: {
-          role: 'customer',
-          name: dto.captainName,
-          mobile: dto.captainMobile,
-        },
-      }));
-    await tx.ownerCustomer.upsert({
-      where: {
-        ownerId_customerId: { ownerId, customerId: customer.id },
-      },
-      create: { ownerId, customerId: customer.id },
-      update: { lastVisitAt: new Date() },
-    });
+      (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: 'customer',
+            name: dto.captainName,
+            mobile: dto.captainMobile,
+          })
+          .returning()
+      )[0];
+    await tx
+      .insert(ownerCustomers)
+      .values({
+        id: randomUUID(),
+        ownerId,
+        customerId: customer.id,
+      })
+      .onConflictDoUpdate({
+        target: [ownerCustomers.ownerId, ownerCustomers.customerId],
+        set: { lastVisitAt: new Date() },
+      });
     return customer;
   }
 
@@ -267,29 +314,33 @@ export class TournamentsService {
     participantId: string,
     razorpayPaymentId?: string,
   ) {
-    return this.prisma.withTenantBypass(async (tx) => {
-      const t = await tx.tournament.findFirst({
-        where: { id: tournamentId, ownerId },
+    return this.db.withTenantBypass(async (tx) => {
+      const t = await tx.query.tournaments.findFirst({
+        where: and(eq(tournaments.id, tournamentId), eq(tournaments.ownerId, ownerId)),
       });
       if (!t) throw new NotFoundException('Tournament not found');
 
-      const p = await tx.tournamentParticipant.findUnique({
-        where: { id: participantId },
+      const p = await tx.query.tournamentParticipants.findFirst({
+        where: eq(tournamentParticipants.id, participantId),
       });
       if (!p || p.tournamentId !== tournamentId) {
         throw new NotFoundException('Participant not found');
       }
       // Idempotency: if already paid, return without re-processing.
       if (p.paid) return p;
-      return tx.tournamentParticipant.update({
-        where: { id: participantId },
-        data: {
-          paid: true,
-          // Persist the captured gateway payment id so a later cancellation can
-          // refund against it (BUG-3). Only set when supplied by the handshake.
-          ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
-        },
-      });
+      return (
+        await tx
+          .update(tournamentParticipants)
+          .set({
+            paid: true,
+            // Persist the captured gateway payment id so a later cancellation
+            // can refund against it (BUG-3). Only set when supplied by the
+            // handshake.
+            ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
+          })
+          .where(eq(tournamentParticipants.id, participantId))
+          .returning()
+      )[0];
     });
   }
 
@@ -319,15 +370,17 @@ export class TournamentsService {
     tournamentId: string,
     participantId: string,
   ) {
-    const t = await this.prisma.withTenantBypass((tx) =>
-      tx.tournament.findUnique({ where: { id: tournamentId } }),
+    const t = await this.db.withTenantBypass((tx) =>
+      tx.query.tournaments.findFirst({ where: eq(tournaments.id, tournamentId) }),
     );
     if (!t || t.ownerId !== ownerId) {
       throw new NotFoundException('Tournament not found');
     }
 
-    const p = await this.prisma.withTenantBypass((tx) =>
-      tx.tournamentParticipant.findUnique({ where: { id: participantId } }),
+    const p = await this.db.withTenantBypass((tx) =>
+      tx.query.tournamentParticipants.findFirst({
+        where: eq(tournamentParticipants.id, participantId),
+      }),
     );
     if (!p || p.tournamentId !== tournamentId) {
       throw new NotFoundException('Participant not found');
@@ -358,19 +411,19 @@ export class TournamentsService {
       gatewayId = res.id;
     }
 
-    return this.prisma.withTenantId(t.ownerId, async (tx) => {
+    return this.db.withTenantId(t.ownerId, async (tx) => {
       // Re-check inside the tx for idempotency under concurrency.
-      const fresh = await tx.tournamentParticipant.findUnique({
-        where: { id: participantId },
+      const fresh = await tx.query.tournamentParticipants.findFirst({
+        where: eq(tournamentParticipants.id, participantId),
       });
       if (!fresh || !fresh.paid) {
         return { cancelled: true as const, refunded: false as const };
       }
 
-      await tx.tournamentParticipant.update({
-        where: { id: participantId },
-        data: { paid: false },
-      });
+      await tx
+        .update(tournamentParticipants)
+        .set({ paid: false })
+        .where(eq(tournamentParticipants.id, participantId));
 
       // BUG-4: every gateway refund MUST have a matching ledger entry or the
       // cash book is unbalanced. register() upserts a User by mobile, so the
@@ -378,23 +431,27 @@ export class TournamentsService {
       // upsert one now keyed off the captain's captured details rather than
       // silently skipping the ledger post.
       if (fee > 0) {
-        let customer = await tx.user.findUnique({
-          where: { mobile: fresh.captainMobile },
+        let customer = await tx.query.users.findFirst({
+          where: eq(users.mobile, fresh.captainMobile),
         });
         if (!customer) {
-          customer = await tx.user.create({
-            data: {
-              role: 'customer',
-              name: fresh.captainName,
-              mobile: fresh.captainMobile,
-            },
-          });
+          customer = (
+            await tx
+              .insert(users)
+              .values({
+                id: randomUUID(),
+                role: 'customer',
+                name: fresh.captainName,
+                mobile: fresh.captainMobile,
+              })
+              .returning()
+          )[0];
         }
         await this.ledger.post(tx, {
           ownerId: t.ownerId,
           customerId: customer.id,
           type: LedgerTxnType.CASH_REFUND,
-          amount: new Prisma.Decimal(fee),
+          amount: new Decimal(fee),
           lane: CASH_LANE,
           refType: 'tournament_participant',
           refId: participantId,

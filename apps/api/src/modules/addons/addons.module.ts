@@ -31,8 +31,21 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
 import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { randomUUID } from 'node:crypto';
+import { and, count, eq } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import { Decimal, money } from '../../db/money';
+import { addons, bookingAddons } from '../../db/schema';
+
+/** Postgres SQLSTATE for a foreign-key violation (was Prisma P2003). */
+const PG_FK_VIOLATION = '23503';
+
+/** Narrow an unknown error to a pg driver error carrying a SQLSTATE `code`. */
+function pgErrorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? (err as { code?: string }).code
+    : undefined;
+}
 
 class CreateAddonDto {
   @IsString() name!: string;
@@ -61,7 +74,7 @@ class ToggleActiveDto {
  */
 @Injectable()
 export class AddonsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   private ownerId(user: RequestUser): string {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
@@ -69,24 +82,29 @@ export class AddonsService {
   }
 
   create(user: RequestUser, venueId: string, dto: CreateAddonDto) {
-    return this.prisma.withTenant((tx) =>
-      tx.addon.create({
-        data: {
+    return this.db.withTenant(async (tx) => {
+      const [addon] = await tx
+        .insert(addons)
+        .values({
+          id: randomUUID(),
           ownerId: user.ownerId!,
           venueId,
           name: dto.name,
           type: dto.type,
-          price: new Prisma.Decimal(dto.price),
+          price: money(new Decimal(dto.price)),
           stock: dto.stock ?? null,
-        },
-      }),
-    );
+        })
+        .returning();
+      return addon;
+    });
   }
 
   /** Public list for a venue (used at customer checkout). */
   list(venueId: string) {
-    return this.prisma.withTenantBypass((tx) =>
-      tx.addon.findMany({ where: { venueId, active: true } }),
+    return this.db.withTenantBypass((tx) =>
+      tx.query.addons.findMany({
+        where: and(eq(addons.venueId, venueId), eq(addons.active, true)),
+      }),
     );
   }
 
@@ -95,8 +113,10 @@ export class AddonsService {
     const ownerId = this.ownerId(user);
     // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone,
     // which a superuser DB connection bypasses.
-    const addon = await this.prisma.withTenant((tx) =>
-      tx.addon.findFirst({ where: { id: addonId, ownerId } }),
+    const addon = await this.db.withTenant((tx) =>
+      tx.query.addons.findFirst({
+        where: and(eq(addons.id, addonId), eq(addons.ownerId, ownerId)),
+      }),
     );
     if (!addon) throw new NotFoundException('Add-on not found');
     return addon;
@@ -105,38 +125,45 @@ export class AddonsService {
   /** Update mutable fields of an add-on (name/type/price/stock/active). */
   async update(user: RequestUser, addonId: string, dto: UpdateAddonDto) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone.
-      const existing = await tx.addon.findFirst({
-        where: { id: addonId, ownerId },
+      const existing = await tx.query.addons.findFirst({
+        where: and(eq(addons.id, addonId), eq(addons.ownerId, ownerId)),
       });
       if (!existing) throw new NotFoundException('Add-on not found');
 
-      const data: Prisma.AddonUpdateInput = {};
+      const data: Partial<typeof addons.$inferInsert> = {};
       if (dto.name !== undefined) data.name = dto.name;
       if (dto.type !== undefined) data.type = dto.type;
-      if (dto.price !== undefined) data.price = new Prisma.Decimal(dto.price);
+      if (dto.price !== undefined) data.price = money(new Decimal(dto.price));
       if (dto.stock !== undefined) data.stock = dto.stock; // null => unlimited
       if (dto.active !== undefined) data.active = dto.active;
 
-      return tx.addon.update({ where: { id: addonId }, data });
+      const [updated] = await tx
+        .update(addons)
+        .set(data)
+        .where(eq(addons.id, addonId))
+        .returning();
+      return updated;
     });
   }
 
   /** Toggle (or explicitly set) the active flag — soft deactivation. */
   async setActive(user: RequestUser, addonId: string, active?: boolean) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone.
-      const existing = await tx.addon.findFirst({
-        where: { id: addonId, ownerId },
+      const existing = await tx.query.addons.findFirst({
+        where: and(eq(addons.id, addonId), eq(addons.ownerId, ownerId)),
       });
       if (!existing) throw new NotFoundException('Add-on not found');
       const next = active ?? !existing.active;
-      return tx.addon.update({
-        where: { id: addonId },
-        data: { active: next },
-      });
+      const [updated] = await tx
+        .update(addons)
+        .set({ active: next })
+        .where(eq(addons.id, addonId))
+        .returning();
+      return updated;
     });
   }
 
@@ -147,31 +174,32 @@ export class AddonsService {
    */
   async remove(user: RequestUser, addonId: string) {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenant(async (tx) => {
+    return this.db.withTenant(async (tx) => {
       // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone.
-      const existing = await tx.addon.findFirst({
-        where: { id: addonId, ownerId },
+      const existing = await tx.query.addons.findFirst({
+        where: and(eq(addons.id, addonId), eq(addons.ownerId, ownerId)),
       });
       if (!existing) throw new NotFoundException('Add-on not found');
 
-      const referenced = await tx.bookingAddon.count({ where: { addonId } });
+      const [{ c: referenced }] = await tx
+        .select({ c: count() })
+        .from(bookingAddons)
+        .where(eq(bookingAddons.addonId, addonId));
       if (referenced > 0) {
-        const addon = await tx.addon.update({
-          where: { id: addonId },
-          data: { active: false },
-        });
+        const [addon] = await tx
+          .update(addons)
+          .set({ active: false })
+          .where(eq(addons.id, addonId))
+          .returning();
         return { deleted: false, deactivated: true, addon };
       }
 
       try {
-        await tx.addon.delete({ where: { id: addonId } });
+        await tx.delete(addons).where(eq(addons.id, addonId));
       } catch (err) {
         // Guard against a concurrent FK reference slipping in between the
-        // count and the delete — surface a 400 rather than a raw Prisma error.
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2003'
-        ) {
+        // count and the delete — surface a 400 rather than a raw driver error.
+        if (pgErrorCode(err) === PG_FK_VIOLATION) {
           throw new BadRequestException(
             'Add-on is referenced by a booking and cannot be deleted; deactivate it instead',
           );

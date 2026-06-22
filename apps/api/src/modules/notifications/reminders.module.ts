@@ -1,7 +1,9 @@
 import { Injectable, Logger, Module } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { BookingStatus } from '@sportsbooking/shared';
-import { PrismaService } from '../../prisma/prisma.service';
+import { asc, eq } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import { bookings as bookingsTable, slots as slotsTable } from '../../db/schema';
 import { NotificationService } from './notification.service';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -33,7 +35,7 @@ export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly notifications: NotificationService,
   ) {}
 
@@ -59,30 +61,29 @@ export class RemindersService {
 
       // Confirmed bookings whose FIRST upcoming slot falls inside the window.
       // We match on the occupying slot rows (a booking can span several slots);
-      // the `some` filter is enough to surface a booking whose play time is
+      // an in-window slot is enough to surface a booking whose play time is
       // imminent. Past slots (startsAt < now) are excluded so we never remind
-      // about a session that already started.
-      const bookings = await this.prisma.withTenantBypass((tx) =>
-        tx.booking.findMany({
-          where: {
-            status: BookingStatus.CONFIRMED,
-            slots: {
-              some: {
-                startsAt: { gte: now, lte: windowEnd },
-              },
-            },
-          },
-          include: {
-            slots: { orderBy: { startsAt: 'asc' } },
-            venue: { select: { name: true } },
-            customer: { select: { mobile: true } },
+      // about a session that already started. The relational query builder
+      // can't filter on a `many` relation, so we load confirmed bookings with
+      // their slots and keep those with at least one slot inside the window.
+      const allConfirmed = await this.db.withTenantBypass((tx) =>
+        tx.query.bookings.findMany({
+          where: eq(bookingsTable.status, BookingStatus.CONFIRMED),
+          with: {
+            slots: { orderBy: asc(slotsTable.startsAt) },
+            venue: { columns: { name: true } },
+            user: { columns: { mobile: true } },
           },
         }),
       );
 
+      const bookings = allConfirmed.filter((b) =>
+        b.slots.some((s) => s.startsAt >= now && s.startsAt <= windowEnd),
+      );
+
       for (const booking of bookings) {
         try {
-          const mobile = booking.customer?.mobile?.trim();
+          const mobile = booking.user?.mobile?.trim();
           if (!mobile) {
             skipped.push(booking.id);
             continue;

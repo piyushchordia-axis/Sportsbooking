@@ -3,12 +3,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import {
   LedgerTxnType,
   PaymentStatus,
   ReferralStatus,
 } from '@sportsbooking/shared';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
+import type { DbTx } from '../../db';
+import { bookings, owners, referrals } from '../../db/schema';
+import { dec } from '../../db/money';
 import { LedgerService } from '../ledger/ledger.service';
 import { creditLane } from '../loyalty/loyalty.service';
 
@@ -28,34 +32,50 @@ export class ReferralService {
 
   /** Get or create the caller's referral code for a given owner. */
   async myCode(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     referrerId: string,
   ): Promise<string> {
-    const existing = await tx.referral.findFirst({
-      where: { ownerId, referrerId, refereeId: null },
+    const existing = await tx.query.referrals.findFirst({
+      where: and(
+        eq(referrals.ownerId, ownerId),
+        eq(referrals.referrerId, referrerId),
+        isNull(referrals.refereeId),
+      ),
     });
     if (existing) return existing.code;
     let code = this.generateCode();
     // avoid collision on the (ownerId, code) unique constraint
-    while (await tx.referral.findFirst({ where: { ownerId, code } })) {
+    while (
+      await tx.query.referrals.findFirst({
+        where: and(eq(referrals.ownerId, ownerId), eq(referrals.code, code)),
+      })
+    ) {
       code = this.generateCode();
     }
-    await tx.referral.create({
-      data: { ownerId, referrerId, code, status: ReferralStatus.PENDING },
+    await tx.insert(referrals).values({
+      id: randomUUID(),
+      ownerId,
+      referrerId,
+      code,
+      status: ReferralStatus.PENDING,
     });
     return code;
   }
 
   /** A new player applies a code → links them as the referee (still pending). */
   async apply(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     code: string,
     refereeId: string,
   ): Promise<void> {
-    const ref = await tx.referral.findFirst({
-      where: { ownerId, code, status: ReferralStatus.PENDING },
+    const ref = await tx.query.referrals.findFirst({
+      where: and(
+        eq(referrals.ownerId, ownerId),
+        eq(referrals.code, code),
+        eq(referrals.status, ReferralStatus.PENDING),
+      ),
     });
     if (!ref) throw new NotFoundException('Invalid referral code');
     if (ref.referrerId === refereeId) return; // no self-referral
@@ -64,22 +84,27 @@ export class ReferralService {
     // has already been linked to this referrer for this owner, do not create a
     // duplicate row — return the existing link instead. (Tenant-scoped by
     // ownerId.)
-    const existing = await tx.referral.findFirst({
-      where: { ownerId, referrerId: ref.referrerId, refereeId },
+    const existing = await tx.query.referrals.findFirst({
+      where: and(
+        eq(referrals.ownerId, ownerId),
+        eq(referrals.referrerId, ref.referrerId),
+        eq(referrals.refereeId, refereeId),
+      ),
     });
     if (existing) return;
 
     // Reject if the referee is not actually a new customer: they already have a
     // paid (or settled-at-venue) booking with this owner.
-    const paidBooking = await tx.booking.findFirst({
-      where: {
-        ownerId,
-        customerId: refereeId,
-        paymentStatus: {
-          in: [PaymentStatus.PAID, PaymentStatus.SETTLED_AT_VENUE],
-        },
-      },
-      select: { id: true },
+    const paidBooking = await tx.query.bookings.findFirst({
+      where: and(
+        eq(bookings.ownerId, ownerId),
+        eq(bookings.customerId, refereeId),
+        inArray(bookings.paymentStatus, [
+          PaymentStatus.PAID,
+          PaymentStatus.SETTLED_AT_VENUE,
+        ]),
+      ),
+      columns: { id: true },
     });
     if (paidBooking) {
       throw new BadRequestException(
@@ -88,14 +113,13 @@ export class ReferralService {
     }
 
     // clone into a per-referee pending row so one code can refer many players
-    await tx.referral.create({
-      data: {
-        ownerId,
-        referrerId: ref.referrerId,
-        refereeId,
-        code,
-        status: ReferralStatus.PENDING,
-      },
+    await tx.insert(referrals).values({
+      id: randomUUID(),
+      ownerId,
+      referrerId: ref.referrerId,
+      refereeId,
+      code,
+      status: ReferralStatus.PENDING,
     });
   }
 
@@ -104,17 +128,23 @@ export class ReferralService {
    * this is their first paid booking. Idempotent. Called from booking markPaid.
    */
   async releaseOnFirstPaid(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     refereeId: string,
   ): Promise<void> {
-    const ref = await tx.referral.findFirst({
-      where: { ownerId, refereeId, status: ReferralStatus.PENDING },
+    const ref = await tx.query.referrals.findFirst({
+      where: and(
+        eq(referrals.ownerId, ownerId),
+        eq(referrals.refereeId, refereeId),
+        eq(referrals.status, ReferralStatus.PENDING),
+      ),
     });
     if (!ref) return;
 
-    const owner = await tx.owner.findUnique({ where: { id: ownerId } });
-    const reward = owner?.referralReward ?? new Prisma.Decimal(0);
+    const owner = await tx.query.owners.findFirst({
+      where: eq(owners.id, ownerId),
+    });
+    const reward = dec(owner?.referralReward ?? '0');
     if (reward.greaterThan(0)) {
       await this.ledger.post(tx, {
         ownerId,
@@ -127,9 +157,12 @@ export class ReferralService {
         note: 'Referral reward (referee first paid booking)',
       });
     }
-    await tx.referral.update({
-      where: { id: ref.id },
-      data: { status: ReferralStatus.REWARDED, rewardReleasedOnFirstPaid: true },
-    });
+    await tx
+      .update(referrals)
+      .set({
+        status: ReferralStatus.REWARDED,
+        rewardReleasedOnFirstPaid: true,
+      })
+      .where(eq(referrals.id, ref.id));
   }
 }

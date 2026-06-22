@@ -10,8 +10,10 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { UserRole } from '@sportsbooking/shared';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { NotificationService } from '../notifications/notification.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { owners } from '../../db/schema';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Send a renewal reminder when the AMC is due within this window. */
@@ -43,7 +45,7 @@ export class AmcService {
   private readonly logger = new Logger(AmcService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly notifications: NotificationService,
   ) {}
 
@@ -67,13 +69,13 @@ export class AmcService {
     const suspended: string[] = [];
     const wouldSuspend: string[] = [];
 
-    const owners = await this.prisma.withTenantBypass((tx) =>
-      tx.owner.findMany({
-        where: {
-          status: 'active',
-          amcRenewalDate: { not: null },
-        },
-        select: {
+    const activeOwners = await this.db.withTenantBypass((tx) =>
+      tx.query.owners.findMany({
+        where: and(
+          eq(owners.status, 'active'),
+          isNotNull(owners.amcRenewalDate),
+        ),
+        columns: {
           id: true,
           name: true,
           contactEmail: true,
@@ -84,18 +86,18 @@ export class AmcService {
       }),
     );
 
-    for (const owner of owners) {
+    for (const owner of activeOwners) {
       const renewalDate = owner.amcRenewalDate;
       if (!renewalDate) continue;
 
       // Overdue past the grace period → suspend (or dry-run log).
       if (renewalDate < suspendCutoff) {
         if (isProd) {
-          await this.prisma.withTenantBypass((tx) =>
-            tx.owner.update({
-              where: { id: owner.id },
-              data: { status: 'suspended' },
-            }),
+          await this.db.withTenantBypass((tx) =>
+            tx
+              .update(owners)
+              .set({ status: 'suspended' })
+              .where(eq(owners.id, owner.id)),
           );
           suspended.push(owner.id);
           this.logger.warn(
@@ -133,7 +135,7 @@ export class AmcService {
     name: string;
     contactEmail: string;
     contactMobile: string | null;
-    amcAmount: unknown;
+    amcAmount: string | null;
     amcRenewalDate: Date | null;
   }): Promise<void> {
     const dueOn = owner.amcRenewalDate

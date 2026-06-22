@@ -9,8 +9,10 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Request } from 'express';
+import { eq } from 'drizzle-orm';
 import { Public } from '../../common/decorators/public.decorator';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { bookings as bookingsTable } from '../../db/schema';
 import { BookingsService } from '../bookings/bookings.service';
 import { PaymentService } from './payment.service';
 
@@ -26,7 +28,7 @@ export class PaymentsController {
 
   constructor(
     private readonly payments: PaymentService,
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     // BookingsService isn't exported by its module; resolve it lazily from the
     // app container so the webhook can reuse the idempotent confirm logic
     // without creating a module-level circular import.
@@ -65,8 +67,10 @@ export class PaymentsController {
         return { received: true as const };
       }
 
-      const booking = await this.prisma.withTenantBypass((tx) =>
-        tx.booking.findFirst({ where: { razorpayOrderId: orderId } }),
+      const booking = await this.db.withTenantBypass((tx) =>
+        tx.query.bookings.findFirst({
+          where: eq(bookingsTable.razorpayOrderId, orderId),
+        }),
       );
       if (!booking) {
         this.logger.warn(`No booking for order ${orderId}; ignoring`);

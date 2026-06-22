@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FeatureFlag } from '@sportsbooking/shared';
+import { eq } from 'drizzle-orm';
 import { REQUIRE_FLAG_KEY } from '../decorators/require-flag.decorator';
 import { RequestUser } from '../decorators/current-user.decorator';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { owners } from '../../db/schema';
 
 /**
  * Enforces per-owner feature-flag entitlements (PRD §2.2). Routes opt in with
@@ -29,7 +31,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class FeatureFlagGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -48,14 +50,14 @@ export class FeatureFlagGuard implements CanActivate {
     // an owner in scope) — do not break the flow; allow it.
     if (!ownerId) return true;
 
-    const owner = await this.prisma.withTenantBypass((tx) =>
-      tx.owner.findUnique({
-        where: { id: ownerId },
-        select: { featureFlags: true },
+    const owner = await this.db.withTenantBypass((tx) =>
+      tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+        columns: { featureFlags: true },
       }),
     );
 
-    if (!owner || !owner.featureFlags.includes(flag)) {
+    if (!owner || !owner.featureFlags?.includes(flag)) {
       throw new ForbiddenException(`Feature not enabled: ${flag}`);
     }
     return true;

@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
 import { LedgerTxnType } from '@sportsbooking/shared';
+import { eq } from 'drizzle-orm';
+import type { DbTx } from '../../db';
+import { Decimal, dec } from '../../db/money';
+import { owners, venueSettings } from '../../db/schema';
 import { LedgerService } from '../ledger/ledger.service';
 
 /**
@@ -45,20 +48,12 @@ export class LoyaltyService {
   }
 
   /** Points balance for a customer ON A GIVEN OWNER (per-owner lane). */
-  pointsBalance(
-    tx: Prisma.TransactionClient,
-    ownerId: string,
-    customerId: string,
-  ) {
+  pointsBalance(tx: DbTx, ownerId: string, customerId: string) {
     return this.ledger.balance(tx, customerId, pointsLane(ownerId));
   }
 
   /** Credit balance for a customer ON A GIVEN OWNER (per-owner lane). */
-  creditBalance(
-    tx: Prisma.TransactionClient,
-    ownerId: string,
-    customerId: string,
-  ) {
+  creditBalance(tx: DbTx, ownerId: string, customerId: string) {
     return this.ledger.balance(tx, customerId, creditLane(ownerId));
   }
 
@@ -68,19 +63,21 @@ export class LoyaltyService {
    * default. `venueId` is optional so legacy callers keep working.
    */
   private async resolveEarnRate(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     venueId?: string,
   ): Promise<number> {
     if (venueId) {
-      const settings = await tx.venueSettings.findUnique({
-        where: { venueId },
+      const settings = await tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, venueId),
       });
       if (settings?.loyaltyEarnRate != null) {
         return Number(settings.loyaltyEarnRate);
       }
     }
-    const owner = await tx.owner.findUnique({ where: { id: ownerId } });
+    const owner = await tx.query.owners.findFirst({
+      where: eq(owners.id, ownerId),
+    });
     return owner?.loyaltyEarnRate
       ? Number(owner.loyaltyEarnRate)
       : this.defaultEarnRate;
@@ -91,19 +88,21 @@ export class LoyaltyService {
    * precedence as the earn rate.
    */
   private async resolveRedeemValue(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     venueId?: string,
   ): Promise<number> {
     if (venueId) {
-      const settings = await tx.venueSettings.findUnique({
-        where: { venueId },
+      const settings = await tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, venueId),
       });
       if (settings?.loyaltyRedeemValue != null) {
         return Number(settings.loyaltyRedeemValue);
       }
     }
-    const owner = await tx.owner.findUnique({ where: { id: ownerId } });
+    const owner = await tx.query.owners.findFirst({
+      where: eq(owners.id, ownerId),
+    });
     return owner?.loyaltyRedeemValue
       ? Number(owner.loyaltyRedeemValue)
       : this.defaultRedeemValue;
@@ -114,7 +113,7 @@ export class LoyaltyService {
    * the per-venue override. Used by the checkout quote to cap points-to-cash.
    */
   redeemValueFor(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     venueId?: string,
   ): Promise<number> {
@@ -123,10 +122,10 @@ export class LoyaltyService {
 
   /** Earn points on a settled cash spend (called when a booking is paid). */
   async earn(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
-    cashSpend: Prisma.Decimal,
+    cashSpend: Decimal,
     bookingId: string,
     venueId?: string,
   ): Promise<void> {
@@ -150,14 +149,14 @@ export class LoyaltyService {
    * Returns the rupee value applied. Caller caps `points` to what's needed.
    */
   async redeem(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
     points: number,
     bookingId: string,
     venueId?: string,
-  ): Promise<Prisma.Decimal> {
-    if (points <= 0) return new Prisma.Decimal(0);
+  ): Promise<Decimal> {
+    if (points <= 0) return dec(0);
     const redeemValue = await this.resolveRedeemValue(tx, ownerId, venueId);
     await this.ledger.post(tx, {
       ownerId,
@@ -169,7 +168,7 @@ export class LoyaltyService {
       refId: bookingId,
       note: `Redeemed ${points} pts`,
     });
-    return new Prisma.Decimal(points).mul(redeemValue);
+    return dec(points).mul(redeemValue);
   }
 
   /**
@@ -177,10 +176,10 @@ export class LoyaltyService {
    * cancellation of a booking that had redeemed points). Not cash (PRD §4.4).
    */
   async creditRefund(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
-    amount: Prisma.Decimal,
+    amount: Decimal,
     bookingId: string,
   ): Promise<void> {
     if (!amount.greaterThan(0)) return;

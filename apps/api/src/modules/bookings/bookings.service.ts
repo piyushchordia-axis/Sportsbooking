@@ -7,7 +7,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import {
   BookingResponse,
   BookingStatus,
@@ -18,7 +29,23 @@ import {
   UserRole,
 } from '@sportsbooking/shared';
 import { DateTime } from 'luxon';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { Decimal, dec, money } from '../../db/money';
+import {
+  addons as addonsTable,
+  bookableUnits,
+  bookingAddons,
+  bookings,
+  ledgerTxns,
+  offers,
+  ownerCustomers,
+  playerProfiles,
+  slots,
+  users,
+  venues,
+  venueSettings,
+} from '../../db/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { LoyaltyService, pointsLane } from '../loyalty/loyalty.service';
 import { MembershipsService } from '../memberships/memberships.service';
@@ -29,12 +56,23 @@ import { ReferralService } from '../referral/referral.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { CartSlotDto, CreateBookingDto, ListBookingsQueryDto } from './dto';
 
-const UNIQUE_VIOLATION = 'P2002';
+/** Postgres SQLSTATE for a unique-constraint violation (was Prisma P2002). */
+const UNIQUE_VIOLATION = '23505';
 
 /** Cash lane: a positive balance is money returned to the customer (refunds). */
 const CASH_LANE = 'cash';
 /** Dues lane: a positive balance is money the customer OWES (e.g. no-show fee). */
 const DUES_LANE = 'dues';
+
+/** True if a thrown error is a Postgres unique-violation (concurrent slot lock). */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === UNIQUE_VIOLATION
+  );
+}
 
 /**
  * Owner cancellation policy templates (VenueSettings.cancellationTemplate).
@@ -77,7 +115,7 @@ export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly pricing: PricingService,
     private readonly memberships: MembershipsService,
     private readonly loyalty: LoyaltyService,
@@ -109,8 +147,8 @@ export class BookingsService {
     dto: CreateBookingDto,
     user: RequestUser | undefined,
   ): Promise<BookingResponse> {
-    const venue = await this.prisma.withTenantBypass((tx) =>
-      tx.venue.findUnique({ where: { id: dto.venueId } }),
+    const venue = await this.db.withTenantBypass((tx) =>
+      tx.query.venues.findFirst({ where: eq(venues.id, dto.venueId) }),
     );
     if (!venue) throw new NotFoundException('Venue not found');
     const ownerId = venue.ownerId;
@@ -125,10 +163,10 @@ export class BookingsService {
       );
     }
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
+    return this.db.withTenantId(ownerId, async (tx) => {
       if (dto.idempotencyKey) {
-        const existing = await tx.booking.findUnique({
-          where: { idempotencyKey: dto.idempotencyKey },
+        const existing = await tx.query.bookings.findFirst({
+          where: eq(bookings.idempotencyKey, dto.idempotencyKey),
         });
         if (existing) return this.toResponse(existing, []);
       }
@@ -200,7 +238,7 @@ export class BookingsService {
    * ledger/payment logic). Runs inside the caller's transaction.
    */
   private async createOccurrence(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     args: {
       dto: CreateBookingDto;
       venue: { id: string; ownerId: string; name: string; contactPhone: string | null };
@@ -215,7 +253,7 @@ export class BookingsService {
     const { dto, venue, ownerId, customerId, slotInputs, payMode } = args;
 
       // 1. Price each slot (resolved per-court dynamic price).
-      let slotSubtotal = new Prisma.Decimal(0);
+      let slotSubtotal = dec(0);
       const slotRows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
       const unitIds = new Set<string>();
       for (const s of slotInputs) {
@@ -233,25 +271,25 @@ export class BookingsService {
       // BYPASSES RLS, so an unscoped findMany would let a customer reference
       // another venue's add-ons. Reject if any requested id is missing/out-of-scope.
       const addons = dto.addonIds?.length
-        ? await tx.addon.findMany({
-            where: {
-              id: { in: dto.addonIds },
-              ownerId: venue.ownerId,
-              venueId: dto.venueId,
-              active: true,
-            },
+        ? await tx.query.addons.findMany({
+            where: and(
+              inArray(addonsTable.id, dto.addonIds),
+              eq(addonsTable.ownerId, venue.ownerId),
+              eq(addonsTable.venueId, dto.venueId),
+              eq(addonsTable.active, true),
+            ),
           })
         : [];
       if (dto.addonIds?.length && addons.length !== dto.addonIds.length) {
         throw new BadRequestException('Invalid add-on for this venue');
       }
       const addonSubtotal = addons.reduce(
-        (acc, a) => acc.add(a.price),
-        new Prisma.Decimal(0),
+        (acc, a) => acc.add(dec(a.price)),
+        dec(0),
       );
 
       // 3. Pack (evaluate only; debit after the lock).
-      let packDiscount = new Prisma.Decimal(0);
+      let packDiscount = dec(0);
       let packSessions = 0;
       if (dto.packId) {
         const app = await this.memberships.evaluatePack(
@@ -288,11 +326,11 @@ export class BookingsService {
         customerSegments,
       });
       const offerId = offerApp?.offerId;
-      const offerDiscount = offerApp?.discount ?? new Prisma.Decimal(0);
+      const offerDiscount = offerApp?.discount ?? dec(0);
 
       // 5. Loyalty points redemption (capped to remaining + balance).
       let pointsRedeemed = 0;
-      let pointsValue = new Prisma.Decimal(0);
+      let pointsValue = dec(0);
       if (dto.pointsToRedeem && dto.pointsToRedeem > 0) {
         const redeemValue = await this.loyalty.redeemValueFor(
           tx,
@@ -317,58 +355,58 @@ export class BookingsService {
                 .toNumber()
             : 0;
         pointsRedeemed = Math.min(dto.pointsToRedeem, balance, maxByCash);
-        pointsValue = new Prisma.Decimal(pointsRedeemed).mul(redeemValue);
+        pointsValue = dec(pointsRedeemed).mul(redeemValue);
       }
 
-      const total = Prisma.Decimal.max(
+      const total = Decimal.max(
         slotSubtotal
           .sub(packDiscount)
           .add(addonSubtotal)
           .sub(offerDiscount)
           .sub(pointsValue),
-        new Prisma.Decimal(0),
+        dec(0),
       );
 
       // 6. Create booking + occupying slot rows (the lock).
-      const booking = await tx.booking.create({
-        data: {
-          ownerId,
-          venueId: dto.venueId,
-          customerId,
-          payMode,
-          paymentStatus:
-            payMode === PayMode.PREPAY
-              ? PaymentStatus.PENDING
-              : PaymentStatus.AWAITING_VENUE_SETTLEMENT,
-          subtotal: slotSubtotal.add(addonSubtotal),
-          discount: packDiscount.add(offerDiscount),
-          total,
-          packId: dto.packId,
-          offerId,
-          pointsRedeemed: pointsValue,
-          seriesId: args.seriesId,
-          idempotencyKey: args.idempotencyKey,
-        },
-      });
+      const booking = (
+        await tx
+          .insert(bookings)
+          .values({
+            id: randomUUID(),
+            ownerId,
+            venueId: dto.venueId,
+            customerId,
+            payMode,
+            paymentStatus:
+              payMode === PayMode.PREPAY
+                ? PaymentStatus.PENDING
+                : PaymentStatus.AWAITING_VENUE_SETTLEMENT,
+            subtotal: money(slotSubtotal.add(addonSubtotal)),
+            discount: money(packDiscount.add(offerDiscount)),
+            total: money(total),
+            packId: dto.packId,
+            offerId,
+            pointsRedeemed: money(pointsValue),
+            seriesId: args.seriesId,
+            idempotencyKey: args.idempotencyKey,
+          })
+          .returning()
+      )[0];
 
       try {
         for (const r of slotRows) {
-          await tx.slot.create({
-            data: {
-              unitId: r.unitId,
-              ownerId,
-              startsAt: r.startsAt,
-              endsAt: r.endsAt,
-              status: 'booked',
-              bookingId: booking.id,
-            },
+          await tx.insert(slots).values({
+            id: randomUUID(),
+            unitId: r.unitId,
+            ownerId,
+            startsAt: r.startsAt,
+            endsAt: r.endsAt,
+            status: 'booked',
+            bookingId: booking.id,
           });
         }
       } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === UNIQUE_VIOLATION
-        ) {
+        if (isUniqueViolation(err)) {
           throw new ConflictException(
             'One or more selected slots were just booked. Please pick another.',
           );
@@ -407,19 +445,18 @@ export class BookingsService {
       // row per add-on capturing the price charged at booking time (unitPrice)
       // so reports stay correct even if the catalogue price later changes.
       for (const a of addons) {
-        await tx.bookingAddon.create({
-          data: {
-            bookingId: booking.id,
-            addonId: a.id,
-            unitPrice: a.price,
-            quantity: 1,
-          },
+        await tx.insert(bookingAddons).values({
+          id: randomUUID(),
+          bookingId: booking.id,
+          addonId: a.id,
+          unitPrice: money(dec(a.price)),
+          quantity: 1,
         });
         if (a.stock != null) {
-          await tx.addon.update({
-            where: { id: a.id },
-            data: { stock: { decrement: 1 } },
-          });
+          await tx
+            .update(addonsTable)
+            .set({ stock: a.stock - 1 })
+            .where(eq(addonsTable.id, a.id));
         }
       }
 
@@ -429,10 +466,10 @@ export class BookingsService {
         if (total.greaterThan(0)) {
           const order = await this.payments.createOrder(Number(total), booking.id);
           razorpayOrderId = order.id;
-          await tx.booking.update({
-            where: { id: booking.id },
-            data: { razorpayOrderId },
-          });
+          await tx
+            .update(bookings)
+            .set({ razorpayOrderId })
+            .where(eq(bookings.id, booking.id));
         } else {
           // BUG-7: a fully-discounted prepay booking has nothing to charge, so
           // no Razorpay order is created and confirmPayment() can never settle
@@ -440,10 +477,10 @@ export class BookingsService {
           // (mirroring markPaid's PREPAY branch) so it never gets stuck. There
           // is no cash spend, so loyalty earn (floor(0 * rate) = 0) is a no-op;
           // we keep markPaid's referral release for parity with a paid booking.
-          await tx.booking.update({
-            where: { id: booking.id },
-            data: { paymentStatus: PaymentStatus.PAID },
-          });
+          await tx
+            .update(bookings)
+            .set({ paymentStatus: PaymentStatus.PAID })
+            .where(eq(bookings.id, booking.id));
           await this.loyalty.earn(
             tx,
             ownerId,
@@ -518,16 +555,18 @@ export class BookingsService {
    * Returns a human-readable reason for the first clash, or null if all free.
    */
   private async findSlotConflict(
-    tx: Prisma.TransactionClient,
-    slots: { unitId: string; start: string; end: string }[],
+    tx: DbTx,
+    slotsArg: { unitId: string; start: string; end: string }[],
   ): Promise<string | null> {
-    const existing = await tx.slot.findFirst({
-      where: {
-        OR: slots.map((s) => ({
-          unitId: s.unitId,
-          startsAt: DateTime.fromISO(s.start).toJSDate(),
-        })),
-      },
+    const existing = await tx.query.slots.findFirst({
+      where: or(
+        ...slotsArg.map((s) =>
+          and(
+            eq(slots.unitId, s.unitId),
+            eq(slots.startsAt, DateTime.fromISO(s.start).toJSDate()),
+          ),
+        ),
+      ),
     });
     if (!existing) return null;
     return existing.status === 'blocked'
@@ -545,8 +584,8 @@ export class BookingsService {
     user?: RequestUser,
     razorpayPaymentId?: string,
   ): Promise<{ paid: true }> {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({ where: { id: bookingId } }),
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({ where: eq(bookings.id, bookingId) }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -565,8 +604,10 @@ export class BookingsService {
       throw new ForbiddenException('Booking is outside your assigned venues');
     }
 
-    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
-      const fresh = await tx.booking.findUnique({ where: { id: bookingId } });
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      const fresh = await tx.query.bookings.findFirst({
+        where: eq(bookings.id, bookingId),
+      });
       if (!fresh) throw new NotFoundException('Booking not found');
       if (fresh.status === BookingStatus.CANCELLED) {
         throw new BadRequestException(
@@ -580,9 +621,9 @@ export class BookingsService {
         return { paid: true as const };
       }
 
-      await tx.booking.update({
-        where: { id: bookingId },
-        data: {
+      await tx
+        .update(bookings)
+        .set({
           paymentStatus:
             fresh.payMode === PayMode.PREPAY
               ? PaymentStatus.PAID
@@ -590,14 +631,14 @@ export class BookingsService {
           // Persist the captured gateway payment id so a later cancellation can
           // issue a refund against it. Only set on the prepay handshake.
           ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
-        },
-      });
+        })
+        .where(eq(bookings.id, bookingId));
 
       await this.loyalty.earn(
         tx,
         fresh.ownerId,
         fresh.customerId,
-        fresh.total,
+        dec(fresh.total),
         bookingId,
         fresh.venueId,
       );
@@ -630,8 +671,8 @@ export class BookingsService {
     },
     user?: RequestUser,
   ): Promise<{ paid: true }> {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({ where: { id: bookingId } }),
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({ where: eq(bookings.id, bookingId) }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -701,8 +742,11 @@ export class BookingsService {
     bookingId: string,
     user?: RequestUser,
   ): Promise<{ cancelled: true }> {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({ where: { id: bookingId }, include: { slots: true } }),
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({
+        where: eq(bookings.id, bookingId),
+        with: { slots: true },
+      }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -735,20 +779,17 @@ export class BookingsService {
 
     // Resolve the gateway refund (network call) BEFORE the tx so the
     // transaction stays short. We re-check status inside the tx for idempotency.
-    let refund: { amount: Prisma.Decimal; gatewayId: string; fee: Prisma.Decimal } | null =
+    let refund: { amount: Decimal; gatewayId: string; fee: Decimal } | null =
       null;
     const isPaid =
       booking.status !== BookingStatus.CANCELLED &&
       booking.payMode === PayMode.PREPAY &&
       booking.paymentStatus === PaymentStatus.PAID &&
       booking.razorpayPaymentId != null &&
-      booking.total.greaterThan(0);
+      dec(booking.total).greaterThan(0);
     if (isPaid) {
       const fee = await this.cancellationFee(booking);
-      const refundable = Prisma.Decimal.max(
-        booking.total.sub(fee),
-        new Prisma.Decimal(0),
-      );
+      const refundable = Decimal.max(dec(booking.total).sub(fee), dec(0));
       if (refundable.greaterThan(0)) {
         const res = await this.payments.refund(
           booking.razorpayPaymentId as string,
@@ -756,29 +797,29 @@ export class BookingsService {
         );
         refund = { amount: refundable, gatewayId: res.id, fee };
       } else {
-        refund = { amount: new Prisma.Decimal(0), gatewayId: '', fee };
+        refund = { amount: dec(0), gatewayId: '', fee };
       }
     }
 
-    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
-      const fresh = await tx.booking.findUnique({
-        where: { id: bookingId },
-        include: { slots: true },
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      const fresh = await tx.query.bookings.findFirst({
+        where: eq(bookings.id, bookingId),
+        with: { slots: true },
       });
       if (!fresh || fresh.status === BookingStatus.CANCELLED) {
         return { cancelled: true as const };
       }
 
-      await tx.slot.deleteMany({ where: { bookingId } });
-      await tx.booking.update({
-        where: { id: bookingId },
-        data: {
+      await tx.delete(slots).where(eq(slots.bookingId, bookingId));
+      await tx
+        .update(bookings)
+        .set({
           status: BookingStatus.CANCELLED,
           ...(refund && refund.amount.greaterThan(0)
             ? { paymentStatus: PaymentStatus.REFUNDED }
             : {}),
-        },
-      });
+        })
+        .where(eq(bookings.id, bookingId));
 
       if (fresh.packId) {
         await this.memberships.refundSessions(
@@ -790,12 +831,12 @@ export class BookingsService {
           bookingId,
         );
       }
-      if (fresh.pointsRedeemed.greaterThan(0)) {
+      if (dec(fresh.pointsRedeemed).greaterThan(0)) {
         await this.loyalty.creditRefund(
           tx,
           fresh.ownerId,
           fresh.customerId,
-          fresh.pointsRedeemed,
+          dec(fresh.pointsRedeemed),
           bookingId,
         );
       }
@@ -812,18 +853,18 @@ export class BookingsService {
         fresh.paymentStatus === PaymentStatus.PAID ||
         fresh.paymentStatus === PaymentStatus.SETTLED_AT_VENUE;
       if (wasPaid) {
-        const earned = await tx.ledgerTxn.findFirst({
-          where: {
-            customerId: fresh.customerId,
-            lane: pointsLane(fresh.ownerId),
-            type: LedgerTxnType.POINTS_EARN,
-            refType: 'booking',
-            refId: bookingId,
-            amount: { gt: 0 },
-          },
-          orderBy: { createdAt: 'desc' },
+        const earned = await tx.query.ledgerTxns.findFirst({
+          where: and(
+            eq(ledgerTxns.customerId, fresh.customerId),
+            eq(ledgerTxns.lane, pointsLane(fresh.ownerId)),
+            eq(ledgerTxns.type, LedgerTxnType.POINTS_EARN),
+            eq(ledgerTxns.refType, 'booking'),
+            eq(ledgerTxns.refId, bookingId),
+            gt(ledgerTxns.amount, '0'),
+          ),
+          orderBy: desc(ledgerTxns.createdAt),
         });
-        if (earned && earned.amount.greaterThan(0)) {
+        if (earned && dec(earned.amount).greaterThan(0)) {
           // Clamp the claw-back to the current points balance: if the customer
           // already spent some of these points, the ledger's overdraft guard
           // would reject a full reversal and abort the cancellation. We reverse
@@ -834,7 +875,7 @@ export class BookingsService {
             fresh.ownerId,
             fresh.customerId,
           );
-          const reversal = Prisma.Decimal.min(earned.amount, balance);
+          const reversal = Decimal.min(dec(earned.amount), balance);
           if (reversal.greaterThan(0)) {
             await this.ledger.post(tx, {
               ownerId: fresh.ownerId,
@@ -877,12 +918,14 @@ export class BookingsService {
    */
   private async cancellationFee(booking: {
     venueId: string;
-    total: Prisma.Decimal;
+    total: string;
     slots: { startsAt: Date }[];
-  }): Promise<Prisma.Decimal> {
-    const zero = new Prisma.Decimal(0);
-    const settings = await this.prisma.withTenantBypass((tx) =>
-      tx.venueSettings.findUnique({ where: { venueId: booking.venueId } }),
+  }): Promise<Decimal> {
+    const zero = dec(0);
+    const settings = await this.db.withTenantBypass((tx) =>
+      tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, booking.venueId),
+      }),
     );
     const template = settings
       ? CANCELLATION_TEMPLATES[settings.cancellationTemplate]
@@ -901,10 +944,10 @@ export class BookingsService {
 
     // BUG-11: round the cancellation fee to 2dp HALF_UP so the refund
     // (total − fee) is an exact currency amount sent to the gateway.
-    return booking.total
+    return dec(booking.total)
       .mul(template.penaltyPct)
       .div(100)
-      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   }
 
   /**
@@ -919,59 +962,91 @@ export class BookingsService {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
     const ownerId = user.ownerId;
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const where: Prisma.BookingWhereInput = {};
-      if (filters.status) where.status = filters.status;
-      if (filters.paymentStatus) where.paymentStatus = filters.paymentStatus;
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const conds = [];
+      if (filters.status) conds.push(eq(bookings.status, filters.status));
+      if (filters.paymentStatus)
+        conds.push(eq(bookings.paymentStatus, filters.paymentStatus));
 
       // Staff can only see bookings for the venues assigned to them.
       const staffVenues =
         user.role === UserRole.STAFF ? user.assignedVenueIds ?? [] : null;
       if (filters.venueId) {
         if (staffVenues && !staffVenues.includes(filters.venueId)) return [];
-        where.venueId = filters.venueId;
+        conds.push(eq(bookings.venueId, filters.venueId));
       } else if (staffVenues) {
         if (staffVenues.length === 0) return [];
-        where.venueId = { in: staffVenues };
+        conds.push(inArray(bookings.venueId, staffVenues));
       }
 
-      // Date-range and court filters apply to the occupying slot rows.
-      const slotWhere: Prisma.SlotWhereInput = {};
-      if (filters.unitId) slotWhere.unitId = filters.unitId;
-      if (filters.from || filters.to) {
-        const startsAt: Prisma.DateTimeFilter = {};
-        if (filters.from)
-          startsAt.gte = DateTime.fromISO(filters.from).startOf('day').toJSDate();
-        if (filters.to)
-          startsAt.lte = DateTime.fromISO(filters.to).endOf('day').toJSDate();
-        slotWhere.startsAt = startsAt;
+      // Date-range and court filters apply to the occupying slot rows. We
+      // resolve the matching bookingIds from the slot rows first, then scope the
+      // booking query to them (the relational query builder cannot filter a
+      // parent by a related-row predicate directly).
+      const slotConds = [];
+      if (filters.unitId) slotConds.push(eq(slots.unitId, filters.unitId));
+      if (filters.from)
+        slotConds.push(
+          gte(
+            slots.startsAt,
+            DateTime.fromISO(filters.from).startOf('day').toJSDate(),
+          ),
+        );
+      if (filters.to)
+        slotConds.push(
+          lte(
+            slots.startsAt,
+            DateTime.fromISO(filters.to).endOf('day').toJSDate(),
+          ),
+        );
+      if (slotConds.length > 0) {
+        const matchingSlots = await tx.query.slots.findMany({
+          where: and(...slotConds),
+          columns: { bookingId: true },
+        });
+        const bookingIds = [
+          ...new Set(
+            matchingSlots
+              .map((s) => s.bookingId)
+              .filter((id): id is string => id != null),
+          ),
+        ];
+        if (bookingIds.length === 0) return [];
+        conds.push(inArray(bookings.id, bookingIds));
       }
-      if (Object.keys(slotWhere).length > 0) where.slots = { some: slotWhere };
 
-      const bookings = await tx.booking.findMany({
-        where,
-        include: { slots: true, customer: true },
-        orderBy: { createdAt: 'desc' },
+      const bookingRows = await tx.query.bookings.findMany({
+        where: conds.length > 0 ? and(...conds) : undefined,
+        with: { slots: true, user: true },
+        orderBy: desc(bookings.createdAt),
       });
 
       // Enrich with venue + court names and the per-owner customer profile.
-      const venueIds = [...new Set(bookings.map((b) => b.venueId))];
+      const venueIds = [...new Set(bookingRows.map((b) => b.venueId))];
       const unitIds = [
-        ...new Set(bookings.flatMap((b) => b.slots.map((s) => s.unitId))),
+        ...new Set(bookingRows.flatMap((b) => b.slots.map((s) => s.unitId))),
       ];
-      const customerIds = [...new Set(bookings.map((b) => b.customerId))];
-      const [venues, units, profiles] = await Promise.all([
-        tx.venue.findMany({ where: { id: { in: venueIds } } }),
-        tx.bookableUnit.findMany({ where: { id: { in: unitIds } } }),
-        tx.playerProfile.findMany({
-          where: { customerId: { in: customerIds } },
-        }),
+      const customerIds = [...new Set(bookingRows.map((b) => b.customerId))];
+      const [venueRows, unitRows, profiles] = await Promise.all([
+        venueIds.length
+          ? tx.query.venues.findMany({ where: inArray(venues.id, venueIds) })
+          : Promise.resolve([]),
+        unitIds.length
+          ? tx.query.bookableUnits.findMany({
+              where: inArray(bookableUnits.id, unitIds),
+            })
+          : Promise.resolve([]),
+        customerIds.length
+          ? tx.query.playerProfiles.findMany({
+              where: inArray(playerProfiles.customerId, customerIds),
+            })
+          : Promise.resolve([]),
       ]);
-      const venueName = new Map(venues.map((v) => [v.id, v.name]));
-      const unitName = new Map(units.map((u) => [u.id, u.name]));
+      const venueName = new Map(venueRows.map((v) => [v.id, v.name]));
+      const unitName = new Map(unitRows.map((u) => [u.id, u.name]));
       const profileByCustomer = new Map(profiles.map((p) => [p.customerId, p]));
 
-      const items: OwnerBooking[] = bookings.map((b) => {
+      const items: OwnerBooking[] = bookingRows.map((b) => {
         const profile = profileByCustomer.get(b.customerId);
         return {
           id: b.id,
@@ -982,8 +1057,8 @@ export class BookingsService {
           venueId: b.venueId,
           venueName: venueName.get(b.venueId) ?? '—',
           customerId: b.customerId,
-          customerName: profile?.name ?? b.customer?.name ?? null,
-          customerMobile: profile?.mobile ?? b.customer?.mobile ?? null,
+          customerName: profile?.name ?? b.user?.name ?? null,
+          customerMobile: profile?.mobile ?? b.user?.mobile ?? null,
           slots: b.slots
             .slice()
             .sort((a, c) => a.startsAt.getTime() - c.startsAt.getTime())
@@ -1014,29 +1089,35 @@ export class BookingsService {
    * customer can only ever see their own bookings regardless of tenant.
    */
   async listForCustomer(user: RequestUser): Promise<CustomerBooking[]> {
-    const bookings = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findMany({
-        where: { customerId: user.id },
-        include: { slots: true },
-        orderBy: { createdAt: 'desc' },
+    const bookingRows = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findMany({
+        where: eq(bookings.customerId, user.id),
+        with: { slots: true },
+        orderBy: desc(bookings.createdAt),
       }),
     );
-    if (bookings.length === 0) return [];
+    if (bookingRows.length === 0) return [];
 
-    const venueIds = [...new Set(bookings.map((b) => b.venueId))];
+    const venueIds = [...new Set(bookingRows.map((b) => b.venueId))];
     const unitIds = [
-      ...new Set(bookings.flatMap((b) => b.slots.map((s) => s.unitId))),
+      ...new Set(bookingRows.flatMap((b) => b.slots.map((s) => s.unitId))),
     ];
-    const [venues, units] = await this.prisma.withTenantBypass((tx) =>
+    const [venueRows, unitRows] = await this.db.withTenantBypass((tx) =>
       Promise.all([
-        tx.venue.findMany({ where: { id: { in: venueIds } } }),
-        tx.bookableUnit.findMany({ where: { id: { in: unitIds } } }),
+        venueIds.length
+          ? tx.query.venues.findMany({ where: inArray(venues.id, venueIds) })
+          : Promise.resolve([]),
+        unitIds.length
+          ? tx.query.bookableUnits.findMany({
+              where: inArray(bookableUnits.id, unitIds),
+            })
+          : Promise.resolve([]),
       ]),
     );
-    const venueName = new Map(venues.map((v) => [v.id, v.name]));
-    const unitName = new Map(units.map((u) => [u.id, u.name]));
+    const venueName = new Map(venueRows.map((v) => [v.id, v.name]));
+    const unitName = new Map(unitRows.map((u) => [u.id, u.name]));
 
-    return bookings.map((b) => this.toCustomerBooking(b, venueName, unitName));
+    return bookingRows.map((b) => this.toCustomerBooking(b, venueName, unitName));
   }
 
   /**
@@ -1045,10 +1126,10 @@ export class BookingsService {
    * owning customer. Enriched the same way as the relevant list view.
    */
   async getOne(bookingId: string, user: RequestUser): Promise<CustomerBooking> {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({
-        where: { id: bookingId },
-        include: { slots: true },
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({
+        where: eq(bookings.id, bookingId),
+        with: { slots: true },
       }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
@@ -1064,16 +1145,19 @@ export class BookingsService {
       throw new ForbiddenException('You cannot view this booking');
     }
 
-    const [venues, units] = await this.prisma.withTenantBypass((tx) =>
+    const unitIds = booking.slots.map((s) => s.unitId);
+    const [venueRows, unitRows] = await this.db.withTenantBypass((tx) =>
       Promise.all([
-        tx.venue.findMany({ where: { id: booking.venueId } }),
-        tx.bookableUnit.findMany({
-          where: { id: { in: booking.slots.map((s) => s.unitId) } },
-        }),
+        tx.query.venues.findMany({ where: eq(venues.id, booking.venueId) }),
+        unitIds.length
+          ? tx.query.bookableUnits.findMany({
+              where: inArray(bookableUnits.id, unitIds),
+            })
+          : Promise.resolve([]),
       ]),
     );
-    const venueName = new Map(venues.map((v) => [v.id, v.name]));
-    const unitName = new Map(units.map((u) => [u.id, u.name]));
+    const venueName = new Map(venueRows.map((v) => [v.id, v.name]));
+    const unitName = new Map(unitRows.map((u) => [u.id, u.name]));
     return this.toCustomerBooking(booking, venueName, unitName);
   }
 
@@ -1083,7 +1167,7 @@ export class BookingsService {
       status: string;
       payMode: string;
       paymentStatus: string;
-      total: Prisma.Decimal;
+      total: string;
       venueId: string;
       createdAt: Date;
       slots: { unitId: string; startsAt: Date; endsAt: Date }[];
@@ -1118,10 +1202,10 @@ export class BookingsService {
    * mutations.
    */
   private async loadOwnedBooking(bookingId: string, user: RequestUser) {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({
-        where: { id: bookingId },
-        include: { slots: true },
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({
+        where: eq(bookings.id, bookingId),
+        with: { slots: true },
       }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
@@ -1161,8 +1245,8 @@ export class BookingsService {
       return { status };
     }
 
-    await this.prisma.withTenantId(booking.ownerId, (tx) =>
-      tx.booking.update({ where: { id: bookingId }, data: { status } }),
+    await this.db.withTenantId(booking.ownerId, (tx) =>
+      tx.update(bookings).set({ status }).where(eq(bookings.id, bookingId)),
     );
     return { status };
   }
@@ -1181,23 +1265,27 @@ export class BookingsService {
     status: string;
     noShowFeeApplied: boolean;
   }): Promise<void> {
-    const settings = await this.prisma.withTenantBypass((tx) =>
-      tx.venueSettings.findUnique({ where: { venueId: booking.venueId } }),
+    const settings = await this.db.withTenantBypass((tx) =>
+      tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, booking.venueId),
+      }),
     );
-    const fee = settings?.noShowFee ?? new Prisma.Decimal(0);
+    const fee = settings ? dec(settings.noShowFee) : dec(0);
 
-    await this.prisma.withTenantId(booking.ownerId, async (tx) => {
-      const fresh = await tx.booking.findUnique({ where: { id: booking.id } });
+    await this.db.withTenantId(booking.ownerId, async (tx) => {
+      const fresh = await tx.query.bookings.findFirst({
+        where: eq(bookings.id, booking.id),
+      });
       if (!fresh) throw new NotFoundException('Booking not found');
 
       const applyFee = fee.greaterThan(0) && !fresh.noShowFeeApplied;
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
+      await tx
+        .update(bookings)
+        .set({
           status: BookingStatus.NO_SHOW,
           ...(applyFee ? { noShowFeeApplied: true } : {}),
-        },
-      });
+        })
+        .where(eq(bookings.id, booking.id));
 
       if (applyFee) {
         await this.ledger.post(tx, {
@@ -1233,13 +1321,13 @@ export class BookingsService {
       throw new BadRequestException('Pick at least one new slot.');
     }
 
-    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
       // The new courts must belong to the booking's own venue. This keeps the
       // booking's venueId consistent and (since staff are already scoped to the
       // booking's venue) holds staff within their assigned venues.
       const newUnitIds = [...new Set(newSlots.map((s) => s.unitId))];
-      const units = await tx.bookableUnit.findMany({
-        where: { id: { in: newUnitIds } },
+      const units = await tx.query.bookableUnits.findMany({
+        where: inArray(bookableUnits.id, newUnitIds),
       });
       const unitVenue = new Map(units.map((u) => [u.id, u.venueId]));
       for (const id of newUnitIds) {
@@ -1253,7 +1341,7 @@ export class BookingsService {
       }
 
       // Re-price the current slots (at today's rates) to anchor the delta.
-      let oldSlotSubtotal = new Prisma.Decimal(0);
+      let oldSlotSubtotal = dec(0);
       for (const s of booking.slots) {
         const durationMin = Math.round(
           (s.endsAt.getTime() - s.startsAt.getTime()) / 60000,
@@ -1268,7 +1356,7 @@ export class BookingsService {
       }
 
       // Price + validate the requested slots.
-      let newSlotSubtotal = new Prisma.Decimal(0);
+      let newSlotSubtotal = dec(0);
       const rows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
       for (const s of newSlots) {
         const start = DateTime.fromISO(s.start).toJSDate();
@@ -1287,25 +1375,21 @@ export class BookingsService {
       }
 
       // Swap the slot rows — free the old, lock the new.
-      await tx.slot.deleteMany({ where: { bookingId } });
+      await tx.delete(slots).where(eq(slots.bookingId, bookingId));
       try {
         for (const r of rows) {
-          await tx.slot.create({
-            data: {
-              unitId: r.unitId,
-              ownerId: booking.ownerId,
-              startsAt: r.startsAt,
-              endsAt: r.endsAt,
-              status: 'booked',
-              bookingId,
-            },
+          await tx.insert(slots).values({
+            id: randomUUID(),
+            unitId: r.unitId,
+            ownerId: booking.ownerId,
+            startsAt: r.startsAt,
+            endsAt: r.endsAt,
+            status: 'booked',
+            bookingId,
           });
         }
       } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === UNIQUE_VIOLATION
-        ) {
+        if (isUniqueViolation(err)) {
           throw new ConflictException(
             'One or more of the new slots are already booked. Please pick another.',
           );
@@ -1314,15 +1398,16 @@ export class BookingsService {
       }
 
       const delta = newSlotSubtotal.sub(oldSlotSubtotal);
-      const zero = new Prisma.Decimal(0);
-      const newTotal = Prisma.Decimal.max(booking.total.add(delta), zero);
-      await tx.booking.update({
-        where: { id: bookingId },
-        data: {
-          subtotal: Prisma.Decimal.max(booking.subtotal.add(delta), zero),
-          total: newTotal,
-        },
-      });
+      const zero = dec(0);
+      const oldTotal = dec(booking.total);
+      const newTotal = Decimal.max(oldTotal.add(delta), zero);
+      await tx
+        .update(bookings)
+        .set({
+          subtotal: money(Decimal.max(dec(booking.subtotal).add(delta), zero)),
+          total: money(newTotal),
+        })
+        .where(eq(bookings.id, bookingId));
 
       // BUG-6: reconcile the money for a PAID prepay booking. Previously the
       // total moved with the price delta but the gateway/ledger were never
@@ -1348,7 +1433,7 @@ export class BookingsService {
         booking.payMode === PayMode.PREPAY &&
         booking.paymentStatus === PaymentStatus.PAID;
       if (isPaidPrepay) {
-        const actualDelta = newTotal.sub(booking.total);
+        const actualDelta = newTotal.sub(oldTotal);
         if (actualDelta.lessThan(0)) {
           // Price drop on a paid booking → return the difference. When we have a
           // captured gateway payment id we refund to the card; otherwise (a
@@ -1410,35 +1495,33 @@ export class BookingsService {
       throw new BadRequestException('Name and mobile are required.');
     }
 
-    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
-      await tx.playerProfile.upsert({
-        where: {
-          ownerId_customerId: {
-            ownerId: booking.ownerId,
-            customerId: booking.customerId,
-          },
-        },
-        create: {
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      await tx
+        .insert(playerProfiles)
+        .values({
+          id: randomUUID(),
           ownerId: booking.ownerId,
           customerId: booking.customerId,
           name,
           mobile,
-        },
-        update: { name, mobile },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [playerProfiles.ownerId, playerProfiles.customerId],
+          set: { name, mobile },
+        });
       return { name, mobile };
     });
   }
 
   /** Distinct game ids for the given bookable units (for offer game scoping). */
   private async gameIdsForUnits(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     unitIds: string[],
   ): Promise<string[]> {
     if (unitIds.length === 0) return [];
-    const units = await tx.bookableUnit.findMany({
-      where: { id: { in: unitIds } },
-      select: { gameId: true },
+    const units = await tx.query.bookableUnits.findMany({
+      where: inArray(bookableUnits.id, unitIds),
+      columns: { gameId: true },
     });
     return [...new Set(units.map((u) => u.gameId))];
   }
@@ -1449,12 +1532,15 @@ export class BookingsService {
    * (5+ bookings). Returns an empty list if there's no CRM link yet.
    */
   private async segmentsForCustomer(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
   ): Promise<string[]> {
-    const link = await tx.ownerCustomer.findUnique({
-      where: { ownerId_customerId: { ownerId, customerId } },
+    const link = await tx.query.ownerCustomers.findFirst({
+      where: and(
+        eq(ownerCustomers.ownerId, ownerId),
+        eq(ownerCustomers.customerId, customerId),
+      ),
     });
     if (!link) return [];
     const segments: string[] = [];
@@ -1467,18 +1553,20 @@ export class BookingsService {
   /** True if an offer's scope matches the current booking context. */
   private offerInScope(
     offer: {
-      venueIds: string[];
-      gameIds: string[];
+      venueIds: string[] | null;
+      gameIds: string[] | null;
       segment: string | null;
     },
     ctx: { venueId: string; bookedGameIds: string[]; customerSegments: string[] },
   ): boolean {
-    if (offer.venueIds.length > 0 && !offer.venueIds.includes(ctx.venueId)) {
+    const venueIds = offer.venueIds ?? [];
+    const gameIds = offer.gameIds ?? [];
+    if (venueIds.length > 0 && !venueIds.includes(ctx.venueId)) {
       return false;
     }
     if (
-      offer.gameIds.length > 0 &&
-      !ctx.bookedGameIds.some((g) => offer.gameIds.includes(g))
+      gameIds.length > 0 &&
+      !ctx.bookedGameIds.some((g) => gameIds.includes(g))
     ) {
       return false;
     }
@@ -1496,24 +1584,24 @@ export class BookingsService {
    * the discountable base), or null if nothing applies.
    */
   private async resolveOffer(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     args: {
       ownerId: string;
       venueId: string;
       offerCode?: string;
-      base: Prisma.Decimal;
+      base: Decimal;
       bookedGameIds: string[];
       customerSegments: string[];
     },
-  ): Promise<{ offerId: string; discount: Prisma.Decimal } | null> {
+  ): Promise<{ offerId: string; discount: Decimal } | null> {
     const now = new Date();
-    const validWindow: Prisma.OfferWhereInput = {
-      active: true,
-      AND: [
-        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
-        { OR: [{ validTo: null }, { validTo: { gte: now } }] },
-      ],
-    };
+    // Validity window: active AND (no validFrom OR validFrom <= now) AND
+    // (no validTo OR validTo >= now).
+    const validWindow = and(
+      eq(offers.active, true),
+      or(isNull(offers.validFrom), lte(offers.validFrom, now)),
+      or(isNull(offers.validTo), gte(offers.validTo, now)),
+    );
 
     const scopeCtx = {
       venueId: args.venueId,
@@ -1522,24 +1610,28 @@ export class BookingsService {
     };
     const discountFor = (offer: {
       type: string;
-      value: Prisma.Decimal;
-    }): Prisma.Decimal =>
+      value: string;
+    }): Decimal =>
       offer.type === 'percent'
         ? // BUG-11: round the percent discount to 2dp HALF_UP so the discount is
           // a clean currency amount and the derived total stays consistent.
           args.base
-            .mul(offer.value)
+            .mul(dec(offer.value))
             .div(100)
-            .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
-        : Prisma.Decimal.min(offer.value, args.base);
+            .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+        : Decimal.min(dec(offer.value), args.base);
 
     // Owner-scope every offer lookup (defense-in-depth): the dev DB connects as
     // a superuser that BYPASSES RLS, so without an explicit ownerId filter a
     // customer could redeem another owner's promo code or auto-apply another
     // owner's offer. Offers carry a denormalised ownerId.
     if (args.offerCode) {
-      const offer = await tx.offer.findFirst({
-        where: { code: args.offerCode, ownerId: args.ownerId, ...validWindow },
+      const offer = await tx.query.offers.findFirst({
+        where: and(
+          eq(offers.code, args.offerCode),
+          eq(offers.ownerId, args.ownerId),
+          validWindow,
+        ),
       });
       if (!offer || !this.offerInScope(offer, scopeCtx)) return null;
       return { offerId: offer.id, discount: discountFor(offer) };
@@ -1547,10 +1639,14 @@ export class BookingsService {
 
     // Auto-apply: pick whichever valid, in-scope auto-apply offer gives the
     // largest discount for this booking.
-    const candidates = await tx.offer.findMany({
-      where: { autoApply: true, ownerId: args.ownerId, ...validWindow },
+    const candidates = await tx.query.offers.findMany({
+      where: and(
+        eq(offers.autoApply, true),
+        eq(offers.ownerId, args.ownerId),
+        validWindow,
+      ),
     });
-    let best: { offerId: string; discount: Prisma.Decimal } | null = null;
+    let best: { offerId: string; discount: Decimal } | null = null;
     for (const offer of candidates) {
       if (!this.offerInScope(offer, scopeCtx)) continue;
       const discount = discountFor(offer);
@@ -1563,23 +1659,27 @@ export class BookingsService {
   }
 
   private async resolveCustomer(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     dto: CreateBookingDto,
     user: RequestUser | undefined,
   ): Promise<string> {
     if (user?.role === 'customer') return user.id;
     if (dto.customer) {
-      const existing = await tx.user.findUnique({
-        where: { mobile: dto.customer.mobile },
+      const existing = await tx.query.users.findFirst({
+        where: eq(users.mobile, dto.customer.mobile),
       });
       if (existing) return existing.id;
-      const created = await tx.user.create({
-        data: {
-          role: 'customer',
-          name: dto.customer.name,
-          mobile: dto.customer.mobile,
-        },
-      });
+      const created = (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: 'customer',
+            name: dto.customer.name,
+            mobile: dto.customer.mobile,
+          })
+          .returning()
+      )[0];
       return created.id;
     }
     throw new NotFoundException('No customer context for booking');
@@ -1598,10 +1698,10 @@ export class BookingsService {
     slotCount: number,
   ): Promise<void> {
     try {
-      const customer = await this.prisma.withTenantBypass((tx) =>
-        tx.user.findUnique({
-          where: { id: customerId },
-          select: { mobile: true },
+      const customer = await this.db.withTenantBypass((tx) =>
+        tx.query.users.findFirst({
+          where: eq(users.id, customerId),
+          columns: { mobile: true },
         }),
       );
       const mobile = customer?.mobile?.trim();
@@ -1624,27 +1724,42 @@ export class BookingsService {
   }
 
   private async capturePlayer(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     customerId: string,
   ): Promise<void> {
-    const user = await tx.user.findUnique({ where: { id: customerId } });
-    if (!user) return;
-    await tx.ownerCustomer.upsert({
-      where: { ownerId_customerId: { ownerId, customerId } },
-      create: { ownerId, customerId, bookingCount: 1, lastVisitAt: new Date() },
-      update: { bookingCount: { increment: 1 }, lastVisitAt: new Date() },
+    const user = await tx.query.users.findFirst({
+      where: eq(users.id, customerId),
     });
-    await tx.playerProfile.upsert({
-      where: { ownerId_customerId: { ownerId, customerId } },
-      create: {
+    if (!user) return;
+    await tx
+      .insert(ownerCustomers)
+      .values({
+        id: randomUUID(),
+        ownerId,
+        customerId,
+        bookingCount: 1,
+        lastVisitAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [ownerCustomers.ownerId, ownerCustomers.customerId],
+        set: {
+          bookingCount: sql`${ownerCustomers.bookingCount} + 1`,
+          lastVisitAt: new Date(),
+        },
+      });
+    await tx
+      .insert(playerProfiles)
+      .values({
+        id: randomUUID(),
         ownerId,
         customerId,
         name: user.name,
         mobile: user.mobile ?? '',
-      },
-      update: {},
-    });
+      })
+      .onConflictDoNothing({
+        target: [playerProfiles.ownerId, playerProfiles.customerId],
+      });
   }
 
   private toResponse(
@@ -1653,7 +1768,7 @@ export class BookingsService {
       status: string;
       payMode: string;
       paymentStatus: string;
-      total: Prisma.Decimal;
+      total: string;
     },
     lineItems: { label: string; amount: number }[],
   ): BookingResponse {

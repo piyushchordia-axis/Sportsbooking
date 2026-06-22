@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { desc, eq } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { ledgerTxns } from '../../db/schema';
 import { POINTS_LANE, CREDIT_LANE } from '../loyalty/loyalty.service';
 
 /**
@@ -17,7 +19,7 @@ import { POINTS_LANE, CREDIT_LANE } from '../loyalty/loyalty.service';
  */
 @Injectable()
 export class WalletService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   /**
    * Wallet summary for a customer, optionally scoped to one owner.
@@ -31,24 +33,21 @@ export class WalletService {
    */
   async summary(customerId: string, ownerId?: string) {
     if (ownerId) {
-      return this.prisma.withTenantId(ownerId, (tx) =>
+      return this.db.withTenantId(ownerId, (tx) =>
         this.scopedSummary(tx, customerId),
       );
     }
-    return this.prisma.withTenantBypass((tx) =>
+    return this.db.withTenantBypass((tx) =>
       this.aggregateSummary(tx, customerId),
     );
   }
 
   /** Per-owner view: latest balanceAfter per lane within the owner tenant. */
-  private async scopedSummary(
-    tx: Prisma.TransactionClient,
-    customerId: string,
-  ) {
-    const txns = await tx.ledgerTxn.findMany({
-      where: { customerId },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+  private async scopedSummary(tx: DbTx, customerId: string) {
+    const txns = await tx.query.ledgerTxns.findMany({
+      where: eq(ledgerTxns.customerId, customerId),
+      orderBy: desc(ledgerTxns.createdAt),
+      limit: 100,
     });
 
     // latest balanceAfter per lane = current derived balance
@@ -76,14 +75,11 @@ export class WalletService {
    * balance (sum of the latest balanceAfter per distinct lane). Other lanes
    * (e.g. pack/cash/dues) are summed per distinct lane as-is.
    */
-  private async aggregateSummary(
-    tx: Prisma.TransactionClient,
-    customerId: string,
-  ) {
-    const txns = await tx.ledgerTxn.findMany({
-      where: { customerId },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+  private async aggregateSummary(tx: DbTx, customerId: string) {
+    const txns = await tx.query.ledgerTxns.findMany({
+      where: eq(ledgerTxns.customerId, customerId),
+      orderBy: desc(ledgerTxns.createdAt),
+      limit: 100,
     });
 
     // Latest balanceAfter per distinct lane (txns are newest-first).

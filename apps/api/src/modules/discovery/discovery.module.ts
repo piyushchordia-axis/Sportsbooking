@@ -1,6 +1,8 @@
 import { Controller, Get, Injectable, Module, Query } from '@nestjs/common';
+import { and, asc, eq, ilike } from 'drizzle-orm';
 import { Public } from '../../common/decorators/public.decorator';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { bookableUnits, gameCatalogue, venues } from '../../db/schema';
 
 /** Great-circle distance in km between two lat/lng points (haversine). */
 function haversineKm(
@@ -33,7 +35,7 @@ function parseNum(v?: string): number | undefined {
  */
 @Injectable()
 export class DiscoveryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   async venues(
     city?: string,
@@ -46,21 +48,20 @@ export class DiscoveryService {
       offset?: number;
     },
   ) {
-    return this.prisma.withTenantBypass(async (tx) => {
-      const venues = await tx.venue.findMany({
-        where: {
-          active: true,
-          ...(city ? { city: { contains: city, mode: 'insensitive' } } : {}),
-          ...(gameId ? { games: { some: { gameId } } } : {}),
-        },
-        include: {
-          units: {
-            where: { active: true },
-            include: { pricingRules: { select: { price: true } } },
+    return this.db.withTenantBypass(async (tx) => {
+      const rows = await tx.query.venues.findMany({
+        where: and(
+          eq(venues.active, true),
+          ...(city ? [ilike(venues.city, `%${city}%`)] : []),
+        ),
+        with: {
+          bookableUnits: {
+            where: eq(bookableUnits.active, true),
+            with: { pricingRules: { columns: { price: true } } },
           },
-          games: { include: { game: true } },
+          venueGames: { with: { gameCatalogue: true } },
           owner: {
-            select: {
+            columns: {
               id: true,
               name: true,
               logoUrl: true,
@@ -72,11 +73,17 @@ export class DiscoveryService {
         },
       });
 
-      const items = venues.map((v) => {
+      // Mirror Prisma's `games: { some: { gameId } }` venue-level filter: keep
+      // only venues that offer the requested game.
+      const venuesList = gameId
+        ? rows.filter((v) => v.venueGames.some((g) => g.gameId === gameId))
+        : rows;
+
+      const items = venuesList.map((v) => {
         // Best-effort lowest hourly price across the venue's bookable units.
         // Pricing is rule-based (PricingRule per unit, most-specific-wins); the
         // cheapest configured rule is the closest stand-in for a "from" price.
-        const prices = v.units.flatMap((u) =>
+        const prices = v.bookableUnits.flatMap((u) =>
           u.pricingRules.map((r) => Number(r.price)),
         );
         const minPrice = prices.length ? Math.min(...prices) : null;
@@ -99,8 +106,11 @@ export class DiscoveryService {
           secondaryColor: v.owner.secondaryColor,
           accentColor: v.owner.accentColor,
         },
-        games: v.games.map((g) => ({ id: g.game.id, name: g.game.name })),
-        units: v.units.map((u) => ({
+        games: v.venueGames.map((g) => ({
+          id: g.gameCatalogue.id,
+          name: g.gameCatalogue.name,
+        })),
+        units: v.bookableUnits.map((u) => ({
           id: u.id,
           name: u.name,
           label: u.label,
@@ -165,7 +175,9 @@ export class DiscoveryService {
   }
 
   games() {
-    return this.prisma.gameCatalogue.findMany({ orderBy: { name: 'asc' } });
+    return this.db.db.query.gameCatalogue.findMany({
+      orderBy: asc(gameCatalogue.name),
+    });
   }
 }
 

@@ -13,7 +13,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 import {
   FeatureFlag,
   JoinRequestStatus,
@@ -35,7 +36,18 @@ import { RequireFlag } from '../../common/decorators/require-flag.decorator';
 import { LedgerService } from '../ledger/ledger.service';
 import { creditLane } from '../loyalty/loyalty.service';
 import { NotificationService } from '../notifications/notification.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { db } from '../../db';
+import { DbService } from '../../db/db.service';
+import { dec } from '../../db/money';
+import {
+  bookings,
+  ledgerTxns,
+  openMatches,
+  openMatchJoinRequests,
+  slots,
+  users,
+  venueSettings,
+} from '../../db/schema';
 
 class CreateMatchDto {
   @IsUUID() bookingId!: string;
@@ -44,36 +56,38 @@ class CreateMatchDto {
   @IsOptional() @IsEnum(SkillLevel) skillMax?: SkillLevel;
 }
 
-/** Minimal public profile shape for host/player display. */
-const HOST_SELECT = { id: true, name: true } satisfies Prisma.UserSelect;
-
 /**
- * Shared include for projecting a match into a customer-facing view: the
- * booking's slot (court/game/venue/time), approved join requests (filled
- * spots) and the booking total (fee/repayment info).
+ * Relational `with` clause for a match projection (used by the relational query
+ * builder). Drizzle relation names (from relations.ts): the host is the `user`
+ * relation on open_matches (hostId), the joined slots live under `slots`, a
+ * slot's unit is `bookableUnit` whose game is `gameCatalogue`, and approved
+ * requests (= filled spots) are `openMatchJoinRequests`.
  */
-const MATCH_INCLUDE = {
+const MATCH_WITH = {
+  user: { columns: { id: true, name: true } },
   booking: {
-    include: {
+    with: {
       slots: {
-        include: { unit: { include: { game: true, venue: true } } },
-        orderBy: { startsAt: 'asc' },
-        take: 1,
+        with: {
+          bookableUnit: { with: { gameCatalogue: true, venue: true } },
+        },
+        orderBy: asc(slots.startsAt),
+        limit: 1,
       },
     },
   },
-  // approved requests = filled spots
-  joinRequests: {
-    where: { status: JoinRequestStatus.APPROVED },
-    select: { status: true },
+  openMatchJoinRequests: {
+    where: eq(openMatchJoinRequests.status, JoinRequestStatus.APPROVED),
+    columns: { status: true },
   },
-} satisfies Prisma.OpenMatchInclude;
+} as const;
 
-type MatchWithIncludes = Prisma.OpenMatchGetPayload<{
-  include: typeof MATCH_INCLUDE;
-}> & {
-  host: Prisma.UserGetPayload<{ select: typeof HOST_SELECT }>;
-};
+/** A match projected with {@link MATCH_WITH} (host + booking/slot + approved). */
+type MatchWithIncludes = NonNullable<
+  Awaited<
+    ReturnType<typeof db.query.openMatches.findFirst<{ with: typeof MATCH_WITH }>>
+  >
+>;
 
 /**
  * Open matches / find players (PRD §5.3, §6.2). A host opens spare spots on a
@@ -84,7 +98,7 @@ type MatchWithIncludes = Prisma.OpenMatchGetPayload<{
 @Injectable()
 export class OpenMatchesService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly ledger: LedgerService,
     private readonly notifications: NotificationService,
   ) {}
@@ -96,10 +110,10 @@ export class OpenMatchesService {
    */
   private async notifyUser(userId: string, message: string): Promise<void> {
     try {
-      const user = await this.prisma.withTenantBypass((tx) =>
-        tx.user.findUnique({
-          where: { id: userId },
-          select: { mobile: true },
+      const user = await this.db.withTenantBypass((tx) =>
+        tx.query.users.findFirst({
+          where: eq(users.id, userId),
+          columns: { mobile: true },
         }),
       );
       if (user?.mobile) {
@@ -112,30 +126,34 @@ export class OpenMatchesService {
 
   /** Host opens a match on their own booking. */
   async create(host: RequestUser, dto: CreateMatchDto) {
-    const booking = await this.prisma.withTenantBypass((tx) =>
-      tx.booking.findUnique({ where: { id: dto.bookingId } }),
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({ where: eq(bookings.id, dto.bookingId) }),
     );
     if (!booking) throw new NotFoundException('Booking not found');
     if (booking.customerId !== host.id) {
       throw new ForbiddenException('Only the host can open this booking');
     }
 
-    return this.prisma.withTenantId(booking.ownerId, async (tx) => {
-      const settings = await tx.venueSettings.findUnique({
-        where: { venueId: booking.venueId },
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      const settings = await tx.query.venueSettings.findFirst({
+        where: eq(venueSettings.venueId, booking.venueId),
       });
-      return tx.openMatch.create({
-        data: {
-          ownerId: booking.ownerId,
-          bookingId: dto.bookingId,
-          hostId: host.id,
-          openSpots: dto.openSpots,
-          skillMin: dto.skillMin ?? SkillLevel.BEGINNER,
-          skillMax: dto.skillMax ?? SkillLevel.PRO,
-          repaymentMode:
-            settings?.openMatchRepaymentMode ?? OpenMatchRepaymentMode.INFO,
-        },
-      });
+      return (
+        await tx
+          .insert(openMatches)
+          .values({
+            id: randomUUID(),
+            ownerId: booking.ownerId,
+            bookingId: dto.bookingId,
+            hostId: host.id,
+            openSpots: dto.openSpots,
+            skillMin: dto.skillMin ?? SkillLevel.BEGINNER,
+            skillMax: dto.skillMax ?? SkillLevel.PRO,
+            repaymentMode:
+              settings?.openMatchRepaymentMode ?? OpenMatchRepaymentMode.INFO,
+          })
+          .returning()
+      )[0];
     });
   }
 
@@ -145,19 +163,18 @@ export class OpenMatchesService {
    * filtered to a single venue.
    */
   async browse(venueId?: string) {
-    const matches = await this.prisma.withTenantBypass((tx) =>
-      tx.openMatch.findMany({
-        where: {
-          status: OpenMatchStatus.OPEN,
-          ...(venueId ? { booking: { venueId } } : {}),
-        },
-        include: { ...MATCH_INCLUDE, host: { select: HOST_SELECT } },
-        orderBy: { createdAt: 'desc' },
+    const matches = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findMany({
+        where: eq(openMatches.status, OpenMatchStatus.OPEN),
+        with: MATCH_WITH,
+        orderBy: desc(openMatches.createdAt),
       }),
     );
 
-    // Only matches that still have at least one unfilled spot.
+    // Only matches that still have at least one unfilled spot. Venue filter is
+    // applied post-fetch (the relational filter is on the nested booking).
     return matches
+      .filter((m) => !venueId || m.booking.venueId === venueId)
       .map((m) => this.toBrowseView(m))
       .filter((v) => v.spots.remaining > 0);
   }
@@ -168,30 +185,28 @@ export class OpenMatchesService {
    * joined or requested.
    */
   async mine(user: RequestUser) {
-    const [hosted, pending, joined] = await this.prisma.withTenantBypass((tx) =>
+    const [hosted, pending, joined] = await this.db.withTenantBypass((tx) =>
       Promise.all([
-        tx.openMatch.findMany({
-          where: { hostId: user.id },
-          include: { ...MATCH_INCLUDE, host: { select: HOST_SELECT } },
-          orderBy: { createdAt: 'desc' },
+        tx.query.openMatches.findMany({
+          where: eq(openMatches.hostId, user.id),
+          with: MATCH_WITH,
+          orderBy: desc(openMatches.createdAt),
         }),
         // pending join requests across all of this host's matches
-        tx.openMatchJoinRequest.findMany({
-          where: {
-            status: JoinRequestStatus.REQUESTED,
-            match: { hostId: user.id },
+        tx.query.openMatchJoinRequests.findMany({
+          where: eq(openMatchJoinRequests.status, JoinRequestStatus.REQUESTED),
+          with: {
+            user: { columns: { id: true, name: true } },
+            openMatch: { columns: { hostId: true } },
           },
-          include: { player: { select: HOST_SELECT } },
-          orderBy: { createdAt: 'asc' },
+          orderBy: openMatchJoinRequests.createdAt,
         }),
-        tx.openMatchJoinRequest.findMany({
-          where: { playerId: user.id },
-          include: {
-            match: {
-              include: { ...MATCH_INCLUDE, host: { select: HOST_SELECT } },
-            },
+        tx.query.openMatchJoinRequests.findMany({
+          where: eq(openMatchJoinRequests.playerId, user.id),
+          with: {
+            openMatch: { with: MATCH_WITH },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: desc(openMatchJoinRequests.createdAt),
         }),
       ]),
     );
@@ -200,19 +215,21 @@ export class OpenMatchesService {
       hosting: hosted.map((m) => ({
         ...this.toBrowseView(m),
         pendingRequests: pending
-          .filter((r) => r.matchId === m.id)
+          .filter(
+            (r) => r.matchId === m.id && r.openMatch?.hostId === user.id,
+          )
           .map((r) => ({
             id: r.id,
             status: r.status,
             createdAt: r.createdAt,
-            player: r.player,
+            player: r.user,
           })),
       })),
       joined: joined.map((r) => ({
         requestId: r.id,
         status: r.status,
         requestedAt: r.createdAt,
-        match: this.toBrowseView(r.match),
+        match: this.toBrowseView(r.openMatch),
       })),
     };
   }
@@ -220,9 +237,9 @@ export class OpenMatchesService {
   /** Project a match (+booking/slot/host) into a customer-facing view. */
   private toBrowseView(m: MatchWithIncludes) {
     const slot = m.booking.slots[0];
-    const unit = slot?.unit ?? null;
+    const unit = slot?.bookableUnit ?? null;
     const players = m.openSpots + 1; // host + spots
-    const filled = m.joinRequests.filter(
+    const filled = m.openMatchJoinRequests.filter(
       (r) => r.status === JoinRequestStatus.APPROVED,
     ).length;
     return {
@@ -231,12 +248,14 @@ export class OpenMatchesService {
       createdAt: m.createdAt,
       skillMin: m.skillMin,
       skillMax: m.skillMax,
-      host: m.host,
+      host: m.user,
       venue: unit
         ? { id: unit.venue.id, name: unit.venue.name, city: unit.venue.city }
         : null,
       court: unit ? { id: unit.id, name: unit.name } : null,
-      game: unit ? { id: unit.game.id, name: unit.game.name } : null,
+      game: unit
+        ? { id: unit.gameCatalogue.id, name: unit.gameCatalogue.name }
+        : null,
       time: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt } : null,
       spots: {
         total: m.openSpots,
@@ -245,26 +264,29 @@ export class OpenMatchesService {
       },
       fee: {
         repaymentMode: m.repaymentMode,
-        bookingTotal: m.booking.total,
+        bookingTotal: dec(m.booking.total),
         // even share each of the `players` participants owes
-        perPlayer: m.booking.total.div(players),
+        perPlayer: dec(m.booking.total).div(players),
       },
     };
   }
 
   /** A player requests to join an open match. */
   async requestJoin(player: RequestUser, matchId: string) {
-    const match = await this.prisma.withTenantBypass((tx) =>
-      tx.openMatch.findUnique({ where: { id: matchId } }),
+    const match = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findFirst({ where: eq(openMatches.id, matchId) }),
     );
     if (!match) throw new NotFoundException('Match not found');
     if (match.status !== OpenMatchStatus.OPEN) {
       throw new BadRequestException('Match is not open');
     }
-    const created = await this.prisma.withTenantId(match.ownerId, (tx) =>
-      tx.openMatchJoinRequest.create({
-        data: { matchId, playerId: player.id },
-      }),
+    const created = await this.db.withTenantId(match.ownerId, async (tx) =>
+      (
+        await tx
+          .insert(openMatchJoinRequests)
+          .values({ id: randomUUID(), matchId, playerId: player.id })
+          .returning()
+      )[0],
     );
 
     // Notify the host that a player requested to join (best-effort, PRD §9).
@@ -282,17 +304,20 @@ export class OpenMatchesService {
    * credit lane — throws if the joiner's wallet credit is insufficient.
    */
   async approve(host: RequestUser, matchId: string, requestId: string) {
-    const match = await this.prisma.withTenantBypass((tx) =>
-      tx.openMatch.findUnique({ where: { id: matchId }, include: { booking: true } }),
+    const match = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findFirst({
+        where: eq(openMatches.id, matchId),
+        with: { booking: true },
+      }),
     );
     if (!match) throw new NotFoundException('Match not found');
     if (match.hostId !== host.id) {
       throw new ForbiddenException('Only the host approves requests');
     }
 
-    const result = await this.prisma.withTenantId(match.ownerId, async (tx) => {
-      const req = await tx.openMatchJoinRequest.findUnique({
-        where: { id: requestId },
+    const result = await this.db.withTenantId(match.ownerId, async (tx) => {
+      const req = await tx.query.openMatchJoinRequests.findFirst({
+        where: eq(openMatchJoinRequests.id, requestId),
       });
       if (!req || req.matchId !== matchId) {
         throw new NotFoundException('Request not found');
@@ -303,15 +328,29 @@ export class OpenMatchesService {
       // no-op so the joiner is not double-charged / the host not double-credited
       // via the ledger. Conditionally update only still-pending rows and verify a
       // row actually transitioned before proceeding to settlement.
-      const transition = await tx.openMatchJoinRequest.updateMany({
-        where: { id: requestId, status: JoinRequestStatus.REQUESTED },
-        data: { status: JoinRequestStatus.APPROVED },
-      });
-      if (transition.count === 0) {
+      const transition = await tx
+        .update(openMatchJoinRequests)
+        .set({ status: JoinRequestStatus.APPROVED })
+        .where(
+          and(
+            eq(openMatchJoinRequests.id, requestId),
+            eq(openMatchJoinRequests.status, JoinRequestStatus.REQUESTED),
+          ),
+        )
+        .returning({ id: openMatchJoinRequests.id });
+      if (transition.length === 0) {
         // Already approved (or otherwise not pending) — do not re-settle.
-        const approvedNow = await tx.openMatchJoinRequest.count({
-          where: { matchId, status: JoinRequestStatus.APPROVED },
-        });
+        const approvedNow = (
+          await tx
+            .select({ c: count() })
+            .from(openMatchJoinRequests)
+            .where(
+              and(
+                eq(openMatchJoinRequests.matchId, matchId),
+                eq(openMatchJoinRequests.status, JoinRequestStatus.APPROVED),
+              ),
+            )
+        )[0].c;
         return {
           approved: true,
           spotsFilled: approvedNow,
@@ -321,13 +360,21 @@ export class OpenMatchesService {
         };
       }
 
-      const approved = await tx.openMatchJoinRequest.count({
-        where: { matchId, status: JoinRequestStatus.APPROVED },
-      });
+      const approved = (
+        await tx
+          .select({ c: count() })
+          .from(openMatchJoinRequests)
+          .where(
+            and(
+              eq(openMatchJoinRequests.matchId, matchId),
+              eq(openMatchJoinRequests.status, JoinRequestStatus.APPROVED),
+            ),
+          )
+      )[0].c;
 
       if (match.repaymentMode === OpenMatchRepaymentMode.LEDGER) {
         const players = match.openSpots + 1; // host + spots
-        const share = match.booking.total.div(players);
+        const share = dec(match.booking.total).div(players);
         // joiner repays host their share
         await this.ledger.post(tx, {
           ownerId: match.ownerId,
@@ -353,10 +400,10 @@ export class OpenMatchesService {
 
       // Close the match once all spots are filled.
       if (approved >= match.openSpots) {
-        await tx.openMatch.update({
-          where: { id: matchId },
-          data: { status: OpenMatchStatus.FULL },
-        });
+        await tx
+          .update(openMatches)
+          .set({ status: OpenMatchStatus.FULL })
+          .where(eq(openMatches.id, matchId));
       }
       return {
         approved: true,
@@ -389,30 +436,36 @@ export class OpenMatchesService {
    * still in REQUESTED state (already-rejected/approved requests are no-ops).
    */
   async reject(host: RequestUser, matchId: string, requestId: string) {
-    const match = await this.prisma.withTenantBypass((tx) =>
-      tx.openMatch.findUnique({ where: { id: matchId } }),
+    const match = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findFirst({ where: eq(openMatches.id, matchId) }),
     );
     if (!match) throw new NotFoundException('Match not found');
     if (match.hostId !== host.id) {
       throw new ForbiddenException('Only the host rejects requests');
     }
 
-    const result = await this.prisma.withTenantId(match.ownerId, async (tx) => {
-      const req = await tx.openMatchJoinRequest.findUnique({
-        where: { id: requestId },
+    const result = await this.db.withTenantId(match.ownerId, async (tx) => {
+      const req = await tx.query.openMatchJoinRequests.findFirst({
+        where: eq(openMatchJoinRequests.id, requestId),
       });
       if (!req || req.matchId !== matchId) {
         throw new NotFoundException('Request not found');
       }
 
       // Idempotency: only transition still-pending requests to REJECTED.
-      const transition = await tx.openMatchJoinRequest.updateMany({
-        where: { id: requestId, status: JoinRequestStatus.REQUESTED },
-        data: { status: JoinRequestStatus.REJECTED },
-      });
+      const transition = await tx
+        .update(openMatchJoinRequests)
+        .set({ status: JoinRequestStatus.REJECTED })
+        .where(
+          and(
+            eq(openMatchJoinRequests.id, requestId),
+            eq(openMatchJoinRequests.status, JoinRequestStatus.REQUESTED),
+          ),
+        )
+        .returning({ id: openMatchJoinRequests.id });
       return {
         rejected: true,
-        changed: transition.count > 0,
+        changed: transition.length > 0,
         playerId: req.playerId,
       };
     });
@@ -435,15 +488,15 @@ export class OpenMatchesService {
    * blocked — reversing append-only settlement is out of scope here.
    */
   async cancel(host: RequestUser, matchId: string) {
-    const match = await this.prisma.withTenantBypass((tx) =>
-      tx.openMatch.findUnique({ where: { id: matchId } }),
+    const match = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findFirst({ where: eq(openMatches.id, matchId) }),
     );
     if (!match) throw new NotFoundException('Match not found');
     if (match.hostId !== host.id) {
       throw new ForbiddenException('Only the host can cancel this match');
     }
 
-    const affectedPlayers = await this.prisma.withTenantId(
+    const affectedPlayers = await this.db.withTenantId(
       match.ownerId,
       async (tx) => {
         if (
@@ -457,13 +510,18 @@ export class OpenMatchesService {
         // ledger — those entries are append-only and reversing them is out of
         // scope. Surface a clear conflict rather than silently leaving the
         // ledger inconsistent.
-        const settledCount = await tx.ledgerTxn.count({
-          where: {
-            type: LedgerTxnType.OPEN_MATCH_SETTLE,
-            refType: 'open_match',
-            refId: matchId,
-          },
-        });
+        const settledCount = (
+          await tx
+            .select({ c: count() })
+            .from(ledgerTxns)
+            .where(
+              and(
+                eq(ledgerTxns.type, LedgerTxnType.OPEN_MATCH_SETTLE),
+                eq(ledgerTxns.refType, 'open_match'),
+                eq(ledgerTxns.refId, matchId),
+              ),
+            )
+        )[0].c;
         if (settledCount > 0) {
           throw new ConflictException(
             'Match has settled ledger repayments; cancellation/reversal is out of scope',
@@ -472,20 +530,21 @@ export class OpenMatchesService {
 
         // Capture players with an active (approved/requested) interest so we can
         // tell them the match is off (best-effort, after the tx commits).
-        const requests = await tx.openMatchJoinRequest.findMany({
-          where: {
-            matchId,
-            status: {
-              in: [JoinRequestStatus.APPROVED, JoinRequestStatus.REQUESTED],
-            },
-          },
-          select: { playerId: true },
+        const requests = await tx.query.openMatchJoinRequests.findMany({
+          where: and(
+            eq(openMatchJoinRequests.matchId, matchId),
+            inArray(openMatchJoinRequests.status, [
+              JoinRequestStatus.APPROVED,
+              JoinRequestStatus.REQUESTED,
+            ]),
+          ),
+          columns: { playerId: true },
         });
 
-        await tx.openMatch.update({
-          where: { id: matchId },
-          data: { status: OpenMatchStatus.CANCELLED },
-        });
+        await tx
+          .update(openMatches)
+          .set({ status: OpenMatchStatus.CANCELLED })
+          .where(eq(openMatches.id, matchId));
         return requests.map((r) => r.playerId);
       },
     );

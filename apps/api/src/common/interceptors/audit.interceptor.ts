@@ -4,10 +4,12 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { UserRole } from '@sportsbooking/shared';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { auditLogs } from '../../db/schema';
 import { RequestUser } from '../decorators/current-user.decorator';
 
 /** HTTP verb -> audit action. Non-mutating verbs are not mapped. */
@@ -59,7 +61,7 @@ const SKIP_AUTH_PATHS = ['/auth/refresh', '/auth/logout', '/auth/login'];
  */
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest();
@@ -127,18 +129,17 @@ export class AuditInterceptor implements NestInterceptor {
       const metadata = { method: req?.method, path };
 
       // Append-only log; bypass RLS so SUPER_ADMIN (no ownerId) can also write.
-      void this.prisma
+      void this.db
         .withTenantBypass((tx) =>
-          tx.auditLog.create({
-            data: {
-              ownerId: user.ownerId ?? null,
-              actorId: user.id,
-              actorRole: user.role,
-              action,
-              entity,
-              entityId,
-              metadata,
-            },
+          tx.insert(auditLogs).values({
+            id: randomUUID(),
+            ownerId: user.ownerId ?? null,
+            actorId: user.id,
+            actorRole: user.role,
+            action,
+            entity,
+            entityId,
+            metadata,
           }),
         )
         .catch(() => {

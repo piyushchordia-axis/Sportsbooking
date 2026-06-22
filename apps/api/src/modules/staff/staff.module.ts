@@ -14,6 +14,8 @@ import {
 } from '@nestjs/common';
 import { UserRole } from '@sportsbooking/shared';
 import * as bcrypt from 'bcryptjs';
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import {
   ArrayUnique,
   IsArray,
@@ -29,8 +31,9 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { PrismaService } from '../../prisma/prisma.service';
-import type { Prisma } from '@prisma/client';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { users, venues } from '../../db/schema';
 
 class CreateStaffDto {
   @IsString() name!: string;
@@ -70,7 +73,7 @@ interface StaffSummary {
  */
 @Injectable()
 export class StaffService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   private ownerId(user: RequestUser): string {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
@@ -82,14 +85,14 @@ export class StaffService {
     name: string;
     email: string | null;
     active: boolean;
-    assignedVenueIds: string[];
+    assignedVenueIds: string[] | null;
   }): StaffSummary {
     return {
       id: u.id,
       name: u.name,
       email: u.email,
       active: u.active,
-      assignedVenueIds: u.assignedVenueIds,
+      assignedVenueIds: u.assignedVenueIds ?? [],
     };
   }
 
@@ -98,14 +101,14 @@ export class StaffService {
    * Rejects empty/foreign ids. Scoped by ownerId explicitly (defense-in-depth).
    */
   private async assertVenuesOwned(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     venueIds: string[],
   ): Promise<void> {
     if (venueIds.length === 0) return;
-    const owned = await tx.venue.findMany({
-      where: { id: { in: venueIds }, ownerId },
-      select: { id: true },
+    const owned = await tx.query.venues.findMany({
+      where: and(inArray(venues.id, venueIds), eq(venues.ownerId, ownerId)),
+      columns: { id: true },
     });
     if (owned.length !== venueIds.length) {
       throw new BadRequestException(
@@ -118,27 +121,31 @@ export class StaffService {
   async create(user: RequestUser, dto: CreateStaffDto): Promise<StaffSummary> {
     const ownerId = this.ownerId(user);
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
+    return this.db.withTenantId(ownerId, async (tx) => {
       // Email is globally unique across all users; reject any existing match.
-      const existing = await tx.user.findUnique({
-        where: { email: dto.email },
+      const existing = await tx.query.users.findFirst({
+        where: eq(users.email, dto.email),
       });
       if (existing) throw new ConflictException('Email already in use');
 
       await this.assertVenuesOwned(tx, ownerId, dto.assignedVenueIds);
 
       const passwordHash = await bcrypt.hash(dto.password, 10);
-      const created = await tx.user.create({
-        data: {
-          role: UserRole.STAFF,
-          ownerId,
-          name: dto.name,
-          email: dto.email,
-          passwordHash,
-          active: true,
-          assignedVenueIds: dto.assignedVenueIds,
-        },
-      });
+      const created = (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: UserRole.STAFF,
+            ownerId,
+            name: dto.name,
+            email: dto.email,
+            passwordHash,
+            active: true,
+            assignedVenueIds: dto.assignedVenueIds,
+          })
+          .returning()
+      )[0];
       return this.toSummary(created);
     });
   }
@@ -146,17 +153,17 @@ export class StaffService {
   /** List this owner's staff users (never returns passwordHash). */
   async list(user: RequestUser): Promise<StaffSummary[]> {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const staff = await tx.user.findMany({
-        where: { ownerId, role: UserRole.STAFF },
-        select: {
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const staff = await tx.query.users.findMany({
+        where: and(eq(users.ownerId, ownerId), eq(users.role, UserRole.STAFF)),
+        columns: {
           id: true,
           name: true,
           email: true,
           active: true,
           assignedVenueIds: true,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: desc(users.createdAt),
       });
       return staff.map((s) => this.toSummary(s));
     });
@@ -173,9 +180,13 @@ export class StaffService {
     dto: UpdateStaffDto,
   ): Promise<StaffSummary> {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const existing = await tx.user.findFirst({
-        where: { id, ownerId, role: UserRole.STAFF },
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const existing = await tx.query.users.findFirst({
+        where: and(
+          eq(users.id, id),
+          eq(users.ownerId, ownerId),
+          eq(users.role, UserRole.STAFF),
+        ),
       });
       if (!existing) throw new NotFoundException('Staff user not found');
 
@@ -191,7 +202,9 @@ export class StaffService {
         data.assignedVenueIds = dto.assignedVenueIds;
       }
 
-      const updated = await tx.user.update({ where: { id }, data });
+      const updated = (
+        await tx.update(users).set(data).where(eq(users.id, id)).returning()
+      )[0];
       return this.toSummary(updated);
     });
   }
@@ -199,16 +212,23 @@ export class StaffService {
   /** Soft-deactivate a staff user owned by this owner (active=false). */
   async deactivate(user: RequestUser, id: string): Promise<StaffSummary> {
     const ownerId = this.ownerId(user);
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const existing = await tx.user.findFirst({
-        where: { id, ownerId, role: UserRole.STAFF },
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const existing = await tx.query.users.findFirst({
+        where: and(
+          eq(users.id, id),
+          eq(users.ownerId, ownerId),
+          eq(users.role, UserRole.STAFF),
+        ),
       });
       if (!existing) throw new NotFoundException('Staff user not found');
 
-      const updated = await tx.user.update({
-        where: { id },
-        data: { active: false },
-      });
+      const updated = (
+        await tx
+          .update(users)
+          .set({ active: false })
+          .where(eq(users.id, id))
+          .returning()
+      )[0];
       return this.toSummary(updated);
     });
   }

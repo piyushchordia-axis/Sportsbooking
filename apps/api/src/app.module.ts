@@ -10,7 +10,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantMiddleware } from './common/tenant/tenant.middleware';
-import { PrismaModule } from './prisma/prisma.module';
+import { DbModule } from './db/db.module';
 import { AddonsModule } from './modules/addons/addons.module';
 import { AmcModule } from './modules/amc/amc.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -37,7 +37,7 @@ import { VenuesModule } from './modules/venues/venues.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    PrismaModule,
+    DbModule,
     NotificationsModule,
     RemindersModule,
     PaymentsModule,

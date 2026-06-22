@@ -13,8 +13,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { OfferType, UserRole } from '@sportsbooking/shared';
-import { Prisma } from '@prisma/client';
+import { and, count, eq } from 'drizzle-orm';
 import {
   IsArray,
   IsBoolean,
@@ -31,7 +32,9 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import { bookings, offers } from '../../db/schema';
+import { dec, money } from '../../db/money';
 
 class CreateOfferDto {
   @IsString() name!: string;
@@ -66,43 +69,49 @@ class UpdateOfferDto {
  */
 @Injectable()
 export class OffersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   create(user: RequestUser, dto: CreateOfferDto) {
-    return this.prisma.withTenant((tx) =>
-      tx.offer.create({
-        data: {
-          ownerId: user.ownerId!,
-          name: dto.name,
-          type: dto.type,
-          value: new Prisma.Decimal(dto.value),
-          code: dto.code,
-          autoApply: dto.autoApply ?? false,
-          validFrom: dto.validFrom ? new Date(dto.validFrom) : null,
-          validTo: dto.validTo ? new Date(dto.validTo) : null,
-          venueIds: dto.venueIds ?? [],
-          gameIds: dto.gameIds ?? [],
-          segment: dto.segment,
-        },
-      }),
-    );
+    return this.db.withTenant(async (tx) => {
+      return (
+        await tx
+          .insert(offers)
+          .values({
+            id: randomUUID(),
+            ownerId: user.ownerId!,
+            name: dto.name,
+            type: dto.type,
+            value: money(dec(dto.value)),
+            code: dto.code,
+            autoApply: dto.autoApply ?? false,
+            validFrom: dto.validFrom ? new Date(dto.validFrom) : null,
+            validTo: dto.validTo ? new Date(dto.validTo) : null,
+            venueIds: dto.venueIds ?? [],
+            gameIds: dto.gameIds ?? [],
+            segment: dto.segment,
+          })
+          .returning()
+      )[0];
+    });
   }
 
   list(_user: RequestUser) {
-    return this.prisma.withTenant((tx) => tx.offer.findMany());
+    return this.db.withTenant((tx) => tx.query.offers.findMany());
   }
 
   /** Update any field of an offer, tenant-scoped. */
   async update(user: RequestUser, id: string, dto: UpdateOfferDto) {
     const ownerId = user.ownerId!;
-    return this.prisma.withTenant(async (tx) => {
-      const existing = await tx.offer.findFirst({ where: { id, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const existing = await tx.query.offers.findFirst({
+        where: and(eq(offers.id, id), eq(offers.ownerId, ownerId)),
+      });
       if (!existing) throw new NotFoundException('Offer not found');
 
-      const data: Prisma.OfferUpdateInput = {};
+      const data: Partial<typeof offers.$inferInsert> = {};
       if (dto.name !== undefined) data.name = dto.name;
       if (dto.type !== undefined) data.type = dto.type;
-      if (dto.value !== undefined) data.value = new Prisma.Decimal(dto.value);
+      if (dto.value !== undefined) data.value = money(dec(dto.value));
       if (dto.code !== undefined) data.code = dto.code;
       if (dto.autoApply !== undefined) data.autoApply = dto.autoApply;
       if (dto.active !== undefined) data.active = dto.active;
@@ -116,7 +125,9 @@ export class OffersService {
       if (dto.gameIds !== undefined) data.gameIds = dto.gameIds;
       if (dto.segment !== undefined) data.segment = dto.segment;
 
-      return tx.offer.update({ where: { id }, data });
+      return (
+        await tx.update(offers).set(data).where(eq(offers.id, id)).returning()
+      )[0];
     });
   }
 
@@ -127,10 +138,18 @@ export class OffersService {
    */
   async deactivate(user: RequestUser, id: string) {
     const ownerId = user.ownerId!;
-    return this.prisma.withTenant(async (tx) => {
-      const existing = await tx.offer.findFirst({ where: { id, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const existing = await tx.query.offers.findFirst({
+        where: and(eq(offers.id, id), eq(offers.ownerId, ownerId)),
+      });
       if (!existing) throw new NotFoundException('Offer not found');
-      return tx.offer.update({ where: { id }, data: { active: false } });
+      return (
+        await tx
+          .update(offers)
+          .set({ active: false })
+          .where(eq(offers.id, id))
+          .returning()
+      )[0];
     });
   }
 
@@ -141,21 +160,34 @@ export class OffersService {
    */
   async remove(user: RequestUser, id: string, hard = false) {
     const ownerId = user.ownerId!;
-    return this.prisma.withTenant(async (tx) => {
-      const existing = await tx.offer.findFirst({ where: { id, ownerId } });
+    return this.db.withTenant(async (tx) => {
+      const existing = await tx.query.offers.findFirst({
+        where: and(eq(offers.id, id), eq(offers.ownerId, ownerId)),
+      });
       if (!existing) throw new NotFoundException('Offer not found');
 
       if (!hard) {
-        return tx.offer.update({ where: { id }, data: { active: false } });
+        return (
+          await tx
+            .update(offers)
+            .set({ active: false })
+            .where(eq(offers.id, id))
+            .returning()
+        )[0];
       }
 
-      const refs = await tx.booking.count({ where: { offerId: id } });
+      const refs = (
+        await tx
+          .select({ c: count() })
+          .from(bookings)
+          .where(eq(bookings.offerId, id))
+      )[0].c;
       if (refs > 0) {
         throw new BadRequestException(
           'Offer is referenced by existing bookings; deactivate it instead of deleting',
         );
       }
-      await tx.offer.delete({ where: { id } });
+      await tx.delete(offers).where(eq(offers.id, id));
       return { deleted: true };
     });
   }

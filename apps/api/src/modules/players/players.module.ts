@@ -19,7 +19,6 @@ import {
   SkillLevel,
   UserRole,
 } from '@sportsbooking/shared';
-import { Prisma } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -29,6 +28,8 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
+import { randomUUID } from 'node:crypto';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   CurrentUser,
   RequestUser,
@@ -36,7 +37,9 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { NotificationService } from '../notifications/notification.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { ownerCustomers, playerProfiles, users } from '../../db/schema';
 
 class UpdateProfileDto {
   @IsOptional() @IsEnum(SkillLevel) skillLevel?: SkillLevel;
@@ -99,7 +102,7 @@ interface BulkAddResult {
 @Injectable()
 export class PlayersService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly notifications: NotificationService,
   ) {}
 
@@ -130,29 +133,40 @@ export class PlayersService {
 
     const customerId = user.id;
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
+    return this.db.withTenantId(ownerId, async (tx) => {
       // Customers may only edit their profile at an owner they are linked to.
       // The link lookup is tenant-scoped, so it also confirms (and never
       // leaks) cross-tenant membership.
-      const link = await tx.ownerCustomer.findUnique({
-        where: { ownerId_customerId: { ownerId, customerId } },
+      const link = await tx.query.ownerCustomers.findFirst({
+        where: and(
+          eq(ownerCustomers.ownerId, ownerId),
+          eq(ownerCustomers.customerId, customerId),
+        ),
       });
       if (!link) {
         throw new NotFoundException('No profile for this owner');
       }
 
-      return tx.playerProfile.update({
-        where: { ownerId_customerId: { ownerId, customerId } },
-        data: { skillLevel: dto.skillLevel, games: dto.games },
-      });
+      return (
+        await tx
+          .update(playerProfiles)
+          .set({ skillLevel: dto.skillLevel, games: dto.games })
+          .where(
+            and(
+              eq(playerProfiles.ownerId, ownerId),
+              eq(playerProfiles.customerId, customerId),
+            ),
+          )
+          .returning()
+      )[0];
     });
   }
 
   /** Owner CRM directory with simple frequency/recency segmentation. */
   list(user: RequestUser, segment?: string): Promise<PlayerSummary[]> {
-    return this.prisma.withTenant(async (tx) => {
-      const links = await tx.ownerCustomer.findMany({
-        orderBy: { lastVisitAt: 'desc' },
+    return this.db.withTenant(async (tx) => {
+      const links = await tx.query.ownerCustomers.findMany({
+        orderBy: desc(ownerCustomers.lastVisitAt),
       });
       const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
       const filtered = links.filter((l) => {
@@ -164,14 +178,14 @@ export class PlayersService {
       // Enrich with name + mobile. Prefer the per-owner player profile; fall
       // back to the (global) user record for any legacy CRM link without one.
       const customerIds = filtered.map((l) => l.customerId);
-      const [profiles, users] = await Promise.all([
-        tx.playerProfile.findMany({
-          where: { customerId: { in: customerIds } },
+      const [profiles, userRows] = await Promise.all([
+        tx.query.playerProfiles.findMany({
+          where: inArray(playerProfiles.customerId, customerIds),
         }),
-        tx.user.findMany({ where: { id: { in: customerIds } } }),
+        tx.query.users.findMany({ where: inArray(users.id, customerIds) }),
       ]);
       const profileById = new Map(profiles.map((p) => [p.customerId, p]));
-      const userById = new Map(users.map((u) => [u.id, u]));
+      const userById = new Map(userRows.map((u) => [u.id, u]));
 
       return filtered.map((l) => {
         const profile = profileById.get(l.customerId);
@@ -201,49 +215,9 @@ export class PlayersService {
     const ownerId = user.ownerId;
     if (!ownerId) throw new BadRequestException('No tenant context');
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      let customer = await tx.user.findUnique({
-        where: { mobile: dto.mobile },
-      });
-      if (!customer) {
-        customer = await tx.user.create({
-          data: { role: 'customer', name: dto.name, mobile: dto.mobile },
-        });
-      }
-
-      const link = await tx.ownerCustomer.upsert({
-        where: { ownerId_customerId: { ownerId, customerId: customer.id } },
-        create: {
-          ownerId,
-          customerId: customer.id,
-          consent: dto.consent,
-          lastVisitAt: new Date(),
-        },
-        update: { consent: dto.consent },
-      });
-
-      const profile = await tx.playerProfile.upsert({
-        where: { ownerId_customerId: { ownerId, customerId: customer.id } },
-        create: {
-          ownerId,
-          customerId: customer.id,
-          name: dto.name,
-          mobile: dto.mobile,
-          consent: dto.consent,
-        },
-        update: { name: dto.name, mobile: dto.mobile, consent: dto.consent },
-      });
-
-      return {
-        customerId: customer.id,
-        name: profile.name,
-        mobile: profile.mobile,
-        bookingCount: link.bookingCount,
-        lastVisitAt: link.lastVisitAt.toISOString(),
-        consent: link.consent,
-        optedOut: link.optedOut,
-      };
-    });
+    return this.db.withTenantId(ownerId, (tx) =>
+      this.upsertCustomer(tx, ownerId, dto),
+    );
   }
 
   /**
@@ -272,7 +246,7 @@ export class PlayersService {
 
       try {
         // Per-row transaction so a failure can't roll back already-added rows.
-        const summary = await this.prisma.withTenantId(ownerId, (tx) =>
+        const summary = await this.db.withTenantId(ownerId, (tx) =>
           this.upsertCustomer(tx, ownerId, {
             name,
             mobile,
@@ -308,9 +282,12 @@ export class PlayersService {
     const ownerId = user.ownerId;
     if (!ownerId) throw new BadRequestException('No tenant context');
 
-    return this.prisma.withTenantId(ownerId, async (tx) => {
-      const existing = await tx.ownerCustomer.findUnique({
-        where: { ownerId_customerId: { ownerId, customerId } },
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const existing = await tx.query.ownerCustomers.findFirst({
+        where: and(
+          eq(ownerCustomers.ownerId, ownerId),
+          eq(ownerCustomers.customerId, customerId),
+        ),
       });
       if (!existing) {
         throw new NotFoundException('Customer not found in this CRM');
@@ -320,25 +297,44 @@ export class PlayersService {
       if (dto.optedOut !== undefined) linkData.optedOut = dto.optedOut;
       if (dto.consent !== undefined) linkData.consent = dto.consent;
 
-      const link = await tx.ownerCustomer.update({
-        where: { ownerId_customerId: { ownerId, customerId } },
-        data: linkData,
-      });
+      const link = (
+        await tx
+          .update(ownerCustomers)
+          .set(linkData)
+          .where(
+            and(
+              eq(ownerCustomers.ownerId, ownerId),
+              eq(ownerCustomers.customerId, customerId),
+            ),
+          )
+          .returning()
+      )[0];
 
       // Keep the player profile's consent flag in sync when provided.
       const profile =
         dto.consent !== undefined
-          ? await tx.playerProfile
-              .update({
-                where: { ownerId_customerId: { ownerId, customerId } },
-                data: { consent: dto.consent },
-              })
+          ? await tx
+              .update(playerProfiles)
+              .set({ consent: dto.consent })
+              .where(
+                and(
+                  eq(playerProfiles.ownerId, ownerId),
+                  eq(playerProfiles.customerId, customerId),
+                ),
+              )
+              .returning()
+              .then((rows) => rows[0] ?? null)
               .catch(() => null)
-          : await tx.playerProfile.findUnique({
-              where: { ownerId_customerId: { ownerId, customerId } },
-            });
+          : (await tx.query.playerProfiles.findFirst({
+              where: and(
+                eq(playerProfiles.ownerId, ownerId),
+                eq(playerProfiles.customerId, customerId),
+              ),
+            })) ?? null;
 
-      const u = await tx.user.findUnique({ where: { id: customerId } });
+      const u = await tx.query.users.findFirst({
+        where: eq(users.id, customerId),
+      });
 
       return {
         customerId,
@@ -373,10 +369,10 @@ export class PlayersService {
     if (!message) throw new BadRequestException('message is required');
 
     // Resolve the segment to eligible recipients inside a tenant-scoped tx.
-    const recipients = await this.prisma.withTenantId(ownerId, async (tx) => {
-      const links = await tx.ownerCustomer.findMany({
-        where: { ownerId },
-        orderBy: { lastVisitAt: 'desc' },
+    const recipients = await this.db.withTenantId(ownerId, async (tx) => {
+      const links = await tx.query.ownerCustomers.findMany({
+        where: eq(ownerCustomers.ownerId, ownerId),
+        orderBy: desc(ownerCustomers.lastVisitAt),
       });
 
       const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
@@ -389,14 +385,14 @@ export class PlayersService {
       });
 
       const customerIds = eligible.map((l) => l.customerId);
-      const [profiles, users] = await Promise.all([
-        tx.playerProfile.findMany({
-          where: { customerId: { in: customerIds } },
+      const [profiles, userRows] = await Promise.all([
+        tx.query.playerProfiles.findMany({
+          where: inArray(playerProfiles.customerId, customerIds),
         }),
-        tx.user.findMany({ where: { id: { in: customerIds } } }),
+        tx.query.users.findMany({ where: inArray(users.id, customerIds) }),
       ]);
       const profileById = new Map(profiles.map((p) => [p.customerId, p]));
-      const userById = new Map(users.map((u) => [u.id, u]));
+      const userById = new Map(userRows.map((u) => [u.id, u]));
 
       // Prefer the per-owner profile mobile; fall back to the global user.
       return eligible.map((l) => {
@@ -439,39 +435,61 @@ export class PlayersService {
    * and bulk add paths without nesting transactions.
    */
   private async upsertCustomer(
-    tx: Prisma.TransactionClient,
+    tx: DbTx,
     ownerId: string,
     dto: CreateCustomerDto,
   ): Promise<PlayerSummary> {
-    let customer = await tx.user.findUnique({ where: { mobile: dto.mobile } });
+    let customer = await tx.query.users.findFirst({
+      where: eq(users.mobile, dto.mobile),
+    });
     if (!customer) {
-      customer = await tx.user.create({
-        data: { role: 'customer', name: dto.name, mobile: dto.mobile },
-      });
+      customer = (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: 'customer',
+            name: dto.name,
+            mobile: dto.mobile,
+          })
+          .returning()
+      )[0];
     }
 
-    const link = await tx.ownerCustomer.upsert({
-      where: { ownerId_customerId: { ownerId, customerId: customer.id } },
-      create: {
-        ownerId,
-        customerId: customer.id,
-        consent: dto.consent,
-        lastVisitAt: new Date(),
-      },
-      update: { consent: dto.consent },
-    });
+    const link = (
+      await tx
+        .insert(ownerCustomers)
+        .values({
+          id: randomUUID(),
+          ownerId,
+          customerId: customer.id,
+          consent: dto.consent,
+          lastVisitAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [ownerCustomers.ownerId, ownerCustomers.customerId],
+          set: { consent: dto.consent },
+        })
+        .returning()
+    )[0];
 
-    const profile = await tx.playerProfile.upsert({
-      where: { ownerId_customerId: { ownerId, customerId: customer.id } },
-      create: {
-        ownerId,
-        customerId: customer.id,
-        name: dto.name,
-        mobile: dto.mobile,
-        consent: dto.consent,
-      },
-      update: { name: dto.name, mobile: dto.mobile, consent: dto.consent },
-    });
+    const profile = (
+      await tx
+        .insert(playerProfiles)
+        .values({
+          id: randomUUID(),
+          ownerId,
+          customerId: customer.id,
+          name: dto.name,
+          mobile: dto.mobile,
+          consent: dto.consent,
+        })
+        .onConflictDoUpdate({
+          target: [playerProfiles.ownerId, playerProfiles.customerId],
+          set: { name: dto.name, mobile: dto.mobile, consent: dto.consent },
+        })
+        .returning()
+    )[0];
 
     return {
       customerId: customer.id,

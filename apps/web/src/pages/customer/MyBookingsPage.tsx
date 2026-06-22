@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
+import { Skeleton } from '../../components/ui/skeleton';
 import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 
 const STATUS_LABEL: Record<BookingStatus, string> = {
@@ -270,16 +271,7 @@ export function MyBookingsPage() {
       {loading ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 mt-5">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                height: 120,
-                borderRadius: 14,
-                background: 'var(--surface)',
-                border: '1px solid var(--line)',
-                opacity: 0.6,
-              }}
-            />
+            <Skeleton key={i} className="h-[120px] w-full rounded-2xl" />
           ))}
         </div>
       ) : bookings.length === 0 ? (

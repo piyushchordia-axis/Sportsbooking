@@ -179,6 +179,40 @@
 @keyframes fl-blip { 0%,100%{opacity:.35} 50%{opacity:1} }
 @keyframes fl-rise { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
 
+/* Native-feel page transition: a subtle fade + lift on each route change. The
+   shell keys this wrapper by pathname so it re-runs on every tab switch. */
+.fl-page-enter { animation: fl-rise 0.24s ease both; }
+
+/* Skeleton shimmer — Floodlit only (the admin console keeps its own pulse).
+   Targets the shared <Skeleton data-slot="skeleton">, so every floodlit skeleton
+   gets a left-to-right sweep instead of a flat pulse (native loading feel). */
+.floodlit [data-slot='skeleton'] {
+  background-color: var(--surface-2);
+  position: relative;
+  overflow: hidden;
+  animation: none;
+}
+.floodlit [data-slot='skeleton']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--chalk) 10%, transparent) 50%,
+    transparent 100%
+  );
+  animation: fl-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes fl-shimmer { to { transform: translateX(100%); } }
+
+/* Respect reduced-motion: drop the transition + shimmer movement. */
+@media (prefers-reduced-motion: reduce) {
+  .fl-page-enter { animation: none; }
+  .floodlit [data-slot='skeleton']::after { animation: none; }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -285,6 +319,15 @@
   button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  /* The console default button padding above (0.5rem 0.9rem) leaks onto floodlit
+     buttons that style themselves inline (no bg-/text- utility), pushing the
+     icon off-centre in icon-only buttons like the day/night toggle. Zero it for
+     the floodlit app; padded buttons still set their own px-/py- utilities,
+     which win (utilities layer > base layer). */
+  .floodlit button:not([class*='bg-']):not([class*='text-']) {
+    padding: 0;
   }
 
   /*

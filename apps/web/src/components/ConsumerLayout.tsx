@@ -225,7 +225,10 @@ export function ConsumerLayout() {
 
       {/* ===== Content ===== */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-6 md:pb-10">
-        <Outlet />
+        {/* Keyed by route so the fade+lift transition replays on each tab switch. */}
+        <div key={loc.pathname} className="fl-page-enter">
+          <Outlet />
+        </div>
       </main>
 
       {/* ===== Bottom nav (mobile) ===== */}

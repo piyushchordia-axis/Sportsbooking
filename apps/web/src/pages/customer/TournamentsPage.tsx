@@ -13,6 +13,7 @@ import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 import { label } from '../../lib/labels';
 import { useAuth } from '../../auth/AuthContext';
+import { Skeleton } from '../../components/ui/skeleton';
 
 /** Accept a 10-digit Indian mobile, optionally with a +91 / 0 prefix. */
 function isValidMobile(raw: string): boolean {
@@ -329,16 +330,7 @@ export function TournamentsPage() {
       ) : tournaments.loading && !tournaments.data ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                height: 220,
-                borderRadius: 16,
-                background: 'var(--surface)',
-                border: '1px solid var(--line)',
-                opacity: 0.6,
-              }}
-            />
+            <Skeleton key={i} className="h-[220px] w-full rounded-2xl" />
           ))}
         </div>
       ) : rows.length === 0 ? (

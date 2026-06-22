@@ -3,6 +3,7 @@ import { AlertCircle, CreditCard, RefreshCw, Sparkles, Ticket } from 'lucide-rea
 import { api, DiscoverVenue, Pack, WalletSummary } from '../../api/client';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 import { useFloodlitToast } from '../../floodlit/toast';
+import { Skeleton } from '../../components/ui/skeleton';
 
 /**
  * Recoverable load failure: states what went wrong (in the interface's voice)
@@ -310,11 +311,7 @@ export function WalletPage() {
           ) : walletLoading || !wallet ? (
             <div className="grid grid-cols-3 gap-2.5">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="rounded-2xl h-24 animate-pulse"
-                  style={{ background: 'var(--surface-2)', border: '1px solid var(--line)' }}
-                />
+                <Skeleton key={i} className="h-24 w-full rounded-2xl" />
               ))}
             </div>
           ) : (

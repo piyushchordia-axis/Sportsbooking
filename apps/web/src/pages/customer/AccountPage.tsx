@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useLoad } from '../../components/common';
+import { Skeleton } from '../../components/ui/skeleton';
 import { useFloodlitToast } from '../../floodlit/toast';
 import { label } from '../../lib/labels';
 
@@ -137,6 +138,32 @@ export function AccountPage() {
           <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--muted)' }}>
             Sign in with your mobile to unlock packs, points, referrals and your booking history.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- initial loading skeleton -----------------------------------------
+  // Mirror the account layout (header + profile card + the two-column section
+  // cards) while the operator/saved-venue/game data is still resolving.
+  if (venues.loading && !venues.data) {
+    return (
+      <div className="mx-auto w-full max-w-5xl px-1 py-2">
+        <Skeleton className="h-9 w-40 rounded-lg" />
+
+        {/* profile card */}
+        <Skeleton className="mt-4 h-[86px] w-full rounded-2xl" />
+
+        {/* two-column section cards */}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          <div className="flex flex-col gap-4">
+            <Skeleton className="h-[150px] w-full rounded-[14px]" />
+            <Skeleton className="h-72 w-full rounded-[14px]" />
+          </div>
+          <div className="flex flex-col gap-4">
+            <Skeleton className="h-[140px] w-full rounded-[14px]" />
+            <Skeleton className="h-24 w-full rounded-[12px]" />
+          </div>
         </div>
       </div>
     );

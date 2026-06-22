@@ -14,6 +14,7 @@ import {
 import { api, DiscoverVenue } from '../../api/client';
 import { EmptyState, Select, useLoad } from '../../components/common';
 import { DatePicker } from '../../components/ui/date-picker';
+import { Skeleton } from '../../components/ui/skeleton';
 import { fromISODate, toISODate } from '../../lib/date';
 import { useStorefront } from '../../storefront/StorefrontProvider';
 import { useAuth } from '../../auth/AuthContext';
@@ -347,22 +348,26 @@ export function BrowsePage() {
         />
       </label>
 
-      {/* Filter chips: city / sport / price / date / near-me */}
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="fl-chip-select [&_label]:mb-0">
+      {/* Filters: a compact horizontal scroll row of pills (was a 4-up grid that
+          stacked full-width on mobile and ate the whole first screen). Bleeds to
+          the screen edge on mobile for an edge-to-edge scroll; wraps from sm up. */}
+      <div className="mt-3 -mx-4 flex gap-2 overflow-x-auto fl-scroll px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+        <div className="fl-chip-select w-32 shrink-0 [&_label]:mb-0">
           <Select label="" value={city} onChange={setCity} options={cityOptions} />
         </div>
-        <div className="fl-chip-select [&_label]:mb-0">
+        <div className="fl-chip-select w-32 shrink-0 [&_label]:mb-0">
           <Select label="" value={sport} onChange={setSport} options={sportOptions} />
         </div>
-        <div className="fl-chip-select [&_label]:mb-0">
+        <div className="fl-chip-select w-28 shrink-0 [&_label]:mb-0">
           <Select label="" value={maxPrice} onChange={setMaxPrice} options={PRICE_TIERS} />
         </div>
-        <DatePicker
-          value={fromISODate(date)}
-          onChange={(d) => setDate(toISODate(d))}
-          placeholder="Any date"
-        />
+        <div className="w-36 shrink-0">
+          <DatePicker
+            value={fromISODate(date)}
+            onChange={(d) => setDate(toISODate(d))}
+            placeholder="Any date"
+          />
+        </div>
       </div>
 
       {/* Location row: "Near me" chip + optional radius selector */}
@@ -435,9 +440,11 @@ export function BrowsePage() {
       )}
 
       {(loading && list.length === 0) || (geoActive && geoLoading && list.length === 0) ? (
-        <p className="py-10 text-center text-sm" style={{ color: 'var(--muted)' }}>
-          Loading grounds…
-        </p>
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-44 w-full rounded-2xl sm:h-52" />
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="mt-6">
           <EmptyState

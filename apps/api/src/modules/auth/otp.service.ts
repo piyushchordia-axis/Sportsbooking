@@ -41,10 +41,15 @@ export class OtpService {
   async issue(mobile: string): Promise<void> {
     await this.enforceRequestThrottle(mobile);
 
+    // STATIC_OTP pins every code to a fixed value (e.g. 0000) — a TEMPORARY
+    // launch escape so players can sign in before a live SMS provider (MSG91)
+    // is wired. SECURITY: a fixed code lets anyone log in as ANY mobile number;
+    // remove STATIC_OTP and configure real SMS before a public launch.
     const code =
-      process.env.NODE_ENV === 'production'
+      process.env.STATIC_OTP ||
+      (process.env.NODE_ENV === 'production'
         ? String(randomInt(100000, 1000000)) // CSPRNG (not Math.random)
-        : '123456'; // deterministic in dev/test
+        : '123456'); // deterministic in dev/test
     const expiresAt = new Date(Date.now() + this.ttlMs);
 
     // One active code per mobile: upsert so a re-issue replaces the prior code

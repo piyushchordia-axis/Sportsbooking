@@ -22,7 +22,11 @@ export class NotificationService {
     // while the API still answers `{ sent: true }`. Likewise a live driver with
     // no SMS_API_URL drops sends. Refuse to start unless SMS is really wired,
     // or the operator explicitly opts out for a console-only/demo deploy.
-    const allowNoSms = config.get<string>('ALLOW_NO_SMS') === 'true';
+    // STATIC_OTP (a fixed login code) means players don't need to receive an
+    // SMS at all, so a real provider isn't required to boot.
+    const allowNoSms =
+      config.get<string>('ALLOW_NO_SMS') === 'true' ||
+      Boolean(config.get<string>('STATIC_OTP'));
     if (this.isProd && !allowNoSms) {
       const smsUrl = config.get<string>('SMS_API_URL');
       if (this.driver === 'log' || !smsUrl) {

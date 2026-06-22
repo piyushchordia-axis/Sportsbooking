@@ -667,3 +667,41 @@ export const notifications = pgTable("notifications", {
 		}).onUpdate("cascade").onDelete("cascade"),
 	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
 ]);
+
+// --- Auth persistence (DB-backed so OTP, refresh-token revocation and password
+// resets survive a restart and are shared across instances — replacing the old
+// in-memory Maps). These are GLOBAL infra tables (not tenant-scoped): no RLS
+// policy, keyed by mobile / jti / token-hash. ---
+
+export const otpCodes = pgTable("otp_codes", {
+	mobile: text().primaryKey().notNull(),
+	code: text().notNull(),
+	attempts: integer().default(0).notNull(),
+	expiresAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const otpRequests = pgTable("otp_requests", {
+	id: text().primaryKey().notNull(),
+	mobile: text().notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("otp_requests_mobile_createdAt_idx").using("btree", table.mobile.asc().nullsLast(), table.createdAt.asc().nullsLast()),
+]);
+
+export const revokedRefreshTokens = pgTable("revoked_refresh_tokens", {
+	jti: text().primaryKey().notNull(),
+	expiresAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("revoked_refresh_tokens_expiresAt_idx").using("btree", table.expiresAt.asc().nullsLast()),
+]);
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+	tokenHash: text().primaryKey().notNull(),
+	userId: text().notNull(),
+	expiresAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("password_reset_tokens_expiresAt_idx").using("btree", table.expiresAt.asc().nullsLast()),
+]);

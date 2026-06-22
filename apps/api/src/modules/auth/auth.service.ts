@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
@@ -13,9 +13,14 @@ import {
   UserRole,
 } from '@sportsbooking/shared';
 import * as bcrypt from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { eq, lt } from 'drizzle-orm';
 import { DbService } from '../../db/db.service';
-import { owners, users } from '../../db/schema';
+import {
+  owners,
+  passwordResetTokens,
+  revokedRefreshTokens,
+  users,
+} from '../../db/schema';
 import { NotificationService } from '../notifications/notification.service';
 import { JwtPayload } from './jwt.strategy';
 import { OtpService } from './otp.service';
@@ -36,28 +41,10 @@ interface RefreshTokenPayload {
   exp?: number;
 }
 
-interface ResetEntry {
-  userId: string;
-  expiresAt: number;
-}
-
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 @Injectable()
 export class AuthService {
-  /**
-   * Denylist of revoked refresh-token ids (jti → token expiry epoch ms).
-   * In-memory for dev; swap for Redis in prod (TTL = token expiry) so revocation
-   * survives restarts and is shared across instances. Swept lazily on access.
-   */
-  private readonly revokedRefreshJtis = new Map<string, number>();
-
-  /**
-   * Single-use password-reset tokens (opaque token → user id + expiry).
-   * In-memory for dev; use Redis with a 15-min TTL in prod.
-   */
-  private readonly resetTokens = new Map<string, ResetEntry>();
-
   constructor(
     private readonly db: DbService,
     private readonly jwt: JwtService,
@@ -73,7 +60,7 @@ export class AuthService {
 
   /** Customer OTP verification — find-or-create the global customer user. */
   async verifyOtp(dto: VerifyOtpDto): Promise<LoginResponse> {
-    if (!this.otp.verify(dto.mobile, dto.code)) {
+    if (!(await this.otp.verify(dto.mobile, dto.code))) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
@@ -144,7 +131,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    if (this.isRefreshRevoked(payload.jti)) {
+    if (await this.isRefreshRevoked(payload.jti)) {
       throw new UnauthorizedException('Refresh token has been revoked');
     }
 
@@ -160,7 +147,7 @@ export class AuthService {
     await this.assertOwnerNotSuspended(user.ownerId);
 
     // Rotate: revoke the presented token so it cannot be replayed.
-    this.revokeRefresh(payload.jti, payload.exp);
+    await this.revokeRefresh(payload.jti, payload.exp);
 
     return this.mintTokens({
       sub: user.id,
@@ -176,7 +163,7 @@ export class AuthService {
       const payload =
         await this.jwt.verifyAsync<RefreshTokenPayload>(refreshToken);
       if (payload.type === 'refresh' && payload.jti) {
-        this.revokeRefresh(payload.jti, payload.exp);
+        await this.revokeRefresh(payload.jti, payload.exp);
       }
     } catch {
       // Already-invalid/expired tokens need no revocation; treat as success.
@@ -227,11 +214,19 @@ export class AuthService {
       user.passwordHash &&
       PASSWORD_ROLES.includes(user.role as UserRole)
     ) {
-      this.sweepResetTokens();
+      // Store only a hash of the opaque token (defence-in-depth: a DB leak does
+      // not expose usable reset tokens). The raw token is delivered to the user.
       const token = randomBytes(32).toString('hex');
-      this.resetTokens.set(token, {
-        userId: user.id,
-        expiresAt: Date.now() + RESET_TOKEN_TTL_MS,
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      await this.db.withTenantBypass(async (tx) => {
+        await tx
+          .delete(passwordResetTokens)
+          .where(lt(passwordResetTokens.expiresAt, new Date()));
+        await tx.insert(passwordResetTokens).values({
+          tokenHash,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+        });
       });
       // Dev: NotificationService 'log' driver just logs this. For prod, an email
       // provider is needed (SMS is not appropriate for staff password resets).
@@ -252,18 +247,37 @@ export class AuthService {
     token: string,
     newPassword: string,
   ): Promise<{ updated: true }> {
-    this.sweepResetTokens();
-    const entry = this.resetTokens.get(token);
-    if (!entry || entry.expiresAt < Date.now()) {
-      this.resetTokens.delete(token);
-      throw new BadRequestException('Invalid or expired reset token');
-    }
-
+    const tokenHash = createHash('sha256').update(token).digest('hex');
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.db.withTenantBypass((tx) =>
-      tx.update(users).set({ passwordHash }).where(eq(users.id, entry.userId)),
-    );
-    this.resetTokens.delete(token);
+    await this.db.withTenantBypass(async (tx) => {
+      // Sweep expired tokens, then validate + consume this one atomically so the
+      // password update and single-use invalidation cannot diverge.
+      await tx
+        .delete(passwordResetTokens)
+        .where(lt(passwordResetTokens.expiresAt, new Date()));
+      const entry = (
+        await tx
+          .select()
+          .from(passwordResetTokens)
+          .where(eq(passwordResetTokens.tokenHash, tokenHash))
+          .limit(1)
+      )[0];
+      if (!entry || entry.expiresAt.getTime() < Date.now()) {
+        if (entry) {
+          await tx
+            .delete(passwordResetTokens)
+            .where(eq(passwordResetTokens.tokenHash, tokenHash));
+        }
+        throw new BadRequestException('Invalid or expired reset token');
+      }
+      await tx
+        .update(users)
+        .set({ passwordHash })
+        .where(eq(users.id, entry.userId));
+      await tx
+        .delete(passwordResetTokens)
+        .where(eq(passwordResetTokens.tokenHash, tokenHash));
+    });
     return { updated: true };
   }
 
@@ -311,29 +325,34 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private revokeRefresh(jti: string, exp?: number): void {
+  private async revokeRefresh(jti: string, exp?: number): Promise<void> {
     // Keep the entry only until the token would expire anyway, then it is moot.
-    const expiresAtMs = exp ? exp * 1000 : Date.now() + RESET_TOKEN_TTL_MS;
-    this.revokedRefreshJtis.set(jti, expiresAtMs);
+    const expiresAt = new Date(
+      exp ? exp * 1000 : Date.now() + RESET_TOKEN_TTL_MS,
+    );
+    await this.db.withTenantBypass((tx) =>
+      tx
+        .insert(revokedRefreshTokens)
+        .values({ jti, expiresAt })
+        .onConflictDoNothing(),
+    );
   }
 
-  private isRefreshRevoked(jti: string): boolean {
-    this.sweepRevoked();
-    return this.revokedRefreshJtis.has(jti);
-  }
-
-  /** Drop denylist entries whose underlying token has already expired. */
-  private sweepRevoked(): void {
-    const now = Date.now();
-    for (const [jti, expiresAt] of this.revokedRefreshJtis) {
-      if (expiresAt <= now) this.revokedRefreshJtis.delete(jti);
-    }
-  }
-
-  private sweepResetTokens(): void {
-    const now = Date.now();
-    for (const [token, entry] of this.resetTokens) {
-      if (entry.expiresAt <= now) this.resetTokens.delete(token);
-    }
+  private async isRefreshRevoked(jti: string): Promise<boolean> {
+    return this.db.withTenantBypass(async (tx) => {
+      // Drop denylist entries whose underlying token has already expired, then
+      // check the presented jti.
+      await tx
+        .delete(revokedRefreshTokens)
+        .where(lt(revokedRefreshTokens.expiresAt, new Date()));
+      const row = (
+        await tx
+          .select({ jti: revokedRefreshTokens.jti })
+          .from(revokedRefreshTokens)
+          .where(eq(revokedRefreshTokens.jti, jti))
+          .limit(1)
+      )[0];
+      return !!row;
+    });
   }
 }

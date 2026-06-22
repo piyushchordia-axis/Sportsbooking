@@ -227,8 +227,8 @@ the current code. Remaining noteworthy mismatches:_
 
 ## Recommended next steps (prioritized)
 
-1. P0 Move OTP, refresh-token revocation, and password-reset stores to Redis (or a DB table) so auth survives restarts and scales horizontally.
-2. P0 Run production under a dedicated non-superuser `DATABASE_URL` role so RLS enforces; add own-row policies to the 5 child tables (venue_games, venue_settings, booking_addons, tournament_participants, open_match_join_requests).
+1. ~~P0 Move OTP, refresh-token revocation, and password-reset stores to Redis (or a DB table) so auth survives restarts and scales horizontally.~~ **DONE** — moved to Postgres tables (`otp_codes`, `otp_requests`, `revoked_refresh_tokens`, `password_reset_tokens`); reset tokens stored hashed. No Redis dependency.
+2. ~~P0 Run production under a dedicated non-superuser `DATABASE_URL` role so RLS enforces; add own-row policies to the 5 child tables (venue_games, venue_settings, booking_addons, tournament_participants, open_match_join_requests).~~ **DONE** — runtime role `sportsbooking_app` (NOSUPERUSER NOBYPASSRLS); RLS policies now cover all 23 tables incl. the 5 child tables.
 3. P1 Deepen audit logging beyond the global interceptor: capture semantic per-handler events with before/after diffs for high-value actions (onboarding, status changes, refunds, settings/branding edits), and build an audit-viewer surface (the interceptor already writes route-derived rows).
 4. P1 Integrate a real notification provider (WhatsApp Business API + SMS) behind the adapter; add an outbox/delivery-status table and retry; add an email provider for staff password reset.
 5. P1 Add a distinct stored gateway payment-id (and ideally a standalone payment/refund table) so tournament/booking refunds reference real Razorpay payments.

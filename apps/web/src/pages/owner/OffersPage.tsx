@@ -10,6 +10,7 @@ import {
   Percent,
   Plus,
   Power,
+  Search,
   Tag,
   Target,
   Ticket,
@@ -153,6 +154,12 @@ function MultiSelect({
   loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const shown = query.trim()
+    ? options.filter((o) =>
+        o.name.toLowerCase().includes(query.trim().toLowerCase()),
+      )
+    : options;
   const toggle = (id: string) =>
     onChange(
       selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
@@ -167,7 +174,13 @@ function MultiSelect({
 
   return (
     <Labelled label={label} hint={hint}>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (!o) setQuery('');
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -191,44 +204,64 @@ function MultiSelect({
               Nothing to choose yet.
             </p>
           ) : (
-            <div className="max-h-60 overflow-y-auto">
-              <button
-                type="button"
-                onClick={() =>
-                  onChange(
-                    selected.length === options.length
-                      ? []
-                      : options.map((o) => o.id),
-                  )
-                }
-                className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs font-medium text-primary hover:bg-muted"
-              >
-                {selected.length === options.length ? 'Clear all' : 'Select all'}
-              </button>
-              {options.map((o) => {
-                const on = selected.includes(o.id);
-                return (
-                  <button
-                    type="button"
-                    key={o.id}
-                    onClick={() => toggle(o.id)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted"
-                  >
-                    <span
-                      className={cn(
-                        'grid size-4 shrink-0 place-items-center rounded border',
-                        on
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border',
-                      )}
-                    >
-                      {on && <Check className="size-3" />}
-                    </span>
-                    <span className="truncate">{o.name}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              {options.length > 6 && (
+                <div className="relative mb-1">
+                  <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={`Search ${label.toLowerCase()}…`}
+                    className="h-9 w-full rounded-lg border border-border bg-input-background pr-2 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-primary/50"
+                  />
+                </div>
+              )}
+              <div className="max-h-60 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange(
+                      selected.length === options.length
+                        ? []
+                        : options.map((o) => o.id),
+                    )
+                  }
+                  className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs font-medium text-primary hover:bg-muted"
+                >
+                  {selected.length === options.length ? 'Clear all' : 'Select all'}
+                </button>
+                {shown.length === 0 ? (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    No matches.
+                  </p>
+                ) : (
+                  shown.map((o) => {
+                    const on = selected.includes(o.id);
+                    return (
+                      <button
+                        type="button"
+                        key={o.id}
+                        onClick={() => toggle(o.id)}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted"
+                      >
+                        <span
+                          className={cn(
+                            'grid size-4 shrink-0 place-items-center rounded border',
+                            on
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-border',
+                          )}
+                        >
+                          {on && <Check className="size-3" />}
+                        </span>
+                        <span className="truncate">{o.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </>
           )}
         </PopoverContent>
       </Popover>

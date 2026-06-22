@@ -36,6 +36,7 @@ import {
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
 import { SearchableSelect } from '../../components/ui/combobox';
+import { DatePicker } from '../../components/ui/date-picker';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import {
@@ -71,6 +72,7 @@ interface Participant {
   teamName?: string | null;
   captainName: string;
   captainMobile: string;
+  roster?: string[] | null;
   paid: boolean;
 }
 
@@ -350,6 +352,11 @@ export function TournamentsAdminPage() {
                             <TableRow key={p.id}>
                               <TableCell className="font-medium">
                                 {p.teamName || p.captainName}
+                                {p.roster && p.roster.length > 0 && (
+                                  <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                                    {p.roster.join(', ')}
+                                  </span>
+                                )}
                               </TableCell>
                               <TableCell className="text-muted-foreground">
                                 {p.captainName}
@@ -935,10 +942,9 @@ function CreateTournamentDialog({
               </div>
               {regCloses ? (
                 <div className="mt-1.5">
-                  <DateRangePicker
-                    value={regCloseDate}
-                    onChange={(v) => setRegCloseDate({ from: v.from })}
-                    numberOfMonths={1}
+                  <DatePicker
+                    value={regCloseDate.from}
+                    onChange={(d) => setRegCloseDate({ from: d })}
                     placeholder="Pick a cut-off date"
                   />
                   <span className="mt-1 block text-xs text-muted-foreground">

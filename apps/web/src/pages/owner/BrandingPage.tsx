@@ -1,5 +1,5 @@
 import { Branding } from '@sportsbooking/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck,
   Check,
@@ -9,11 +9,11 @@ import {
   RotateCcw,
   Save,
   Sun,
+  Upload,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import {
   Card,
-  Field,
   Msg,
   OwnerLogo,
   PageHeader,
@@ -258,7 +258,10 @@ function StorefrontPreview({
 
 export function BrandingPage() {
   const { setBranding } = useTheme();
-  const { data, error, loading } = useLoad<Branding>(() => api.getBranding(), []);
+  const { data, error, loading, reload } = useLoad<Branding>(
+    () => api.getBranding(),
+    [],
+  );
 
   const [form, setForm] = useState<Branding>({
     logoUrl: '',
@@ -267,7 +270,9 @@ export function BrandingPage() {
     accentColor: '#F59E0B',
   });
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Preview-only controls — never sent to the server.
   const [previewDark, setPreviewDark] = useState(false);
@@ -310,6 +315,24 @@ export function BrandingPage() {
       accentColor: DEFAULT_BRANDING.accentColor,
     });
     setMsg(null);
+  };
+
+  // Logo upload persists server-side immediately (and is applied live); colours
+  // are still saved via the Save button.
+  const onPickLogo = async (file: File) => {
+    setUploading(true);
+    setMsg(null);
+    try {
+      const saved = await api.uploadLogo(file);
+      setForm((f) => ({ ...f, logoUrl: saved.logoUrl ?? '' }));
+      setBranding(saved);
+      reload();
+      setMsg('Logo uploaded and applied.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const save = async () => {
@@ -365,18 +388,60 @@ export function BrandingPage() {
               Logo
             </SectionLabel>
             {loading ? (
-              <Skeleton className="mb-4 h-10 w-full rounded-xl" />
+              <Skeleton className="mb-4 h-16 w-full rounded-xl" />
             ) : (
-              <Field
-                label="Logo URL"
-                value={form.logoUrl ?? ''}
-                onChange={(v) => setForm((f) => ({ ...f, logoUrl: v }))}
-                placeholder="https://…/logo.png"
-              />
+              <div className="mb-2 flex items-center gap-4">
+                <OwnerLogo
+                  logoUrl={form.logoUrl || null}
+                  name="Brand"
+                  className="h-16 w-16 rounded-xl"
+                />
+                <div className="flex flex-col gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void onPickLogo(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={uploading}
+                    >
+                      <Upload className="h-4 w-4" />
+                      {uploading
+                        ? 'Uploading…'
+                        : form.logoUrl
+                          ? 'Replace logo'
+                          : 'Upload logo'}
+                    </Button>
+                    {form.logoUrl && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setForm((f) => ({ ...f, logoUrl: '' }))}
+                        disabled={uploading}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
-            <p className="-mt-1 mb-5 text-xs text-muted-foreground">
-              A square PNG or SVG works best. Leave blank to show a monogram from
-              your venue name.
+            <p className="mb-5 text-xs text-muted-foreground">
+              PNG, JPG, WebP or SVG up to 2&nbsp;MB. Square works best. Leave blank
+              to show a monogram from your venue name. Removing takes effect when
+              you Save.
             </p>
 
             <SectionLabel icon={Palette} className="mb-2">

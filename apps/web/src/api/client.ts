@@ -734,6 +734,37 @@ const patch = <T>(path: string, body?: unknown) =>
 const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
 const get = <T>(path: string) => request<T>(path);
 
+/**
+ * Multipart file upload. Unlike `request`, it must NOT set Content-Type — the
+ * browser sets multipart/form-data with the boundary. Reuses the auth header and
+ * the single-retry-on-401 refresh flow. The FormData is rebuilt per attempt
+ * because its body stream is consumed on the first send.
+ */
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const doFetch = () => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return fetch(`${BASE}${path}`, {
+      method: 'POST',
+      body: fd,
+      headers: { ...authHeaders() },
+    });
+  };
+  let res = await doFetch();
+  if (res.status === 401 && localStorage.getItem('refreshToken')) {
+    const refreshed = await refreshTokens();
+    if (refreshed) res = await doFetch();
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const msg = Array.isArray(body.message)
+      ? body.message.join(', ')
+      : body.message;
+    throw new Error(msg ?? `Upload failed: ${res.status}`);
+  }
+  return (res.status === 204 ? undefined : await res.json()) as T;
+}
+
 /** Build an optional `?from=&to=` query string for report endpoints. */
 function rangeQs(from?: string, to?: string): string {
   const qs = new URLSearchParams();
@@ -918,6 +949,8 @@ export const api = {
   // ---- owner: branding (white-label) ----
   getBranding: () => get<Branding>('/me/branding'),
   updateBranding: (body: Partial<Branding>) => put<Branding>('/me/branding', body),
+  /** Upload a logo image (multipart); stores it and returns the updated branding. */
+  uploadLogo: (file: File) => uploadFile<Branding>('/me/branding/logo', file),
 
   // ---- owner: booking management ----
   listBookings: (filters: BookingFilters = {}) => {

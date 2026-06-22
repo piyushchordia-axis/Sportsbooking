@@ -1,13 +1,24 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { StorageService } from './modules/storage/storage.service';
 
 async function bootstrap() {
   // rawBody: true preserves the unparsed request body so the Razorpay webhook
   // can verify the HMAC signature against the exact bytes Razorpay signed.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   app.setGlobalPrefix('api');
+
+  // Local storage driver (dev): serve uploaded files from disk. With the s3/R2
+  // driver this returns null and assets are served by the bucket/CDN instead.
+  const mount = app.get(StorageService).localMount();
+  if (mount) {
+    app.useStaticAssets(mount.dir, { prefix: mount.prefix });
+  }
 
   // In production, restrict CORS to an allowlist from WEB_ORIGIN (comma-separated)
   // instead of reflecting any origin. In dev, keep the permissive origin so local

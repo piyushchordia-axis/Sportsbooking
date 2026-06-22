@@ -237,7 +237,11 @@ the current code. Remaining noteworthy mismatches:_
 8. ~~P2 …~~ **DONE** — add-on/court CRUD lifecycle (Grounds detail), logo-upload pipeline (S3/R2 + local), per-owner allowedGameIds/featureFlags assignment (super-admin onboarding + edit), and game delete (guarded against venues/units/tournaments still using it).
 9. ~~P2 Add targeted-segment marketing dispatch…~~ **DONE** — owner broadcast resolves a CRM segment (lapsed / regulars / all), enforces DPDP consent + opt-out, and fans out via the notification adapter; PlayersPage campaign dialog. (Delivery uses the adapter's `log` driver in dev — the seam for a real channel later.)
 10. ~~P2 …~~ **DONE** — fixtures/brackets/draws (knockout seeded bracket + round-robin/league standings, results + advancement) and per-player team-roster capture (roster on tournament_participants, captured at registration, shown to the owner).
-11. P3 Surface a recurring-booking flow in the UI; add standalone loyalty/referral config + history screens.
+11. ~~P3 …~~ **DONE** — recurring-booking flow surfaced in the New Booking UI (weekly repeat + occurrences, AT_VENUE-only, series result), and a standalone owner Loyalty & referrals screen (earn rate / point value / referral reward config + points/referral activity history).
+
+---
+
+**Status:** all P0–P3 "Recommended next steps" are now complete or descoped (notifications = in-app only). Remaining out-of-scope hardening lives in the per-area notes above (semantic audit diffs, pack flat-rate pricing).
 
 ## What's solid (what IS done)
 

@@ -264,7 +264,7 @@ function BrowseTab({
 }) {
   if (loading && !matches) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-52 w-full rounded-2xl" />
         ))}
@@ -284,7 +284,7 @@ function BrowseTab({
   return (
     <div>
       <Eyebrow style={{ letterSpacing: '0.1em', margin: '0 0 12px' }}>Games near you</Eyebrow>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {matches.map((m) => {
           const full = m.spots.remaining <= 0;
           const own = currentUserId != null && m.host.id === currentUserId;
@@ -445,7 +445,7 @@ function MineTab({
             hint="When you open spots on a booking, they’ll appear here for you to manage."
           />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {data.hosting.map((m) => (
               <HostedMatchCard
                 key={m.id}
@@ -468,7 +468,7 @@ function MineTab({
             hint="Head to Browse and request to join an open match."
           />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {data.joined.map((j) => (
               <MatchCard
                 key={j.requestId}
@@ -696,7 +696,7 @@ function MatchCard({
           <h3 className="fl-display truncate" style={{ fontWeight: 700, fontSize: 17, textTransform: 'uppercase' }}>
             {game ?? 'Open match'}
           </h3>
-          <p className="truncate" style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+          <p className="line-clamp-2" style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
             {venue}
             {court ? ` · ${court}` : ''} · {formatWindow(match.time)}
           </p>

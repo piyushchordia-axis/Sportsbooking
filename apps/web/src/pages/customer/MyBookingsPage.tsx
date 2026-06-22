@@ -268,7 +268,7 @@ export function MyBookingsPage() {
       <Msg text={error} />
 
       {loading ? (
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 mt-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 mt-5">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
@@ -539,7 +539,7 @@ function Section({
       >
         {title}
       </div>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
         {bookings.map((b) => {
           const when = whenLabel(b);
           const pill = isAwaitingPayment(b)

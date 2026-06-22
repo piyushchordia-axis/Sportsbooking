@@ -224,7 +224,7 @@ export function ConsumerLayout() {
       </header>
 
       {/* ===== Content ===== */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-0 pb-24 sm:px-6 md:pb-10">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-6 md:pb-10">
         <Outlet />
       </main>
 

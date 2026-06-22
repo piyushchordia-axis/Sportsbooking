@@ -185,7 +185,7 @@ export function AccountPage() {
       </div>
 
       {/* desktop two-column reflow */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 lg:items-start">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
         <div className="flex flex-col gap-4">
           {/* details card */}
           <div

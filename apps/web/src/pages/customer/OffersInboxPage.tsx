@@ -118,7 +118,7 @@ export function OffersInboxPage() {
               hint="There are no active deals at this store at the moment. Check back soon."
             />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {offers.map((o) => {
                 const value =
                   o.type === 'percent' ? `${o.value}% off` : `₹${o.value} off`;

@@ -295,7 +295,7 @@ export function WalletPage() {
       </div>
 
       {/* balances + packs side by side on desktop */}
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* balances */}
         <div className="space-y-3">
           {walletError ? (

@@ -348,7 +348,7 @@ export function BrowsePage() {
       </label>
 
       {/* Filter chips: city / sport / price / date / near-me */}
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="fl-chip-select [&_label]:mb-0">
           <Select label="" value={city} onChange={setCity} options={cityOptions} />
         </div>

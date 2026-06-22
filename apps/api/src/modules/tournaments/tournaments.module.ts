@@ -132,7 +132,7 @@ export class TournamentsService {
           )`.as('participant_count'),
         },
       });
-      // Preserve the Prisma `_count.participants` shape consumed by the client.
+      // Preserve the `_count.participants` shape consumed by the client.
       return rows.map(({ participantCount, ...t }) => ({
         ...t,
         _count: { participants: Number(participantCount) },
@@ -157,7 +157,7 @@ export class TournamentsService {
         },
         orderBy: desc(tournaments.createdAt),
       });
-      // Preserve the Prisma `participants` + `_count.participants` shape.
+      // Preserve the `participants` + `_count.participants` shape.
       return rows.map(({ tournamentParticipants: participants, ...t }) => ({
         ...t,
         participants,

@@ -52,9 +52,9 @@ const CANCELLATION_TEMPLATE_HELP: Record<string, string> = {
   strict: 'Free cancellation up to 24h before; 100% penalty after',
 };
 
-/** Postgres SQLSTATE for a unique-constraint violation (was Prisma P2002). */
+/** Postgres unique-violation SQLSTATE (23505). */
 const PG_UNIQUE_VIOLATION = '23505';
-/** Postgres SQLSTATE for a foreign-key violation (was Prisma P2003). */
+/** Postgres foreign-key-violation SQLSTATE (23503). */
 const PG_FK_VIOLATION = '23503';
 
 /** Narrow an unknown error to a pg driver error carrying a SQLSTATE `code`. */

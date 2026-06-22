@@ -56,7 +56,7 @@ import { ReferralService } from '../referral/referral.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { CartSlotDto, CreateBookingDto, ListBookingsQueryDto } from './dto';
 
-/** Postgres SQLSTATE for a unique-constraint violation (was Prisma P2002). */
+/** Postgres unique-violation SQLSTATE (23505). */
 const UNIQUE_VIOLATION = '23505';
 
 /** Cash lane: a positive balance is money returned to the customer (refunds). */

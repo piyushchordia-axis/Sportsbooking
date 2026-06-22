@@ -73,8 +73,7 @@ export class DiscoveryService {
         },
       });
 
-      // Mirror Prisma's `games: { some: { gameId } }` venue-level filter: keep
-      // only venues that offer the requested game.
+      // Venue-level filter: keep only venues that offer the requested game.
       const venuesList = gameId
         ? rows.filter((v) => v.venueGames.some((g) => g.gameId === gameId))
         : rows;

@@ -37,7 +37,7 @@ import { DbService } from '../../db/db.service';
 import { Decimal, money } from '../../db/money';
 import { addons, bookingAddons } from '../../db/schema';
 
-/** Postgres SQLSTATE for a foreign-key violation (was Prisma P2003). */
+/** Postgres foreign-key-violation SQLSTATE (23503). */
 const PG_FK_VIOLATION = '23503';
 
 /** Narrow an unknown error to a pg driver error carrying a SQLSTATE `code`. */

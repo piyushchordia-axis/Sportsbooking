@@ -5,18 +5,26 @@
  * functions app_current_owner_id() / app_bypass_rls(). On a fresh database
  * those functions do not exist yet, so `drizzle-kit push` would fail. We first
  * run src/db/rls-setup.sql to create the functions, then spawn drizzle-kit push
- * so the schema, RLS enablement, and policies all apply together.
+ * so the schema, RLS enablement, and policies all apply together. Finally we run
+ * src/db/role-setup.sql to (idempotently) create the restricted runtime role and
+ * grant it on the freshly-created tables — so one command sets up a fresh DB:
+ * GUC functions -> schema + RLS -> app role + grants.
  */
+import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
 
 async function main(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
+  // DDL (CREATE FUNCTION / drizzle-kit push) needs the ADMIN role; the restricted
+  // runtime DATABASE_URL role cannot create functions or alter the schema.
+  const databaseUrl = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL;
   if (!databaseUrl) {
-    throw new Error('DATABASE_URL is not set');
+    throw new Error('DATABASE_ADMIN_URL / DATABASE_URL is not set');
   }
+  // Ensure the spawned drizzle-kit (which reads drizzle.config.ts) also targets admin.
+  process.env.DATABASE_ADMIN_URL = databaseUrl;
 
   const rlsSetupSql = readFileSync(
     join(__dirname, '..', 'src', 'db', 'rls-setup.sql'),
@@ -45,6 +53,29 @@ async function main(): Promise<void> {
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
+  }
+
+  // drizzle-kit push creates each pgPolicy as a SHELL but drops the sql-template
+  // USING/WITH CHECK body, so RLS-enabled tables would default-deny. Re-apply the
+  // real policy predicates from rls-policies.sql, then create the restricted
+  // runtime role + grants (idempotent) so the app (DATABASE_URL) works under RLS.
+  const rlsPoliciesSql = readFileSync(
+    join(__dirname, '..', 'src', 'db', 'rls-policies.sql'),
+    'utf8',
+  );
+  const roleSetupSql = readFileSync(
+    join(__dirname, '..', 'src', 'db', 'role-setup.sql'),
+    'utf8',
+  );
+  const adminClient = new Client({ connectionString: databaseUrl });
+  await adminClient.connect();
+  try {
+    console.log('Applying RLS policy bodies (src/db/rls-policies.sql)...');
+    await adminClient.query(rlsPoliciesSql);
+    console.log('Applying runtime role + grants (src/db/role-setup.sql)...');
+    await adminClient.query(roleSetupSql);
+  } finally {
+    await adminClient.end();
   }
 }
 

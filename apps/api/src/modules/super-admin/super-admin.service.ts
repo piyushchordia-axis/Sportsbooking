@@ -218,7 +218,7 @@ export class SuperAdminService {
       const ownerRows = await tx.query.owners.findMany({
         orderBy: desc(owners.createdAt),
       });
-      // Count venues per owner in one grouped query (replaces Prisma _count).
+      // Count venues per owner in one grouped query.
       const venueCounts = await tx
         .select({ ownerId: venues.ownerId, c: count() })
         .from(venues)
@@ -276,7 +276,7 @@ export class SuperAdminService {
           data.accentColor = dto.branding.accentColor;
       }
 
-      // Owner.updatedAt was Prisma @updatedAt; bump it on every write.
+      // Owner.updatedAt is maintained in app code; bump it on every write.
       data.updatedAt = new Date();
 
       const o = (

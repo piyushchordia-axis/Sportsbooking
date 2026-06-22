@@ -6,10 +6,12 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Ban,
   CalendarDays,
   CheckCircle2,
   IndianRupee,
   Loader2,
+  MoreVertical,
   Plus,
   Trophy,
   Users,
@@ -40,6 +42,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -339,17 +347,30 @@ export function TournamentsAdminPage() {
                                 </StatusPill>
                               </TableCell>
                               <TableCell className="text-right">
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={cancelled}
-                                  onClick={() => {
-                                    setCancelMsg(null);
-                                    setPending({ t, p });
-                                  }}
-                                >
-                                  Cancel &amp; refund
-                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      aria-label={`Actions for ${p.teamName || p.captainName}`}
+                                    >
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      disabled={cancelled}
+                                      onSelect={() => {
+                                        setCancelMsg(null);
+                                        setPending({ t, p });
+                                      }}
+                                    >
+                                      <Ban className="h-4 w-4" />
+                                      Cancel &amp; refund
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </TableCell>
                             </TableRow>
                           );

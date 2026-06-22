@@ -1,5 +1,20 @@
 import { relations } from "drizzle-orm/relations";
-import { openMatches, openMatchJoinRequests, users, owners, tournaments, tournamentParticipants, ownerCustomers, playerProfiles, venues, bookableUnits, gameCatalogue, pricingRules, slots, bookings, venueSettings, bookingAddons, addons, membershipPacks, offers, ledgerTxns, referrals, auditLogs, venueGames, notifications } from "./schema";
+import { openMatches, openMatchJoinRequests, users, owners, tournaments, tournamentParticipants, ownerCustomers, playerProfiles, venues, bookableUnits, gameCatalogue, pricingRules, slots, bookings, venueSettings, bookingAddons, addons, membershipPacks, offers, ledgerTxns, referrals, auditLogs, venueGames, notifications, savedVenues } from "./schema";
+
+export const savedVenuesRelations = relations(savedVenues, ({one}) => ({
+	venue: one(venues, {
+		fields: [savedVenues.venueId],
+		references: [venues.id]
+	}),
+	user: one(users, {
+		fields: [savedVenues.customerId],
+		references: [users.id]
+	}),
+	owner: one(owners, {
+		fields: [savedVenues.ownerId],
+		references: [owners.id]
+	}),
+}));
 
 export const openMatchJoinRequestsRelations = relations(openMatchJoinRequests, ({one}) => ({
 	openMatch: one(openMatches, {

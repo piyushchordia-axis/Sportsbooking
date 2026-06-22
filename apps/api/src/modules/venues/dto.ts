@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -149,6 +150,22 @@ export class PricingRuleDto {
   price!: number;
 }
 
+/** Max occurrences in a single weekly block series (PRD §4.3). */
+export const MAX_BLOCK_RECURRENCE_COUNT = 12;
+
+export class BlockRecurrenceDto {
+  // v1 supports weekly only; modelled as an enum-of-one so adding daily/monthly
+  // later is a non-breaking extension.
+  @IsIn(['weekly'])
+  frequency!: 'weekly';
+
+  /** total weeks INCLUDING the first; 2..MAX_BLOCK_RECURRENCE_COUNT */
+  @IsInt()
+  @Min(2)
+  @Max(MAX_BLOCK_RECURRENCE_COUNT)
+  count!: number;
+}
+
 export class BlockSlotsDto {
   @IsUUID()
   unitId!: string;
@@ -162,6 +179,16 @@ export class BlockSlotsDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  /**
+   * Optional weekly recurrence (PRD §4.3). Absent → a single [start,end] window
+   * (behaviour unchanged). Present → the window is repeated weekly for `count`
+   * total weeks (including the first); occurrences that clash are skipped.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BlockRecurrenceDto)
+  recurrence?: BlockRecurrenceDto;
 }
 
 /** Free BLOCKED slots in a range for an owner's unit (Grounds revamp §4.3). */

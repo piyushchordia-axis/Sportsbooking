@@ -134,26 +134,51 @@ export class OpenMatchesService {
       throw new ForbiddenException('Only the host can open this booking');
     }
 
+    // One open match per booking (DB enforces a unique bookingId). Surface this
+    // as a friendly 409 instead of a raw 500 when the host re-hosts / double-taps.
+    const already = await this.db.withTenantBypass((tx) =>
+      tx.query.openMatches.findFirst({
+        where: eq(openMatches.bookingId, dto.bookingId),
+        columns: { id: true },
+      }),
+    );
+    if (already) {
+      throw new ConflictException(
+        'You already host an open match for this booking.',
+      );
+    }
+
     return this.db.withTenantId(booking.ownerId, async (tx) => {
       const settings = await tx.query.venueSettings.findFirst({
         where: eq(venueSettings.venueId, booking.venueId),
       });
-      return (
-        await tx
-          .insert(openMatches)
-          .values({
-            id: randomUUID(),
-            ownerId: booking.ownerId,
-            bookingId: dto.bookingId,
-            hostId: host.id,
-            openSpots: dto.openSpots,
-            skillMin: dto.skillMin ?? SkillLevel.BEGINNER,
-            skillMax: dto.skillMax ?? SkillLevel.PRO,
-            repaymentMode:
-              settings?.openMatchRepaymentMode ?? OpenMatchRepaymentMode.INFO,
-          })
-          .returning()
-      )[0];
+      try {
+        return (
+          await tx
+            .insert(openMatches)
+            .values({
+              id: randomUUID(),
+              ownerId: booking.ownerId,
+              bookingId: dto.bookingId,
+              hostId: host.id,
+              openSpots: dto.openSpots,
+              skillMin: dto.skillMin ?? SkillLevel.BEGINNER,
+              skillMax: dto.skillMax ?? SkillLevel.PRO,
+              repaymentMode:
+                settings?.openMatchRepaymentMode ?? OpenMatchRepaymentMode.INFO,
+            })
+            .returning()
+        )[0];
+      } catch (e) {
+        // Race: another request inserted between the check and here (Postgres
+        // unique_violation 23505) → friendly conflict, not a 500.
+        if ((e as { code?: string })?.code === '23505') {
+          throw new ConflictException(
+            'You already host an open match for this booking.',
+          );
+        }
+        throw e;
+      }
     });
   }
 

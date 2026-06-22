@@ -7,6 +7,10 @@ import { defineConfig, devices } from '@playwright/test';
  * and the database seeded (`pnpm db:seed`). The `webServer` block boots the full
  * stack via `pnpm dev` (API :3001 + web :5173); set CI=1 to force a fresh start.
  */
+// Web origin under test. Override with E2E_BASE_URL to run against an
+// already-running stack on a different port (the dev Vite port varies by env).
+const WEB_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -18,7 +22,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
 
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: WEB_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     // Allow pointing at a preinstalled Chromium (e.g. air-gapped CI) without
@@ -34,7 +38,7 @@ export default defineConfig({
 
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:5173',
+    url: WEB_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
     stdout: 'ignore',

@@ -33,8 +33,20 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { DbService } from '../../db/db.service';
-import { bookings, offers } from '../../db/schema';
+import { bookings, offers, ownerCustomers } from '../../db/schema';
 import { dec, money } from '../../db/money';
+
+/** Customer-facing offers-inbox row (PRD §5.4). */
+interface OfferInboxItem {
+  id: string;
+  name: string;
+  type: OfferType;
+  value: number;
+  code: string | null;
+  autoApply: boolean;
+  validFrom: Date | null;
+  validTo: Date | null;
+}
 
 class CreateOfferDto {
   @IsString() name!: string;
@@ -99,6 +111,59 @@ export class OffersService {
     return this.db.withTenant((tx) => tx.query.offers.findMany());
   }
 
+  /**
+   * Customer offers inbox (PRD §5.4): the offers currently valid on this
+   * owner's storefront, scoped to the signed-in customer's marketing segment.
+   * Customers carry no owner context, so this runs under withTenantBypass with
+   * an explicit ownerId filter. Only active offers whose validity window
+   * includes now are returned; a segment-targeted offer is included only when
+   * the customer matches that segment (segments derived from ownerCustomers the
+   * same way bookings.service does — lapsed = no visit in 60d, regulars = 5+).
+   */
+  async inbox(customerId: string, ownerId: string): Promise<OfferInboxItem[]> {
+    return this.db.withTenantBypass(async (tx) => {
+      const now = new Date();
+
+      // Customer's segments for this owner (mirrors bookings.service).
+      const link = await tx.query.ownerCustomers.findFirst({
+        where: and(
+          eq(ownerCustomers.ownerId, ownerId),
+          eq(ownerCustomers.customerId, customerId),
+        ),
+      });
+      const segments: string[] = [];
+      if (link) {
+        const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
+        if (link.lastVisitAt < cutoff) segments.push('lapsed');
+        if (link.bookingCount >= 5) segments.push('regulars');
+      }
+
+      const rows = await tx.query.offers.findMany({
+        where: and(eq(offers.ownerId, ownerId), eq(offers.active, true)),
+      });
+
+      return rows
+        .filter((o) => {
+          if (o.validFrom && o.validFrom > now) return false;
+          if (o.validTo && o.validTo < now) return false;
+          // Non-segmented offers are always included; segmented offers only
+          // when the customer is in that segment.
+          if (o.segment && !segments.includes(o.segment)) return false;
+          return true;
+        })
+        .map((o) => ({
+          id: o.id,
+          name: o.name,
+          type: o.type as OfferType,
+          value: dec(o.value).toNumber(),
+          code: o.code,
+          autoApply: o.autoApply,
+          validFrom: o.validFrom,
+          validTo: o.validTo,
+        }));
+    });
+  }
+
   /** Update any field of an offer, tenant-scoped. */
   async update(user: RequestUser, id: string, dto: UpdateOfferDto) {
     const ownerId = user.ownerId!;
@@ -126,7 +191,11 @@ export class OffersService {
       if (dto.segment !== undefined) data.segment = dto.segment;
 
       return (
-        await tx.update(offers).set(data).where(eq(offers.id, id)).returning()
+        await tx
+          .update(offers)
+          .set(data)
+          .where(and(eq(offers.id, id), eq(offers.ownerId, ownerId)))
+          .returning()
       )[0];
     });
   }
@@ -147,7 +216,7 @@ export class OffersService {
         await tx
           .update(offers)
           .set({ active: false })
-          .where(eq(offers.id, id))
+          .where(and(eq(offers.id, id), eq(offers.ownerId, ownerId)))
           .returning()
       )[0];
     });
@@ -171,7 +240,7 @@ export class OffersService {
           await tx
             .update(offers)
             .set({ active: false })
-            .where(eq(offers.id, id))
+            .where(and(eq(offers.id, id), eq(offers.ownerId, ownerId)))
             .returning()
         )[0];
       }
@@ -187,7 +256,9 @@ export class OffersService {
           'Offer is referenced by existing bookings; deactivate it instead of deleting',
         );
       }
-      await tx.delete(offers).where(eq(offers.id, id));
+      await tx
+        .delete(offers)
+        .where(and(eq(offers.id, id), eq(offers.ownerId, ownerId)));
       return { deleted: true };
     });
   }
@@ -195,16 +266,28 @@ export class OffersService {
 
 @Controller('offers')
 @UseGuards(RolesGuard)
-@Roles(UserRole.OWNER)
 export class OffersController {
   constructor(private readonly offers: OffersService) {}
 
+  /**
+   * Customer offers inbox (PRD §5.4). Customer-only — the owner CRUD routes
+   * below stay OWNER/STAFF-scoped via their own method-level @Roles.
+   */
+  @Get('inbox')
+  @Roles(UserRole.CUSTOMER)
+  inbox(@CurrentUser() user: RequestUser, @Query('ownerId') ownerId: string) {
+    if (!ownerId) throw new BadRequestException('ownerId is required');
+    return this.offers.inbox(user.id, ownerId);
+  }
+
   @Post()
+  @Roles(UserRole.OWNER)
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateOfferDto) {
     return this.offers.create(user, dto);
   }
 
   @Get()
+  @Roles(UserRole.OWNER)
   list(@CurrentUser() user: RequestUser) {
     return this.offers.list(user);
   }

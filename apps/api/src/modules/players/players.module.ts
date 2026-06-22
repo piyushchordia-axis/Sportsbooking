@@ -29,7 +29,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, arrayContains, desc, eq, inArray } from 'drizzle-orm';
 import {
   CurrentUser,
   RequestUser,
@@ -39,7 +39,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { NotificationService } from '../notifications/notification.service';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
-import { ownerCustomers, playerProfiles, users } from '../../db/schema';
+import { bookings, ownerCustomers, playerProfiles, users } from '../../db/schema';
 
 class UpdateProfileDto {
   @IsOptional() @IsEnum(SkillLevel) skillLevel?: SkillLevel;
@@ -162,18 +162,48 @@ export class PlayersService {
     });
   }
 
-  /** Owner CRM directory with simple frequency/recency segmentation. */
-  list(user: RequestUser, segment?: string): Promise<PlayerSummary[]> {
+  /**
+   * Owner CRM directory with simple frequency/recency segmentation (PRD §4.9).
+   * Optional `gameId` keeps customers whose player profile lists that game;
+   * optional `venueId` keeps customers with at least one booking at that venue.
+   * All supplied filters combine with AND semantics.
+   */
+  list(
+    user: RequestUser,
+    segment?: string,
+    gameId?: string,
+    venueId?: string,
+  ): Promise<PlayerSummary[]> {
     return this.db.withTenant(async (tx) => {
       const links = await tx.query.ownerCustomers.findMany({
         orderBy: desc(ownerCustomers.lastVisitAt),
       });
       const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
-      const filtered = links.filter((l) => {
+      let filtered = links.filter((l) => {
         if (segment === 'lapsed') return l.lastVisitAt < cutoff;
         if (segment === 'regulars') return l.bookingCount >= 5;
         return true;
       });
+
+      // gameId: keep only customers whose profile games[] includes the game.
+      if (gameId) {
+        const gameProfiles = await tx.query.playerProfiles.findMany({
+          columns: { customerId: true },
+          where: arrayContains(playerProfiles.games, [gameId]),
+        });
+        const withGame = new Set(gameProfiles.map((p) => p.customerId));
+        filtered = filtered.filter((l) => withGame.has(l.customerId));
+      }
+
+      // venueId: keep only customers with at least one booking at that venue.
+      if (venueId) {
+        const venueBookings = await tx.query.bookings.findMany({
+          columns: { customerId: true },
+          where: eq(bookings.venueId, venueId),
+        });
+        const atVenue = new Set(venueBookings.map((b) => b.customerId));
+        filtered = filtered.filter((l) => atVenue.has(l.customerId));
+      }
 
       // Enrich with name + mobile. Prefer the per-owner player profile; fall
       // back to the (global) user record for any legacy CRM link without one.
@@ -182,7 +212,10 @@ export class PlayersService {
         tx.query.playerProfiles.findMany({
           where: inArray(playerProfiles.customerId, customerIds),
         }),
-        tx.query.users.findMany({ where: inArray(users.id, customerIds) }),
+        tx.query.users.findMany({
+          columns: { id: true, name: true, mobile: true },
+          where: inArray(users.id, customerIds),
+        }),
       ]);
       const profileById = new Map(profiles.map((p) => [p.customerId, p]));
       const userById = new Map(userRows.map((u) => [u.id, u]));
@@ -389,7 +422,10 @@ export class PlayersService {
         tx.query.playerProfiles.findMany({
           where: inArray(playerProfiles.customerId, customerIds),
         }),
-        tx.query.users.findMany({ where: inArray(users.id, customerIds) }),
+        tx.query.users.findMany({
+          columns: { id: true, name: true, mobile: true },
+          where: inArray(users.id, customerIds),
+        }),
       ]);
       const profileById = new Map(profiles.map((p) => [p.customerId, p]));
       const userById = new Map(userRows.map((u) => [u.id, u]));
@@ -518,12 +554,17 @@ export class PlayersController {
     return this.players.updateProfile(user, ownerId, dto);
   }
 
-  /** Owner CRM directory (PRD §4.9) with optional segment filter. */
+  /** Owner CRM directory (PRD §4.9) with optional segment/game/venue filters. */
   @Get('players')
   @UseGuards(RolesGuard)
   @Roles(UserRole.OWNER, UserRole.STAFF)
-  list(@CurrentUser() user: RequestUser, @Query('segment') segment?: string) {
-    return this.players.list(user, segment);
+  list(
+    @CurrentUser() user: RequestUser,
+    @Query('segment') segment?: string,
+    @Query('gameId') gameId?: string,
+    @Query('venueId') venueId?: string,
+  ) {
+    return this.players.list(user, segment, gameId, venueId);
   }
 
   /** Owner/staff add a customer to the CRM (PRD §4.9). */

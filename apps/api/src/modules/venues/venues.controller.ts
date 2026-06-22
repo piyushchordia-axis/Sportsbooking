@@ -164,6 +164,16 @@ export class VenuesController {
     return this.venues.deleteUnit(user, unitId);
   }
 
+  /** Read a court's stored pricing grid (to preload the editor). */
+  @Get('units/:unitId/pricing')
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  getPricing(
+    @CurrentUser() user: RequestUser,
+    @Param('unitId') unitId: string,
+  ) {
+    return this.venues.getPricing(user, unitId);
+  }
+
   @Put('units/:unitId/pricing')
   @Roles(UserRole.OWNER)
   setPricing(

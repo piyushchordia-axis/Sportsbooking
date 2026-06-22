@@ -3,7 +3,7 @@ import { lazy, ReactNode, Suspense } from 'react';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { isRole, useAuth } from './auth/AuthContext';
 import { Layout } from './components/Layout';
-import { ConsumerLayout } from './components/ConsumerLayout';
+import { ConsumerLayoutRoot } from './components/ConsumerLayout';
 import { StorefrontProvider } from './storefront/StorefrontProvider';
 
 // Consumer storefront (public)
@@ -32,6 +32,12 @@ const WalletPage = lazy(() =>
 );
 const OpenMatchesPage = lazy(() =>
   import('./pages/customer/OpenMatchesPage').then((m) => ({ default: m.OpenMatchesPage })),
+);
+const SavedVenuesPage = lazy(() =>
+  import('./pages/customer/SavedVenuesPage').then((m) => ({ default: m.SavedVenuesPage })),
+);
+const OffersInboxPage = lazy(() =>
+  import('./pages/customer/OffersInboxPage').then((m) => ({ default: m.OffersInboxPage })),
 );
 
 // Player auth (OTP) — consumer storefront. Console auth lives at /admin/login.
@@ -123,7 +129,7 @@ function AdminShell() {
 function ConsumerRoot() {
   return (
     <StorefrontProvider>
-      <ConsumerLayout />
+      <ConsumerLayoutRoot />
     </StorefrontProvider>
   );
 }
@@ -151,6 +157,8 @@ export function App() {
           <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/open-matches" element={customer(<OpenMatchesPage />)} />
           <Route path="/my-bookings" element={customer(<MyBookingsPage />)} />
+          <Route path="/saved" element={customer(<SavedVenuesPage />)} />
+          <Route path="/offers" element={customer(<OffersInboxPage />)} />
           <Route path="/wallet" element={customer(<WalletPage />)} />
           <Route path="/account" element={customer(<AccountPage />)} />
           {/* Legacy authed booking route → public browse */}

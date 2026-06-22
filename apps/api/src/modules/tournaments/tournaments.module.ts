@@ -9,10 +9,11 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import {
   FeatureFlag,
   FeeBasis,
@@ -24,6 +25,7 @@ import {
 import {
   IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsNumber,
@@ -32,6 +34,7 @@ import {
   IsUUID,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   CurrentUser,
   RequestUser,
@@ -89,9 +92,14 @@ class RegisterDto {
 }
 
 class ConfirmParticipantDto {
-  // Optional so the dev mock confirm (no real gateway handshake) keeps working;
-  // when present it is the captured gateway payment id persisted for refunds.
+  // Gateway handshake fields. When a razorpayPaymentId is presented it MUST come
+  // with the order id it settles and the signature, so the handshake can be
+  // verified against the participant's stored razorpayOrderId before we mark
+  // paid (mirrors bookings.confirmPayment — SEC: never trust a client-supplied
+  // payment id without verifying the gateway signature).
+  @IsOptional() @IsString() razorpayOrderId?: string;
   @IsOptional() @IsString() razorpayPaymentId?: string;
+  @IsOptional() @IsString() razorpaySignature?: string;
 }
 
 /** Trim + drop empty roster entries; null when none provided. */
@@ -99,6 +107,70 @@ function normalizeRoster(roster?: string[]): string[] | null {
   if (!roster) return null;
   const cleaned = roster.map((s) => s.trim()).filter(Boolean);
   return cleaned.length ? cleaned : null;
+}
+
+/**
+ * Derived lifecycle status for the owner back-office list. There is no stored
+ * status column — open/closed has always been derived from regCloseAt — so the
+ * four buckets below are computed from the dates each time. Every tournament
+ * maps to exactly one bucket (priority order: completed → in_progress →
+ * closing_soon → open):
+ *  - completed:    the event's last day has passed.
+ *  - in_progress:  entries are locked (cut-off passed, or the event has started)
+ *                  and it is not yet completed — i.e. underway or about to play.
+ *  - closing_soon: still accepting entries, with the cut-off within a week.
+ *  - open:         still accepting entries, cut-off not imminent.
+ */
+export type OwnerTournamentStatus =
+  | 'open'
+  | 'closing_soon'
+  | 'in_progress'
+  | 'completed';
+
+/** Cut-off proximity (days) below which an open tournament reads "closing soon". */
+const CLOSING_SOON_DAYS = 7;
+
+/** Local-midnight date string (YYYY-MM-DD), matching how `date` columns store. */
+function toDateStr(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function deriveTournamentStatus(
+  t: { startDate: string; endDate: string; regCloseAt: Date | null },
+  now: Date,
+): OwnerTournamentStatus {
+  const today = toDateStr(now);
+  if (today > t.endDate) return 'completed';
+
+  // Entries close at the explicit cut-off, or implicitly once play begins.
+  const cutoffPassed = t.regCloseAt != null && t.regCloseAt.getTime() < now.getTime();
+  const started = today >= t.startDate;
+  if (cutoffPassed || started) return 'in_progress';
+
+  if (t.regCloseAt) {
+    const days = Math.ceil(
+      (t.regCloseAt.getTime() - now.getTime()) / 86_400_000,
+    );
+    if (days <= CLOSING_SOON_DAYS) return 'closing_soon';
+  }
+  return 'open';
+}
+
+/** Paginated/filterable owner tournaments list query (back-office list page). */
+class OwnerTournamentListQueryDto {
+  /** Scope to one venue; omitted = across all the owner's venues. */
+  @IsOptional() @IsUUID() venueId?: string;
+
+  /** Free-text match on tournament name (ilike). */
+  @IsOptional() @IsString() q?: string;
+
+  /** Lifecycle bucket filter (see deriveTournamentStatus). */
+  @IsOptional()
+  @IsIn(['open', 'closing_soon', 'in_progress', 'completed'])
+  status?: OwnerTournamentStatus;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageSize?: number;
 }
 
 /**
@@ -185,6 +257,132 @@ export class TournamentsService {
         participants,
         _count: { participants: participants.length },
       }));
+    });
+  }
+
+  /**
+   * Paginated, filterable owner list for the back-office master view. Unlike
+   * listForOwner(), this returns LIGHTWEIGHT rows — tournament metadata + the
+   * venue name + participant counts (via subqueries), NOT the full participant
+   * roster — so the list never over-fetches as the catalogue grows. Participant
+   * detail is fetched per-tournament by getForOwner() when a row is opened.
+   *
+   * The lifecycle status is derived per row (no stored column), so — like the
+   * grounds list's derived statuses — the matching set is evaluated, then the
+   * status filter + pagination are applied in memory. q (name) and venueId are
+   * pushed to SQL. Owner-scoped + tenant-scoped via withTenant.
+   */
+  listForOwnerPaged(ownerId: string, query: OwnerTournamentListQueryDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const pageSize = query.pageSize && query.pageSize > 0 ? query.pageSize : 12;
+
+    return this.db.withTenant(async (tx) => {
+      const filters = [eq(tournaments.ownerId, ownerId)];
+      if (query.venueId) filters.push(eq(tournaments.venueId, query.venueId));
+      if (query.q) filters.push(ilike(tournaments.name, `%${query.q}%`));
+
+      const rows = await tx.query.tournaments.findMany({
+        where: and(...filters),
+        with: { venue: { columns: { name: true } } },
+        orderBy: desc(tournaments.createdAt),
+      });
+
+      // Participant tallies in one grouped pass. A correlated subquery via the
+      // relational builder's `extras` mis-aliases the participant table once a
+      // `with` relation is joined, so count separately and map by tournament id.
+      const ids = rows.map((r) => r.id);
+      const countRows = ids.length
+        ? await tx
+            .select({
+              tournamentId: tournamentParticipants.tournamentId,
+              total: sql<number>`COUNT(*)::int`,
+              paid: sql<number>`COUNT(*) FILTER (WHERE ${tournamentParticipants.paid})::int`,
+            })
+            .from(tournamentParticipants)
+            .where(inArray(tournamentParticipants.tournamentId, ids))
+            .groupBy(tournamentParticipants.tournamentId)
+        : [];
+      const countById = new Map(countRows.map((c) => [c.tournamentId, c]));
+
+      const now = new Date();
+      const items = rows.map(({ venue, ...t }) => {
+        const c = countById.get(t.id);
+        return {
+          id: t.id,
+          name: t.name,
+          venueId: t.venueId,
+          venueName: venue?.name ?? null,
+          format: t.format,
+          regType: t.regType,
+          capacity: t.capacity,
+          startDate: t.startDate,
+          endDate: t.endDate,
+          regCloseAt: t.regCloseAt,
+          refundAllowedAfterClose: t.refundAllowedAfterClose,
+          entries: Number(c?.total ?? 0),
+          paidEntries: Number(c?.paid ?? 0),
+          status: deriveTournamentStatus(t, now),
+        };
+      });
+
+      // Tab counts + headline summary are tallied over the whole q/venue-scoped
+      // set (before the status filter) so the tabs always show the full
+      // distribution and the stats strip stays stable as tabs are switched.
+      const counts = { open: 0, closing_soon: 0, in_progress: 0, completed: 0 };
+      let entries = 0;
+      let paidEntries = 0;
+      let capacity = 0;
+      for (const i of items) {
+        counts[i.status] += 1;
+        entries += i.entries;
+        paidEntries += i.paidEntries;
+        capacity += i.capacity;
+      }
+
+      const filtered = query.status
+        ? items.filter((i) => i.status === query.status)
+        : items;
+      const start = (page - 1) * pageSize;
+      return {
+        items: filtered.slice(start, start + pageSize),
+        total: filtered.length,
+        counts: { ...counts, all: items.length },
+        summary: { entries, paidEntries, capacity },
+      };
+    });
+  }
+
+  /**
+   * Single owner tournament WITH its participants (captain PII) for the detail
+   * drawer. Tenant-scoped, plus an explicit ownerId match (defense in depth,
+   * mirroring cancelRegistration) so an owner only ever opens their own.
+   */
+  getForOwner(ownerId: string, tournamentId: string) {
+    return this.db.withTenant(async (tx) => {
+      const row = await tx.query.tournaments.findFirst({
+        where: and(
+          eq(tournaments.id, tournamentId),
+          eq(tournaments.ownerId, ownerId),
+        ),
+        with: {
+          venue: { columns: { name: true } },
+          tournamentParticipants: {
+            orderBy: asc(tournamentParticipants.createdAt),
+          },
+        },
+      });
+      if (!row) throw new NotFoundException('Tournament not found');
+
+      const { venue, tournamentParticipants: participants, ...t } = row;
+      return {
+        ...t,
+        venueName: venue?.name ?? null,
+        status: deriveTournamentStatus(t, new Date()),
+        participants,
+        entries: participants.length,
+        paidEntries: participants.filter((p) => p.paid).length,
+        _count: { participants: participants.length },
+      };
     });
   }
 
@@ -365,7 +563,11 @@ export class TournamentsService {
     ownerId: string,
     tournamentId: string,
     participantId: string,
-    razorpayPaymentId?: string,
+    payment?: {
+      razorpayOrderId?: string;
+      razorpayPaymentId?: string;
+      razorpaySignature?: string;
+    },
   ) {
     return this.db.withTenantBypass(async (tx) => {
       const t = await tx.query.tournaments.findFirst({
@@ -381,22 +583,58 @@ export class TournamentsService {
       }
       // Idempotency: if already paid, return without re-processing.
       if (p.paid) return p;
+
+      // SEC: a presented gateway payment id MUST be verified — never trust a
+      // client-supplied razorpayPaymentId. When one is supplied we require the
+      // order id + signature, bind the presented order to the participant's
+      // STORED razorpayOrderId, and verify the handshake signature before
+      // marking paid (mirrors bookings.service.confirmPayment exactly). Absent a
+      // payment id this is an owner/staff manual/offline settlement.
+      const razorpayPaymentId = payment?.razorpayPaymentId;
+      const isGatewaySettlement = !!razorpayPaymentId;
+      if (isGatewaySettlement) {
+        if (!payment?.razorpayOrderId || !payment?.razorpaySignature) {
+          throw new BadRequestException('Payment order and signature are required');
+        }
+        // The order presented must be the one we created for this participant —
+        // stops a valid signature for some other order settling this entry.
+        if (
+          !p.razorpayOrderId ||
+          p.razorpayOrderId !== payment.razorpayOrderId
+        ) {
+          throw new BadRequestException(
+            'Payment order does not match this participant',
+          );
+        }
+        const ok = this.payments.verifyPaymentSignature(
+          payment.razorpayOrderId,
+          razorpayPaymentId,
+          payment.razorpaySignature,
+        );
+        if (!ok) throw new BadRequestException('Invalid payment signature');
+      }
+
       const updated = (
         await tx
           .update(tournamentParticipants)
           .set({
             paid: true,
             // Persist the captured gateway payment id so a later cancellation
-            // can refund against it (BUG-3). Only set when supplied by the
-            // handshake.
-            ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
+            // can refund against it (BUG-3). Only set on the verified handshake.
+            ...(isGatewaySettlement ? { razorpayPaymentId } : {}),
           })
           .where(eq(tournamentParticipants.id, participantId))
           .returning()
       )[0];
 
-      // Record the gateway capture (only when a real payment id was supplied).
-      if (razorpayPaymentId) {
+      // Gateway settlement: record the real capture against the verified payment
+      // id (gateway-ledger 'capture' row, mirroring bookings). A manual/offline
+      // settlement (owner/staff, no gateway handshake) must NOT fabricate a
+      // 'capture' gateway-ledger row for an unverified payment — it is recorded
+      // explicitly as a manual settlement on the append-only payment ledger
+      // (no gatewayId, status 'manual') so it is reconcilable yet never mistaken
+      // for a verified gateway capture.
+      if (isGatewaySettlement) {
         await this.paymentLedger.record(tx, {
           ownerId,
           refType: 'tournament_participant',
@@ -405,6 +643,19 @@ export class TournamentsService {
           gatewayId: razorpayPaymentId,
           amount: t.fee,
           status: 'captured',
+        });
+      } else {
+        await this.paymentLedger.record(tx, {
+          ownerId,
+          refType: 'tournament_participant',
+          refId: participantId,
+          type: 'capture',
+          // No gateway id: this is an offline/manual settlement, not a gateway
+          // capture. The 'manual' status distinguishes it from a verified
+          // gateway capture for reconciliation.
+          gatewayId: null,
+          amount: t.fee,
+          status: 'manual',
         });
       }
 
@@ -584,6 +835,35 @@ export class TournamentsController {
     return this.tournaments.listForOwner(venueId);
   }
 
+  /**
+   * Paginated, filterable owner master list (lightweight rows; no participant
+   * roster). Backs the back-office tournaments list page. Scoped to the
+   * caller's owner; supports venueId, q (name), status, page, pageSize.
+   */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Get('manage')
+  listForOwnerPaged(
+    @CurrentUser() user: RequestUser,
+    @Query() query: OwnerTournamentListQueryDto,
+  ) {
+    return this.tournaments.listForOwnerPaged(user.ownerId!, query);
+  }
+
+  /**
+   * Single owner tournament with participant detail (captain PII), fetched on
+   * demand when a row is opened. The two-segment path keeps it distinct from
+   * the three-segment manage/venue/:venueId route above.
+   */
+  @UseGuards(RolesGuard, FeatureFlagGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.TOURNAMENTS)
+  @Get('manage/:id')
+  getForOwner(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.tournaments.getForOwner(user.ownerId!, id);
+  }
+
   /** Open entry — guests can register and are captured into the player DB. */
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
@@ -607,12 +887,11 @@ export class TournamentsController {
     @Param('participantId') participantId: string,
     @Body() dto: ConfirmParticipantDto,
   ) {
-    return this.tournaments.markPaid(
-      user.ownerId!,
-      id,
-      participantId,
-      dto?.razorpayPaymentId,
-    );
+    return this.tournaments.markPaid(user.ownerId!, id, participantId, {
+      razorpayOrderId: dto?.razorpayOrderId,
+      razorpayPaymentId: dto?.razorpayPaymentId,
+      razorpaySignature: dto?.razorpaySignature,
+    });
   }
 
   /**

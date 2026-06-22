@@ -1,0 +1,86 @@
+# Production stack for Sportline — mirrors the proven pattern already running on
+# this host (unilivadmin / jain-pathshala): app containers on a private bridge
+# network, the host's Postgres reached over its Unix socket, and the host's
+# public Nginx terminating TLS and proxying the subdomain to the web container.
+#
+#   web (nginx)  ->  serves the SPA, proxies /api + /uploads to api
+#   api (nest)   ->  /api, connects to HOST Postgres via the mounted socket
+#   migrate      ->  one-off: applies schema + RLS (db:push) and seeds (profile)
+#
+# Redis is intentionally absent — the app doesn't use it (Throttler is in-memory).
+#
+# Usage:
+#   cp .env.production.example .env      # then fill DATABASE_URL(s) + JWT_SECRET
+#   docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+name: sportsbooking
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: sportsbooking-api:latest
+    container_name: sportsbooking-api
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      API_PORT: "3001"
+      # The local storage driver writes here — must be the mounted volume path
+      # (the code reads STORAGE_LOCAL_DIR, resolved from cwd). Persists uploads
+      # across rebuilds. STORAGE_LOCAL_BASE_URL (public logo/photo URLs) is set
+      # per-domain in .env.
+      STORAGE_LOCAL_DIR: /data/uploads
+    volumes:
+      # Host Postgres socket — DATABASE_URL uses `?host=/var/run/postgresql`.
+      - /var/run/postgresql:/var/run/postgresql
+      - sb_uploads:/data/uploads
+    expose:
+      - "3001"
+    networks: [sportsbooking]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: sportsbooking-web:latest
+    container_name: sportsbooking-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # Bind to loopback only — the host's public Nginx proxies the subdomain
+      # here. Never exposed to the internet directly. Override with WEB_PORT.
+      - "127.0.0.1:${WEB_PORT:-8093}:80"
+    networks: [sportsbooking]
+
+  # One-off schema/RLS apply + optional seed. Reuses the api image; runs as the
+  # ADMIN role (DATABASE_ADMIN_URL) which db:push needs for DDL + role creation.
+  #   db:push  -> GUC funcs + schema + RLS policies + restricted runtime role
+  #   db:seed  -> demo data (override the command)
+  migrate:
+    image: sportsbooking-api:latest
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ["tools"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - /var/run/postgresql:/var/run/postgresql
+    command: ["pnpm", "db:push"]
+    networks: [sportsbooking]
+
+volumes:
+  sb_uploads:
+
+networks:
+  sportsbooking:
+    driver: bridge

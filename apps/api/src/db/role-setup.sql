@@ -20,3 +20,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO sportsbooking_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO sportsbooking_app;
+
+-- Append-only enforcement at the DB layer (defence-in-depth): the financial
+-- ledger and the payments record must never be mutated or deleted by the app
+-- role. The application only ever INSERTs/SELECTs these tables; revoking
+-- UPDATE/DELETE makes immutability a database guarantee, not just a convention,
+-- so a bug or an injection foothold cannot rewrite ledger/payment history.
+-- (Admin/superuser retains full rights for migrations + test resets.)
+REVOKE UPDATE, DELETE ON ledger_txns FROM sportsbooking_app;
+REVOKE UPDATE, DELETE ON payments FROM sportsbooking_app;

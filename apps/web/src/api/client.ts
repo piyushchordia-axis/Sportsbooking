@@ -13,6 +13,8 @@ import {
   PayMode,
   PaymentStatus,
   PlayerSummary,
+  RegistrationType,
+  TournamentFormat,
 } from '@sportsbooking/shared';
 
 const BASE = '/api';
@@ -417,6 +419,79 @@ export interface FixtureBoard {
   standings: FixtureStanding[];
 }
 
+/** Lifecycle bucket derived server-side for the owner tournaments list. */
+export type OwnerTournamentStatus =
+  | 'open'
+  | 'closing_soon'
+  | 'in_progress'
+  | 'completed';
+
+/** Filters for the paginated owner tournaments list (GET /tournaments/manage). */
+export interface OwnerTournamentListParams {
+  /** Scope to one venue; omitted = across all the owner's venues. */
+  venueId?: string;
+  /** Free-text match on tournament name. */
+  q?: string;
+  status?: OwnerTournamentStatus;
+  /** 1-based page number (defaults server-side to 1). */
+  page?: number;
+  /** Items per page (defaults server-side to 12). */
+  pageSize?: number;
+}
+
+/** One lightweight row in the owner tournaments list (no participant roster). */
+export interface OwnerTournamentListItem {
+  id: string;
+  name: string;
+  venueId: string;
+  venueName: string | null;
+  format: TournamentFormat;
+  regType: RegistrationType;
+  capacity: number;
+  startDate: string;
+  endDate: string;
+  regCloseAt: string | null;
+  refundAllowedAfterClose: boolean;
+  /** Total registrations (paid + cancelled). */
+  entries: number;
+  /** Paid registrations only. */
+  paidEntries: number;
+  status: OwnerTournamentStatus;
+}
+
+/** Paginated owner tournaments list envelope (GET /tournaments/manage). */
+export interface OwnerTournamentListPage {
+  items: OwnerTournamentListItem[];
+  /** Count for the active status filter (drives pagination). */
+  total: number;
+  /** Per-status tallies over the q/venue-scoped set (drive the lifecycle tabs). */
+  counts: {
+    all: number;
+    open: number;
+    closing_soon: number;
+    in_progress: number;
+    completed: number;
+  };
+  /** Headline aggregates over the q/venue-scoped set (drive the stats strip). */
+  summary: { entries: number; paidEntries: number; capacity: number };
+}
+
+/** A registered participant on a tournament (owner back-office; captain PII). */
+export interface TournamentParticipant {
+  id: string;
+  teamName: string | null;
+  captainName: string;
+  captainMobile: string;
+  roster: string[] | null;
+  paid: boolean;
+}
+
+/** Single owner tournament with participants (GET /tournaments/manage/:id). */
+export interface OwnerTournamentDetail extends OwnerTournamentListItem {
+  participants: TournamentParticipant[];
+  _count: { participants: number };
+}
+
 /** A gateway transaction (capture or refund) from the payments ledger. */
 export interface PaymentTxn {
   id: string;
@@ -640,6 +715,43 @@ export interface BlockSlotsInput {
   /** ISO-8601 timestamp */
   end: string;
   reason?: string;
+  /**
+   * Optional weekly recurrence (PRD §4.3). When present the start/end window is
+   * repeated weekly for `count` total weeks (including the first). Absent → a
+   * single one-off block (unchanged behaviour).
+   */
+  recurrence?: { frequency: 'weekly'; count: number };
+}
+
+/** A customer's saved/bookmarked venue (GET /saved-venues). */
+export interface SavedVenue {
+  venueId: string;
+  name: string;
+  city: string | null;
+  ownerId: string;
+  savedAt: string;
+}
+
+/** A currently-valid offer in the customer offers inbox (GET /offers/inbox). */
+export interface OfferInboxItem {
+  id: string;
+  name: string;
+  type: 'percent' | 'flat';
+  value: number;
+  code: string | null;
+  autoApply: boolean;
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+/** One stored pricing-grid rule for a court (GET /venues/units/:unitId/pricing). */
+export interface UnitPricingRule {
+  id: string;
+  dayType: string | null;
+  timeBand: string | null;
+  dateOverride: string | null;
+  minDuration: number | null;
+  price: string | number;
 }
 
 /**
@@ -682,7 +794,9 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-/** Drop stored tokens; the next guarded route will bounce to /login. */
+/** Drop the stored access token; the next guarded route will bounce to /login.
+ *  The refresh token lives in an httpOnly cookie (cleared server-side on logout);
+ *  we still purge any legacy localStorage refreshToken from older sessions. */
 function clearTokens(): void {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
@@ -697,31 +811,29 @@ const NO_REFRESH_PATHS = ['/auth/refresh', '/auth/login'];
 
 /**
  * Shared in-flight refresh promise so concurrent 401s collapse into a single
- * POST /auth/refresh. Resolves to true on success (tokens stored), false on
- * failure (tokens cleared). Reset to null once settled.
+ * POST /auth/refresh. Resolves to true on success (access token stored), false
+ * on failure (tokens cleared). Reset to null once settled.
  */
 let refreshInFlight: Promise<boolean> | null = null;
 
 /**
- * Rotate the stored refresh token into a fresh access (+ refresh) token via
- * POST /auth/refresh. Single-flight: concurrent callers await the same promise.
- * Returns false (and clears tokens) when no refresh token exists or the call
- * fails, so the caller lets the original 401 propagate.
+ * Rotate the httpOnly refresh-token cookie into a fresh access (+ refresh) token
+ * via POST /auth/refresh (credentials: 'include' so the cookie is sent). The
+ * refresh token is no longer in JS-accessible storage (XSS hardening); the new
+ * refresh cookie is set by the server. Single-flight: concurrent callers await
+ * the same promise. Returns false (and clears the access token) on failure so
+ * the caller lets the original 401 propagate.
  */
 function refreshTokens(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
-    const refreshToken = localStorage.getItem('refreshToken');
-    if (!refreshToken) {
-      clearTokens();
-      return false;
-    }
     try {
       const res = await fetch(`${BASE}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        credentials: 'include',
+        body: '{}',
       });
       if (!res.ok) {
         clearTokens();
@@ -729,7 +841,6 @@ function refreshTokens(): Promise<boolean> {
       }
       const tokens = (await res.json()) as AuthTokens;
       localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
       return true;
     } catch {
       clearTokens();
@@ -749,6 +860,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const doFetch = () =>
     fetch(`${BASE}${path}`, {
       ...init,
+      // Send the httpOnly refresh cookie on auth calls (and harmless elsewhere).
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...authHeaders(),
@@ -759,11 +872,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res = await doFetch();
 
   // On a 401 (stale access token), try a single shared refresh + one retry.
-  // Skip auth endpoints whose own 401 must not loop into a refresh.
+  // Skip auth endpoints whose own 401 must not loop into a refresh. Gate on a
+  // stored access token so logged-out users don't trigger a pointless refresh.
   if (
     res.status === 401 &&
     !NO_REFRESH_PATHS.includes(path) &&
-    localStorage.getItem('refreshToken')
+    localStorage.getItem('accessToken')
   ) {
     const refreshed = await refreshTokens();
     if (refreshed) {
@@ -801,11 +915,12 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
     return fetch(`${BASE}${path}`, {
       method: 'POST',
       body: fd,
+      credentials: 'include',
       headers: { ...authHeaders() },
     });
   };
   let res = await doFetch();
-  if (res.status === 401 && localStorage.getItem('refreshToken')) {
+  if (res.status === 401 && localStorage.getItem('accessToken')) {
     const refreshed = await refreshTokens();
     if (refreshed) res = await doFetch();
   }
@@ -846,12 +961,10 @@ export const api = {
     post<{ updated: true }>('/auth/password/reset', { token, newPassword }),
 
   // ---- auth lifecycle ----
-  /** Rotate the stored refresh token into fresh tokens (manual trigger). */
-  refresh: (refreshToken: string) =>
-    post<AuthTokens>('/auth/refresh', { refreshToken }),
-  /** Revoke the stored refresh token server-side (logout). */
-  logout: (refreshToken: string) =>
-    post<{ revoked: true }>('/auth/logout', { refreshToken }),
+  /** Rotate the httpOnly refresh cookie into fresh tokens (manual trigger). */
+  refresh: () => post<AuthTokens>('/auth/refresh', {}),
+  /** Revoke the refresh token server-side + clear its cookie (logout). */
+  logout: () => post<{ revoked: true }>('/auth/logout', {}),
 
   // ---- discovery / booking (customer) ----
   /**
@@ -883,6 +996,18 @@ export const api = {
   cancelBooking: (id: string) => post<{ cancelled: true }>(`/bookings/${id}/cancel`),
   myBookings: () => get<CustomerBooking[]>('/bookings/mine'),
 
+  // ---- saved venues / favourites (customer, PRD §5.4) ----
+  listSavedVenues: () => get<SavedVenue[]>('/saved-venues'),
+  saveVenue: (venueId: string) => post<{ saved: true }>('/saved-venues', { venueId }),
+  unsaveVenue: (venueId: string) =>
+    del<{ removed: true }>(`/saved-venues/${venueId}`),
+
+  // ---- offers inbox (customer, PRD §5.4) ----
+  /** Currently-valid offers for a given owner's storefront, scoped to the
+   *  signed-in customer's segment. */
+  offersInbox: (ownerId: string) =>
+    get<OfferInboxItem[]>(`/offers/inbox?ownerId=${encodeURIComponent(ownerId)}`),
+
   // ---- memberships / wallet / referral (customer) ----
   listOwnerPacks: (ownerId: string) => get<Pack[]>(`/owners/${ownerId}/packs`),
   purchasePack: (ownerId: string, packId: string) =>
@@ -899,6 +1024,26 @@ export const api = {
   // Owner back-office: tournaments WITH participant detail for cancel/refund.
   listOwnerTournaments: (venueId: string) =>
     get<any[]>(`/tournaments/manage/venue/${venueId}`),
+  /**
+   * Owner back-office: paginated/filterable master list of tournaments. Returns
+   * lightweight rows (no participant roster) + total. All params optional.
+   */
+  listOwnerTournamentsPage: (params: OwnerTournamentListParams = {}) => {
+    const qs = new URLSearchParams();
+    const { venueId, q, status, page, pageSize } = params;
+    if (venueId) qs.append('venueId', venueId);
+    if (q) qs.append('q', q);
+    if (status) qs.append('status', status);
+    if (page !== undefined) qs.append('page', String(page));
+    if (pageSize !== undefined) qs.append('pageSize', String(pageSize));
+    const s = qs.toString();
+    return get<OwnerTournamentListPage>(
+      `/tournaments/manage${s ? `?${s}` : ''}`,
+    );
+  },
+  /** Owner back-office: one tournament with participant detail (drawer). */
+  getOwnerTournament: (id: string) =>
+    get<OwnerTournamentDetail>(`/tournaments/manage/${id}`),
   registerTournament: (
     id: string,
     body: {
@@ -971,6 +1116,9 @@ export const api = {
   updateUnit: (unitId: string, body: unknown) => patch(`/venues/units/${unitId}`, body),
   deleteUnit: (unitId: string) => del(`/venues/units/${unitId}`),
   setPricing: (unitId: string, rules: unknown[]) => put(`/venues/units/${unitId}/pricing`, rules),
+  /** Read a court's stored pricing grid (to preload the editor). */
+  getUnitPricing: (unitId: string) =>
+    get<UnitPricingRule[]>(`/venues/units/${unitId}/pricing`),
   getVenueSettings: (venueId: string) => get<VenueSettings>(`/venues/${venueId}/settings`),
   updateVenueSettings: (venueId: string, body: VenueSettingsInput) =>
     put<VenueSettings>(`/venues/${venueId}/settings`, body),
@@ -988,8 +1136,18 @@ export const api = {
   listAddons: (venueId: string) => get<Addon[]>(`/venues/${venueId}/addons`),
   updateAddon: (addonId: string, body: unknown) => patch(`/addons/${addonId}`, body),
   deleteAddon: (addonId: string) => del(`/addons/${addonId}`),
-  listPlayers: (segment?: string) =>
-    get<PlayerSummary[]>(`/players${segment ? `?segment=${segment}` : ''}`),
+  /** CRM directory. Optional segment + game/venue filters (PRD §4.9). */
+  listPlayers: (
+    segment?: string,
+    opts: { gameId?: string; venueId?: string } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (segment) qs.append('segment', segment);
+    if (opts.gameId) qs.append('gameId', opts.gameId);
+    if (opts.venueId) qs.append('venueId', opts.venueId);
+    const s = qs.toString();
+    return get<PlayerSummary[]>(`/players${s ? `?${s}` : ''}`);
+  },
   addCustomer: (body: CreateCustomerRequest) => post<PlayerSummary>('/players', body),
   /** Owner/staff bulk CRM import — one bad row never aborts the batch. */
   bulkAddPlayers: (customers: BulkAddPlayerInput[]) =>

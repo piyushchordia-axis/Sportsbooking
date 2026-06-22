@@ -13,7 +13,8 @@ test.describe('Authentication & role routing', () => {
     await loginWithPassword(page, SEED.owner.email, SEED.owner.password);
     await expect(page).toHaveURL(/\/owner$/);
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Packs' })).toBeVisible();
+    // A stable dashboard stat (the Packs nav link lives in a collapsible group).
+    await expect(page.getByText('Revenue (paid)')).toBeVisible();
   });
 
   test('super admin logs in and sees the platform overview', async ({ page }) => {

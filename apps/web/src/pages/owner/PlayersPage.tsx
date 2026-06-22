@@ -95,10 +95,43 @@ function parseBulk(raw: string, defaultConsent: boolean): ParsedRow[] {
     });
 }
 
+/** A minimal {id,name} reference for the game/venue filter dropdowns. */
+interface NamedRef {
+  id: string;
+  name: string;
+}
+
 /** Owner CRM directory with segment filter + add-player modal (PRD §4.9). */
 export function PlayersPage() {
   const [segment, setSegment] = useState('');
-  const players = useLoad(() => api.listPlayers(segment || undefined), [segment]);
+  const [gameId, setGameId] = useState('');
+  const [venueId, setVenueId] = useState('');
+  const players = useLoad(
+    () =>
+      api.listPlayers(segment || undefined, {
+        gameId: gameId || undefined,
+        venueId: venueId || undefined,
+      }),
+    [segment, gameId, venueId],
+  );
+
+  // Filter dropdown sources — games and the owner's venues.
+  const games = useLoad(() => api.discoverGames() as Promise<NamedRef[]>, []);
+  const venues = useLoad(() => api.listVenues() as Promise<NamedRef[]>, []);
+  const gameOptions = useMemo(
+    () => [
+      { value: '', label: 'All games' },
+      ...(games.data ?? []).map((g) => ({ value: g.id, label: g.name })),
+    ],
+    [games.data],
+  );
+  const venueOptions = useMemo(
+    () => [
+      { value: '', label: 'All grounds' },
+      ...(venues.data ?? []).map((v) => ({ value: v.id, label: v.name })),
+    ],
+    [venues.data],
+  );
 
   // Add-player dialog state.
   const [addOpen, setAddOpen] = useState(false);
@@ -303,6 +336,20 @@ export function PlayersPage() {
           />
         }
       >
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:max-w-md sm:grid-cols-2">
+          <Select
+            label="Game"
+            value={gameId}
+            onChange={setGameId}
+            options={gameOptions}
+          />
+          <Select
+            label="Ground"
+            value={venueId}
+            onChange={setVenueId}
+            options={venueOptions}
+          />
+        </div>
         <Msg text={players.error} />
         {players.loading && rows.length === 0 ? (
           <div className="flex flex-col gap-3 py-2">

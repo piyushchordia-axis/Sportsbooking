@@ -1,106 +1,190 @@
 import { UserRole } from '@sportsbooking/shared';
-import { useEffect, useState } from 'react';
+import { CSSProperties, useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity,
-  CalendarSearch,
-  ChevronDown,
-  LogOut,
+  CalendarCheck,
   Moon,
+  Search,
   Sun,
-  Swords,
-  Trophy,
   User,
+  Users,
   Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStorefront } from '../storefront/StorefrontProvider';
-import { initials } from '../lib/imagery';
+import { FloodlitToastProvider, useFloodlitToast } from '../floodlit/toast';
 import { cn } from './ui/utils';
 
+/** WCAG-ish contrast pick for text on a brand-coloured chip. */
+function onBrandFor(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 'oklch(0.17 0.04 152)';
+  const n = parseInt(m[1], 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum > 0.45 ? 'oklch(0.17 0.02 250)' : 'oklch(0.99 0.01 150)';
+}
+
 const NAV = [
-  { to: '/browse', label: 'Browse', icon: CalendarSearch },
-  { to: '/open-matches', label: 'Open matches', icon: Swords },
-  { to: '/tournaments', label: 'Tournaments', icon: Trophy },
+  { to: '/browse', label: 'Browse', icon: Search, match: ['/browse', '/venue'] },
+  { to: '/open-matches', label: 'Matches', icon: Users, match: ['/open-matches', '/tournaments'] },
+  { to: '/wallet', label: 'Wallet', icon: Wallet, match: ['/wallet'] },
+  { to: '/my-bookings', label: 'Bookings', icon: CalendarCheck, match: ['/my-bookings'] },
+  { to: '/account', label: 'Account', icon: User, match: ['/account', '/saved', '/offers'] },
 ];
 
-const ACCOUNT = [
-  { to: '/my-bookings', label: 'My bookings', icon: CalendarSearch },
-  { to: '/wallet', label: 'Wallet', icon: Wallet },
-  { to: '/account', label: 'Account', icon: User },
-];
+/** Floating brand-coloured toast, rendered above the bottom nav. */
+function ToastHost() {
+  const { toast } = useFloodlitToast();
+  if (!toast) return null;
+  return (
+    <div
+      className="fl-mono"
+      style={{
+        position: 'fixed',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        bottom: 'calc(86px + env(safe-area-inset-bottom))',
+        zIndex: 60,
+        background: 'var(--surface-2)',
+        color: 'var(--chalk)',
+        border: '1px solid var(--brand)',
+        borderRadius: 11,
+        padding: '11px 18px',
+        fontSize: 13,
+        fontWeight: 600,
+        boxShadow: '0 12px 30px -10px black',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {toast}
+    </div>
+  );
+}
 
 /**
- * Public, consumer-facing shell for the player storefront (landing / browse /
- * venue / book). A marketing-style top navbar + footer — NOT the admin sidebar.
- * Re-themes to a venue owner's branding (white-label) via ThemeProvider, which
- * pages set when an owner/venue context is in view.
+ * Player storefront shell ("Floodlit"). Wraps every consumer route in the
+ * `.floodlit` theme scope, applies the active operator's brand colour
+ * (white-label) and the day/night mode, and renders the app chrome — a sticky
+ * top bar plus a bottom nav on mobile that expands to a top nav on desktop. The
+ * landing route brings its own marketing chrome, so the app nav is suppressed
+ * there.
  */
 export function ConsumerLayout() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { branding, mode, toggleMode } = useTheme();
   const { scoped, ownerName, exitStorefront } = useStorefront();
   const loc = useLocation();
   const nav = useNavigate();
-  const [menu, setMenu] = useState(false);
-  const [logoBroken, setLogoBroken] = useState(false);
 
-  useEffect(() => setLogoBroken(false), [branding.logoUrl]);
-  useEffect(() => setMenu(false), [loc.pathname]);
+  const exitToMarketplace = () => {
+    exitStorefront();
+    nav('/browse');
+  };
 
   const isPlayer = user?.role === UserRole.CUSTOMER;
+  const isLanding =
+    loc.pathname === '/' || loc.pathname.startsWith('/s/');
+
+  // White-label: when an operator is in scope, drive --brand from their colour;
+  // otherwise fall back to the Floodlit green baked into the .floodlit scope.
+  const brandStyle = useMemo<CSSProperties>(() => {
+    if (!scoped) return {};
+    return {
+      '--brand': branding.primaryColor,
+      '--on-brand': onBrandFor(branding.primaryColor),
+    } as CSSProperties;
+  }, [scoped, branding.primaryColor]);
+
+  const name = scoped && ownerName ? ownerName : 'Sportline';
+  const short = name.charAt(0).toUpperCase();
+
+  if (isLanding) {
+    return (
+      <div
+        className="floodlit"
+        data-fl-mode={mode}
+        style={{ ...brandStyle, minHeight: '100vh' }}
+      >
+        <Outlet />
+        <ToastHost />
+      </div>
+    );
+  }
+
+  const navActive = (m: string[]) =>
+    m.some((p) => loc.pathname === p || loc.pathname.startsWith(p + '/'));
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-[80rem] items-center gap-6 px-4 sm:px-6">
-          <Link to="/" className="flex items-center gap-2.5 shrink-0">
-            {branding.logoUrl && !logoBroken ? (
+    <div
+      className="floodlit"
+      data-fl-mode={mode}
+      style={{ ...brandStyle, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
+    >
+      {/* ===== Top bar ===== */}
+      <header
+        className="sticky top-0 z-40"
+        style={{
+          background: 'color-mix(in oklab, var(--bg) 86%, transparent)',
+          backdropFilter: 'blur(14px)',
+          borderBottom: '1px solid var(--line)',
+        }}
+      >
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
+          <Link to="/" className="flex min-w-0 flex-1 items-center gap-2.5">
+            {scoped && branding.logoUrl ? (
               <img
                 src={branding.logoUrl}
                 alt=""
-                onError={() => setLogoBroken(true)}
-                className="h-9 w-9 rounded-xl object-contain bg-secondary/60 p-1"
+                className="h-9 w-9 shrink-0 rounded-[10px] object-contain"
+                style={{ background: 'var(--surface)', padding: 3 }}
               />
             ) : (
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-                <Activity className="h-5 w-5" strokeWidth={2.6} />
+              <span
+                className="fl-display grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-lg"
+                style={{ background: 'var(--brand)', color: 'var(--on-brand)', fontWeight: 800 }}
+              >
+                {short}
               </span>
             )}
-            <span className="ff-display text-lg font-extrabold tracking-tight truncate max-w-[12rem]">
-              {scoped && ownerName ? (
-                ownerName
-              ) : (
-                <>
-                  Sport<span className="text-primary">line</span>
-                </>
+            <span className="min-w-0">
+              <span className="fl-display block truncate text-base font-bold leading-none">
+                {name}
+              </span>
+              {scoped && (
+                <span className="block truncate text-[11px]" style={{ color: 'var(--faint)' }}>
+                  white-label storefront
+                </span>
               )}
             </span>
           </Link>
+
+          {/* Exit the white-label storefront back to the full marketplace. */}
           {scoped && (
             <button
-              onClick={exitStorefront}
-              className="hidden lg:inline-flex shrink-0 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/40"
+              onClick={exitToMarketplace}
+              className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors"
+              style={{ border: '1px solid var(--line-strong)', color: 'var(--muted)' }}
               title="Browse all operators on Sportline"
             >
-              All operators
+              All grounds
             </button>
           )}
 
-          <nav className="hidden md:flex items-center gap-1">
+          {/* desktop nav */}
+          <nav className="hidden items-center gap-1 md:flex">
             {NAV.map((n) => {
-              const active = loc.pathname === n.to || loc.pathname.startsWith(n.to + '/');
+              const active = navActive(n.match);
               return (
                 <Link
                   key={n.to}
                   to={n.to}
-                  className={cn(
-                    'rounded-xl px-3 py-2 text-sm font-medium transition-colors',
-                    active
-                      ? 'text-primary bg-primary/10'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                  )}
+                  className="rounded-xl px-3 py-2 text-sm font-medium transition-colors"
+                  style={{ color: active ? 'var(--brand)' : 'var(--muted)' }}
                 >
                   {n.label}
                 </Link>
@@ -111,119 +195,82 @@ export function ConsumerLayout() {
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={toggleMode}
-              aria-label="Toggle theme"
-              className="grid h-9 w-9 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground hover:border-primary/40"
+              aria-label="Toggle day / night"
+              className="grid h-9 w-9 place-items-center rounded-[10px]"
+              style={{ background: 'var(--surface)', border: '1px solid var(--line)', color: 'var(--chalk)' }}
             >
               {mode === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-
             {isPlayer ? (
-              <div className="relative">
-                <button
-                  onClick={() => setMenu((v) => !v)}
-                  className="flex items-center gap-2 rounded-full border border-border py-1 pl-1 pr-2.5 transition-colors hover:border-primary/40"
-                >
-                  <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/15 text-primary text-xs font-semibold ring-1 ring-primary/30">
-                    {initials(user?.name)}
-                  </span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </button>
-                {menu && (
-                  <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-border bg-popover p-1 shadow-2xl">
-                    <div className="px-3 py-2">
-                      <p className="truncate text-sm font-semibold">{user?.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {user?.mobile || 'Player'}
-                      </p>
-                    </div>
-                    <div className="my-1 h-px bg-border" />
-                    {ACCOUNT.map((a) => (
-                      <Link
-                        key={a.to}
-                        to={a.to}
-                        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <a.icon className="h-4 w-4" /> {a.label}
-                      </Link>
-                    ))}
-                    <div className="my-1 h-px bg-border" />
-                    <button
-                      onClick={() => {
-                        logout();
-                        nav('/');
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-destructive hover:bg-muted"
-                    >
-                      <LogOut className="h-4 w-4" /> Log out
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
-                <Link
-                  to="/login"
-                  className="rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Sign in
-                </Link>
-                <Link
-                  to="/browse"
-                  className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  Book now
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile nav row */}
-        <div className="md:hidden border-t border-border">
-          <div className="mx-auto flex max-w-[80rem] items-center gap-1 overflow-x-auto px-2 py-2">
-            {NAV.map((n) => (
               <Link
-                key={n.to}
-                to={n.to}
-                className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                to="/account"
+                aria-label="Account"
+                className="fl-display grid h-9 w-9 place-items-center rounded-full text-sm"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--line-strong)', fontWeight: 700 }}
               >
-                <n.icon className="h-4 w-4" /> {n.label}
+                {(user?.name || 'P').charAt(0).toUpperCase()}
               </Link>
-            ))}
+            ) : (
+              <Link
+                to="/login"
+                className="inline-flex h-9 items-center rounded-[10px] px-3.5 text-[13px] font-semibold"
+                style={{ background: 'var(--surface)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="flex-1">
+      {/* ===== Content ===== */}
+      <main className="mx-auto w-full max-w-6xl flex-1 px-0 pb-24 sm:px-6 md:pb-10">
         <Outlet />
       </main>
 
-      <footer className="border-t border-border bg-elevated/40">
-        <div className="mx-auto flex max-w-[80rem] flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <Activity className="h-4 w-4" strokeWidth={2.6} />
-            </span>
-            <span className="ff-display font-bold">
-              Sport<span className="text-primary">line</span>
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Book turf, courts &amp; games near you — © {new Date().getFullYear()} Sportline.
-          </p>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link to="/browse" className="hover:text-foreground">
-              Browse
-            </Link>
-            <Link to="/open-matches" className="hover:text-foreground">
-              Open matches
-            </Link>
-            <Link to="/tournaments" className="hover:text-foreground">
-              Tournaments
-            </Link>
-          </div>
-        </div>
-      </footer>
+      {/* ===== Bottom nav (mobile) ===== */}
+      <nav
+        className="sticky bottom-0 z-40 flex md:hidden"
+        style={{
+          background: 'color-mix(in oklab, var(--bg) 92%, transparent)',
+          backdropFilter: 'blur(14px)',
+          borderTop: '1px solid var(--line)',
+          padding: '8px 6px calc(8px + env(safe-area-inset-bottom))',
+        }}
+      >
+        {NAV.map((n) => {
+          const active = navActive(n.match);
+          const Icon = n.icon;
+          return (
+            <button
+              key={n.to}
+              onClick={() => nav(n.to)}
+              className="flex flex-1 flex-col items-center gap-1 py-1.5"
+              style={{ background: 'none', border: 'none', color: active ? 'var(--brand)' : 'var(--faint)' }}
+            >
+              <Icon className="h-[19px] w-[19px]" />
+              <span className="text-[10px] font-semibold">{n.label}</span>
+              <span
+                className="h-0.5 w-4 rounded-full"
+                style={{ background: active ? 'var(--brand)' : 'transparent' }}
+              />
+            </button>
+          );
+        })}
+      </nav>
+
+      <ToastHost />
     </div>
   );
 }
+
+/** Wrap the consumer subtree in the Floodlit toast provider + the shell. */
+export function ConsumerLayoutRoot() {
+  return (
+    <FloodlitToastProvider>
+      <ConsumerLayout />
+    </FloodlitToastProvider>
+  );
+}
+
+export { cn };

@@ -6,11 +6,13 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantMiddleware } from './common/tenant/tenant.middleware';
 import { DbModule } from './db/db.module';
+import { HealthModule } from './modules/health/health.module';
 import { AddonsModule } from './modules/addons/addons.module';
 import { AmcModule } from './modules/amc/amc.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -37,12 +39,22 @@ import { ReferralModule } from './modules/referral/referral.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { VenuesModule } from './modules/venues/venues.module';
+import { SavedVenuesModule } from './modules/saved-venues/saved-venues.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    // Global rate-limiting (security H1). A generous default ceiling guards
+    // against scraping/DoS-lite without disrupting normal booking flows;
+    // auth endpoints add much tighter per-route limits via @Throttle to blunt
+    // credential/OTP brute-force. In-memory store (single instance) — wire the
+    // Redis throttler storage for multi-instance production.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 600 },
+    ]),
     DbModule,
+    HealthModule,
     NotificationsModule,
     RemindersModule,
     PaymentsModule,
@@ -69,8 +81,12 @@ import { VenuesModule } from './modules/venues/venues.module';
     AuditLogModule,
     StorageModule,
     LoyaltySettingsModule,
+    SavedVenuesModule,
   ],
   providers: [
+    // Rate-limiting runs first, before auth, so it caps unauthenticated
+    // brute-force traffic too.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // JWT auth applied globally; routes opt out with @Public().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Role enforcement applied globally AFTER JwtAuthGuard. RolesGuard returns

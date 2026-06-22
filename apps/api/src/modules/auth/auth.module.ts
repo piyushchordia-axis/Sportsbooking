@@ -17,6 +17,9 @@ import { OtpService } from './otp.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: resolveJwtSecret(config),
+        // Pin the signing algorithm (verified against the same allowlist in
+        // jwt.strategy) so tokens are always HS256.
+        signOptions: { algorithm: 'HS256' as const },
       }),
     }),
   ],

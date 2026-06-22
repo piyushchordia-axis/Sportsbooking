@@ -40,13 +40,17 @@ export class StaffLoginDto {
 }
 
 export class RefreshTokenDto {
+  // Optional: browser clients carry the refresh token in the httpOnly cookie;
+  // the body is only used by non-browser clients (back-compat).
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class LogoutDto {
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class ChangePasswordDto {

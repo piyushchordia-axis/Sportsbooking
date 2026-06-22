@@ -26,15 +26,70 @@ import { DbService } from '../../db/db.service';
 import { owners } from '../../db/schema';
 import { StorageService } from '../storage/storage.service';
 
-/** Accepted logo image types → file extension. */
+/**
+ * Accepted raster logo image types → file extension. SVG is intentionally
+ * excluded: stored SVGs can carry inline scripts and become a stored-XSS
+ * vector when served from our origin.
+ */
 const LOGO_TYPES: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
-  'image/svg+xml': 'svg',
+  'image/gif': 'gif',
 };
 /** Max logo size (also capped by the multer limit on the route). */
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Sniff the actual file bytes (magic numbers) and return the canonical MIME
+ * type, ignoring the client-supplied mimetype. Returns null if the bytes do
+ * not match a supported raster image signature.
+ */
+function sniffImageMime(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  // GIF: "GIF87a" or "GIF89a"
+  if (
+    buf[0] === 0x47 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x38 &&
+    (buf[4] === 0x37 || buf[4] === 0x39) &&
+    buf[5] === 0x61
+  ) {
+    return 'image/gif';
+  }
+  // WebP: "RIFF" .... "WEBP"
+  if (
+    buf[0] === 0x52 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x46 &&
+    buf[8] === 0x57 &&
+    buf[9] === 0x45 &&
+    buf[10] === 0x42 &&
+    buf[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
 
 class UpdateBrandingDto {
   @IsOptional() @IsString() logoUrl?: string;
@@ -118,19 +173,21 @@ export class OwnerSettingsService {
     file?: Express.Multer.File,
   ): Promise<BrandingResponse> {
     if (!file) throw new BadRequestException('No file uploaded');
-    const ext = LOGO_TYPES[file.mimetype];
-    if (!ext) {
-      throw new BadRequestException('Logo must be a PNG, JPG, WebP or SVG image');
-    }
     if (file.size > MAX_LOGO_BYTES) {
       throw new BadRequestException('Logo must be 2 MB or smaller');
+    }
+    // Trust the actual bytes, not the client-supplied mimetype.
+    const mime = sniffImageMime(file.buffer);
+    const ext = mime ? LOGO_TYPES[mime] : undefined;
+    if (!mime || !ext) {
+      throw new BadRequestException('Logo must be a PNG, JPG, WebP or GIF image');
     }
 
     const previous = await this.getBranding(ownerId);
     const { url } = await this.storage.upload(
       `logos/${ownerId}/${randomUUID()}.${ext}`,
       file.buffer,
-      file.mimetype,
+      mime,
     );
     const updated = await this.updateBranding(ownerId, { logoUrl: url });
 

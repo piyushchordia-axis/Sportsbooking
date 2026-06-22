@@ -1,0 +1,31 @@
+# Build context hygiene — keep images reproducible and the context small.
+# We install fresh from the lockfile inside the image, so never ship host
+# node_modules / build output / local state.
+
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/.vite
+**/build
+
+.git
+.github
+.husky
+
+# Local env + secrets must never land in an image layer.
+**/.env
+**/.env.*
+!**/.env.production.example
+
+# Tests, e2e, and editor/OS cruft (not needed at runtime/build).
+e2e
+test-results
+playwright-report
+**/*.log
+.DS_Store
+
+# Docs, design imports, and PRD assets are irrelevant to the build.
+docs
+*.md
+!apps/web/index.html

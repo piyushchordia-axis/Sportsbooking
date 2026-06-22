@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   LedgerTxnType,
   PackExpiryMode,
@@ -16,11 +16,39 @@ import { PaymentService } from '../payments/payment.service';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { Decimal, dec, money } from '../../db/money';
-import { ledgerTxns, membershipPacks } from '../../db/schema';
+import {
+  ledgerTxns,
+  membershipPacks,
+  ownerCustomers,
+  playerProfiles,
+  users,
+} from '../../db/schema';
 import { CreatePackDto, UpdatePackDto } from './dto';
 
 export function packLane(packId: string): string {
   return `pack:${packId}`;
+}
+
+/**
+ * Pure expiry-mode decision (PRD §4.4). Given a pack's expiry mode, its
+ * validity window and the purchase timestamp, decide whether sessions on that
+ * pack lane are time-expired as of `now`.
+ *
+ * - NONE / ROLLOVER: sessions never time-expire (validityDays ignored).
+ * - FORFEIT: sessions are expired once `now` is at/after purchasedAt +
+ *   validityDays. A null validityDays means "no window" → never expires.
+ */
+export function isPackExpired(
+  expiryMode: PackExpiryMode | string,
+  validityDays: number | null | undefined,
+  purchasedAt: Date,
+  now: Date = new Date(),
+): boolean {
+  if (expiryMode !== PackExpiryMode.FORFEIT) return false;
+  if (validityDays == null) return false;
+  const expiresAt = new Date(purchasedAt);
+  expiresAt.setDate(expiresAt.getDate() + validityDays);
+  return expiresAt.getTime() <= now.getTime();
 }
 
 export interface PackApplication {
@@ -293,7 +321,20 @@ export class MembershipsService {
         }
       }
 
-      // 4) Payment verified and not a replay → credit the sessions. Store the
+      // 4) Roll-forward / expiry settlement on the existing lane balance before
+      // the new credit lands (PRD §4.4):
+      //  - ROLLOVER: unused sessions are NEVER forfeited; re-buying the same
+      //    scope simply carries the prior balance forward (the ledger is
+      //    additive on the lane) and resets the validity clock to this PACK_BUY.
+      //  - FORFEIT: settle any already-expired prior window first, so stale
+      //    sessions are forfeited (and ledger-recorded) rather than silently
+      //    riding on top of the fresh credit.
+      //  - NONE: nothing to settle.
+      // resolvePackExpiry is a no-op for ROLLOVER/NONE and idempotent for
+      // FORFEIT, so calling it unconditionally is safe.
+      await this.resolvePackExpiry(tx, ownerId, customerId, pack);
+
+      // 5) Payment verified and not a replay → credit the sessions. Store the
       // gateway payment id in `refId` so subsequent replays are deduped above.
       const balanceAfter = await this.ledger.post(tx, {
         ownerId,
@@ -305,6 +346,9 @@ export class MembershipsService {
         refId: gatewayPaymentId ?? packId,
         note: `Bought ${pack.name} (${pack.sessions} sessions)`,
       });
+
+      // 6) Pack-purchase player capture into the owner CRM (PRD §4.9).
+      await this.capturePlayer(tx, ownerId, customerId);
       return {
         packId,
         sessionsAdded: pack.sessions,
@@ -353,27 +397,17 @@ export class MembershipsService {
       throw new BadRequestException('Pack not valid for these courts');
     }
 
-    // Expiry enforcement (PRD §4.4): packs with a validity window forfeit
-    // sessions once expired. ROLLOVER / NONE never time-expire.
-    if (
-      pack.validityDays != null &&
-      pack.expiryMode === PackExpiryMode.FORFEIT
-    ) {
-      const lastBuy = await tx.query.ledgerTxns.findFirst({
-        where: and(
-          eq(ledgerTxns.customerId, customerId),
-          eq(ledgerTxns.lane, packLane(packId)),
-          eq(ledgerTxns.type, LedgerTxnType.PACK_BUY),
-        ),
-        orderBy: desc(ledgerTxns.createdAt),
-      });
-      if (lastBuy) {
-        const expiresAt = new Date(lastBuy.createdAt);
-        expiresAt.setDate(expiresAt.getDate() + pack.validityDays);
-        if (expiresAt.getTime() <= Date.now()) {
-          throw new BadRequestException('Pack sessions have expired');
-        }
-      }
+    // Expiry enforcement (PRD §4.4): resolve the pack lane first so FORFEIT
+    // packs past their window are forfeited (and ledger-recorded) before we
+    // read the spendable balance. ROLLOVER / NONE never time-expire.
+    const expired = await this.resolvePackExpiry(
+      tx,
+      ownerId,
+      customerId,
+      pack,
+    );
+    if (expired) {
+      throw new BadRequestException('Pack sessions have expired');
     }
 
     const balance = await this.ledger.balance(tx, customerId, packLane(packId));
@@ -444,5 +478,115 @@ export class MembershipsService {
       refId: bookingId,
       note: `Refunded ${sessions} session(s) on cancellation`,
     });
+  }
+
+  /**
+   * Resolve a pack lane's expiry (PRD §4.4) and return whether sessions are
+   * currently expired/unusable. For FORFEIT packs past their validity window
+   * with a remaining balance, this forfeits the balance by appending a
+   * `pack_expire` ledger entry on the lane (append-only; mirrors ledger.post).
+   *
+   * Idempotent: the forfeiture is keyed (refId) on the funding PACK_BUY row, so
+   * a second resolution of the same expired lane finds the existing PACK_EXPIRE
+   * row and never double-posts. NONE / ROLLOVER never time-expire.
+   */
+  private async resolvePackExpiry(
+    tx: DbTx,
+    ownerId: string,
+    customerId: string,
+    pack: typeof membershipPacks.$inferSelect,
+  ): Promise<boolean> {
+    const lane = packLane(pack.id);
+    const lastBuy = await tx.query.ledgerTxns.findFirst({
+      where: and(
+        eq(ledgerTxns.customerId, customerId),
+        eq(ledgerTxns.lane, lane),
+        eq(ledgerTxns.type, LedgerTxnType.PACK_BUY),
+      ),
+      orderBy: desc(ledgerTxns.createdAt),
+    });
+    if (!lastBuy) return false;
+
+    if (
+      !isPackExpired(
+        pack.expiryMode,
+        pack.validityDays,
+        new Date(lastBuy.createdAt),
+      )
+    ) {
+      return false;
+    }
+
+    // Expired. Forfeit any remaining balance into the ledger exactly once.
+    // Idempotency: refId = the funding PACK_BUY id. If a PACK_EXPIRE already
+    // exists for this purchase, the forfeiture was already recorded.
+    const alreadyForfeited = await tx.query.ledgerTxns.findFirst({
+      where: and(
+        eq(ledgerTxns.customerId, customerId),
+        eq(ledgerTxns.lane, lane),
+        eq(ledgerTxns.type, LedgerTxnType.PACK_EXPIRE),
+        eq(ledgerTxns.refId, lastBuy.id),
+      ),
+    });
+    if (!alreadyForfeited) {
+      const balance = await this.ledger.balance(tx, customerId, lane);
+      if (balance.greaterThan(0)) {
+        await this.ledger.post(tx, {
+          ownerId,
+          customerId,
+          type: LedgerTxnType.PACK_EXPIRE,
+          amount: balance.negated(),
+          lane,
+          refType: 'pack',
+          refId: lastBuy.id,
+          note: `Forfeited ${balance} expired session(s)`,
+        });
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Capture a pack purchaser into the owner CRM (PRD §4.9). Mirrors
+   * bookings.service.capturePlayer: upsert ownerCustomers (firstSeen kept,
+   * lastVisit + bookingCount advanced) and ensure a playerProfiles row exists.
+   */
+  private async capturePlayer(
+    tx: DbTx,
+    ownerId: string,
+    customerId: string,
+  ): Promise<void> {
+    const user = await tx.query.users.findFirst({
+      where: eq(users.id, customerId),
+    });
+    if (!user) return;
+    await tx
+      .insert(ownerCustomers)
+      .values({
+        id: randomUUID(),
+        ownerId,
+        customerId,
+        bookingCount: 1,
+        lastVisitAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [ownerCustomers.ownerId, ownerCustomers.customerId],
+        set: {
+          bookingCount: sql`${ownerCustomers.bookingCount} + 1`,
+          lastVisitAt: new Date(),
+        },
+      });
+    await tx
+      .insert(playerProfiles)
+      .values({
+        id: randomUUID(),
+        ownerId,
+        customerId,
+        name: user.name,
+        mobile: user.mobile ?? '',
+      })
+      .onConflictDoNothing({
+        target: [playerProfiles.ownerId, playerProfiles.customerId],
+      });
   }
 }

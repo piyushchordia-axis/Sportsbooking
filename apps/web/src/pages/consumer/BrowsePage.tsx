@@ -1,21 +1,69 @@
 /** Public ground browse/search (player storefront). */
+import { UserRole } from '@sportsbooking/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, Loader2, MapPin, Navigation, Search, Store } from 'lucide-react';
-import { api, DiscoverVenue } from '../../api/client';
 import {
-  EmptyState,
-  ImageWithFallback,
-  PageHeader,
-  Select,
-  SportIcon,
-  useLoad,
-} from '../../components/common';
-import { Button } from '../../components/ui/button';
+  CalendarDays,
+  Heart,
+  Loader2,
+  MapPin,
+  Navigation,
+  Search,
+  Store,
+} from 'lucide-react';
+import { api, DiscoverVenue } from '../../api/client';
+import { EmptyState, Select, useLoad } from '../../components/common';
 import { DatePicker } from '../../components/ui/date-picker';
 import { fromISODate, toISODate } from '../../lib/date';
-import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { useStorefront } from '../../storefront/StorefrontProvider';
+import { useAuth } from '../../auth/AuthContext';
+import { flMoney } from '../../floodlit/toast';
+
+/**
+ * Saved-venue state shared by the browse cards. For a signed-in customer we
+ * fetch the saved set once and expose an optimistic toggle; for guests /
+ * non-customers `canSave` is false and the heart is hidden.
+ */
+function useSavedVenues() {
+  const { user } = useAuth();
+  const canSave = user?.role === UserRole.CUSTOMER;
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!canSave) {
+      setSaved(new Set());
+      return;
+    }
+    let alive = true;
+    api
+      .listSavedVenues()
+      .then((rows) => alive && setSaved(new Set(rows.map((r) => r.venueId))))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [canSave]);
+
+  const toggle = (venueId: string) => {
+    const wasSaved = saved.has(venueId);
+    // Optimistic: flip immediately, revert on failure.
+    setSaved((prev) => {
+      const next = new Set(prev);
+      wasSaved ? next.delete(venueId) : next.add(venueId);
+      return next;
+    });
+    const req = wasSaved ? api.unsaveVenue(venueId) : api.saveVenue(venueId);
+    req.catch(() =>
+      setSaved((prev) => {
+        const next = new Set(prev);
+        wasSaved ? next.add(venueId) : next.delete(venueId);
+        return next;
+      }),
+    );
+  };
+
+  return { canSave, saved, toggle };
+}
 
 const PRICE_TIERS = [
   { value: '', label: 'Any price' },
@@ -38,10 +86,27 @@ const PAGE_SIZE = 9;
 /** Geolocation flow state. */
 type GeoState = 'idle' | 'locating' | 'on' | 'denied' | 'unsupported' | 'error';
 
-/** Format a distance for the card badge ("2.4 km away" / "850 m away"). */
+/** Format a distance for the card badge ("2.4 km" / "850 m"). */
 function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m away`;
-  return `${km.toFixed(1)} km away`;
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1)} km`;
+}
+
+/** Pick a sport emoji for the card's image-strip tag (Floodlit design). */
+function sportEmoji(games: { name: string }[]): string {
+  const names = games.map((g) => g.name.toLowerCase());
+  const has = (...keys: string[]) => names.some((n) => keys.some((k) => n.includes(k)));
+  if (has('cricket')) return '🏏';
+  if (has('football', 'soccer', 'futsal')) return '⚽';
+  if (has('badminton')) return '🏸';
+  if (has('tennis', 'pickle')) return '🎾';
+  if (has('basket')) return '🏀';
+  if (has('volley')) return '🏐';
+  if (has('hockey')) return '🏑';
+  if (has('table tennis', 'ping')) return '🏓';
+  if (has('swim')) return '🏊';
+  if (has('squash')) return '🎯';
+  return '🏟️';
 }
 
 export function BrowsePage() {
@@ -49,6 +114,7 @@ export function BrowsePage() {
   // site, all grounds in the marketplace. The sport list stays canonical.
   const { scoped, ownerName, venues, loading, error } = useStorefront();
   const { data: games } = useLoad(() => api.discoverGames(), []);
+  const { canSave, saved, toggle: toggleSaved } = useSavedVenues();
 
   const [q, setQ] = useState('');
   const [city, setCity] = useState('');
@@ -226,156 +292,200 @@ export function BrowsePage() {
           ? "Couldn't get your location — showing all grounds. Try again in a moment."
           : null;
 
+  const venueCountLabel =
+    filtered.length === 0
+      ? ''
+      : `${filtered.length} ${filtered.length === 1 ? 'ground' : 'grounds'} ${
+          geoActive ? 'near you' : showLoadMore ? 'matched' : 'found'
+        }`;
+
   return (
-    <div className="container py-8">
-      <PageHeader
-        title={scoped && ownerName ? `Grounds by ${ownerName}` : 'Browse grounds'}
-        subtitle={
-          scoped
-            ? 'Pick a ground, choose your slot and book in seconds.'
-            : 'Find turf, courts and arenas near you — book a slot in seconds.'
-        }
-      />
+    <div className="py-6 sm:py-8">
+      {/* Heading */}
+      <h1
+        className="fl-display"
+        style={{ fontSize: 'clamp(28px,5vw,40px)', lineHeight: 1, color: 'var(--chalk)' }}
+      >
+        {scoped && ownerName ? `Grounds by ${ownerName}` : 'Find a ground'}
+      </h1>
+      <p className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
+        {scoped
+          ? 'Pick a ground, choose your slot and book in seconds.'
+          : 'Find turf, courts and arenas near you — book a slot in seconds.'}
+      </p>
 
       {scoped && (
-        <div className="-mt-2 mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <Store className="h-4 w-4 shrink-0 text-primary" />
+        <div
+          className="mt-4 flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm"
+          style={{
+            background: 'var(--surface)',
+            border: '1px dashed var(--line-strong)',
+            color: 'var(--muted)',
+          }}
+        >
+          <Store className="h-4 w-4 shrink-0" style={{ color: 'var(--brand)' }} />
           <span>
             You're viewing a single operator. Use{' '}
-            <span className="font-medium text-foreground">All grounds</span> in the menu to
-            explore the full marketplace.
+            <span style={{ color: 'var(--chalk)', fontWeight: 600 }}>All grounds</span> in the
+            menu to explore the full marketplace.
           </span>
         </div>
       )}
 
-      {/* Filter bar */}
-      <div className="sticky top-[4.5rem] z-10 mb-6 rounded-2xl border border-border bg-card/95 p-4 backdrop-blur-md">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="relative block lg:col-span-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name or city…"
-              className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background pl-9 pr-3.5 py-1 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-            />
-          </label>
-          <div className="[&_label]:mb-0">
-            <Select label="" value={city} onChange={setCity} options={cityOptions} />
-          </div>
-          <div className="[&_label]:mb-0">
-            <Select label="" value={sport} onChange={setSport} options={sportOptions} />
-          </div>
-          <div className="[&_label]:mb-0">
-            <Select label="" value={maxPrice} onChange={setMaxPrice} options={PRICE_TIERS} />
-          </div>
-          <DatePicker
-            value={fromISODate(date)}
-            onChange={(d) => setDate(toISODate(d))}
-            placeholder="Any date"
-          />
-        </div>
+      {/* Search field */}
+      <label
+        className="mt-5 flex items-center gap-2.5 rounded-xl px-3.5 py-3"
+        style={{ background: 'var(--surface)', border: '1px solid var(--line-strong)' }}
+      >
+        <Search className="h-4 w-4 shrink-0" style={{ color: 'var(--faint)' }} />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search grounds, areas, games…"
+          className="w-full min-w-0 bg-transparent text-sm outline-none"
+          style={{ color: 'var(--chalk)' }}
+        />
+      </label>
 
-        {/* Location row: "Near me" toggle + optional radius selector */}
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          {geoActive ? (
-            <>
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                onClick={clearLocation}
-                className="gap-1.5"
-              >
-                <Navigation className="h-3.5 w-3.5 fill-current" />
-                Near me — on
-              </Button>
-              <div className="w-44 [&_label]:mb-0">
-                <Select
-                  label=""
-                  value={radiusKm}
-                  onChange={setRadiusKm}
-                  options={RADIUS_OPTIONS}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground">Sorted by distance</span>
-            </>
-          ) : (
-            <Button
+      {/* Filter chips: city / sport / price / date / near-me */}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="fl-chip-select [&_label]:mb-0">
+          <Select label="" value={city} onChange={setCity} options={cityOptions} />
+        </div>
+        <div className="fl-chip-select [&_label]:mb-0">
+          <Select label="" value={sport} onChange={setSport} options={sportOptions} />
+        </div>
+        <div className="fl-chip-select [&_label]:mb-0">
+          <Select label="" value={maxPrice} onChange={setMaxPrice} options={PRICE_TIERS} />
+        </div>
+        <DatePicker
+          value={fromISODate(date)}
+          onChange={(d) => setDate(toISODate(d))}
+          placeholder="Any date"
+        />
+      </div>
+
+      {/* Location row: "Near me" chip + optional radius selector */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {geoActive ? (
+          <>
+            <button
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={requestLocation}
-              disabled={geo === 'locating'}
-              className="gap-1.5"
+              onClick={clearLocation}
+              className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-semibold"
+              style={{ background: 'var(--brand)', color: 'var(--on-brand)' }}
             >
-              {geo === 'locating' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Navigation className="h-3.5 w-3.5" />
-              )}
-              {geo === 'locating' ? 'Locating…' : 'Use my location'}
-            </Button>
-          )}
-        </div>
-
-        {geoMessage && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
-            {geoMessage}
-          </p>
-        )}
-
-        {date && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-primary" />
-            Showing availability for{' '}
-            <span className="font-medium text-foreground">{date}</span> — open a ground to pick
-            a slot.
-          </p>
+              <Navigation className="h-3.5 w-3.5 fill-current" />
+              Near me — on
+            </button>
+            <div className="fl-chip-select w-44 [&_label]:mb-0">
+              <Select
+                label=""
+                value={radiusKm}
+                onChange={setRadiusKm}
+                options={RADIUS_OPTIONS}
+              />
+            </div>
+            <span className="text-xs" style={{ color: 'var(--faint)' }}>
+              Sorted by distance
+            </span>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={requestLocation}
+            disabled={geo === 'locating'}
+            className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium disabled:opacity-60"
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--line-strong)',
+              color: 'var(--chalk)',
+            }}
+          >
+            {geo === 'locating' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Navigation className="h-3.5 w-3.5" />
+            )}
+            {geo === 'locating' ? 'Locating…' : 'Use my location'}
+          </button>
         )}
       </div>
 
-      {error && <p className="mb-4 text-sm font-medium text-destructive">{error}</p>}
+      {geoMessage && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
+          <MapPin className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--brand)' }} />
+          {geoMessage}
+        </p>
+      )}
+
+      {date && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
+          <CalendarDays className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--brand)' }} />
+          Showing availability for{' '}
+          <span style={{ color: 'var(--chalk)', fontWeight: 600 }}>{date}</span> — open a ground
+          to pick a slot.
+        </p>
+      )}
+
+      {error && (
+        <p className="mt-4 text-sm font-medium" style={{ color: 'var(--danger)' }}>
+          {error}
+        </p>
+      )}
 
       {(loading && list.length === 0) || (geoActive && geoLoading && list.length === 0) ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">Loading grounds…</p>
+        <p className="py-10 text-center text-sm" style={{ color: 'var(--muted)' }}>
+          Loading grounds…
+        </p>
       ) : filtered.length === 0 ? (
-        <EmptyState
-          title="No grounds match your filters"
-          hint={
-            geoActive
-              ? 'Try widening the distance radius, or clear your other filters.'
-              : 'Try clearing the search or picking a different city, sport or price.'
-          }
-        />
+        <div className="mt-6">
+          <EmptyState
+            title="No grounds match your filters"
+            hint={
+              geoActive
+                ? 'Try widening the distance radius, or clear your other filters.'
+                : 'Try clearing the search or picking a different city, sport or price.'
+            }
+          />
+        </div>
       ) : (
         <>
-          <p className="mb-4 text-sm text-muted-foreground">
-            {filtered.length} {filtered.length === 1 ? 'ground' : 'grounds'}{' '}
-            {showLoadMore && !geoActive ? 'matched' : 'found'}
-            {geoActive ? ' near you' : ''}
-          </p>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className="fl-mono mt-5 mb-3"
+            style={{ fontSize: 11, letterSpacing: '.06em', color: 'var(--faint)' }}
+          >
+            {venueCountLabel}
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {visible.map((v) => (
-              <VenueCard key={v.id} venue={v} dateQuery={dateQuery} showDistance={geoActive} />
+              <VenueCard
+                key={v.id}
+                venue={v}
+                dateQuery={dateQuery}
+                showDistance={geoActive}
+                canSave={canSave}
+                isSaved={saved.has(v.id)}
+                onToggleSave={toggleSaved}
+              />
             ))}
           </div>
 
           {showLoadMore && (
-            <div className="mt-8 flex justify-center">
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={loadMore}
-                disabled={geoMoreLoading}
-                className="gap-2"
-              >
-                {geoMoreLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                {geoMoreLoading ? 'Loading…' : 'Load more'}
-              </Button>
-            </div>
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={geoMoreLoading}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold disabled:opacity-60 md:mx-auto md:max-w-xs"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--line-strong)',
+                color: 'var(--muted)',
+              }}
+            >
+              {geoMoreLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {geoMoreLoading ? 'Loading…' : 'Load more grounds'}
+            </button>
           )}
         </>
       )}
@@ -387,66 +497,105 @@ function VenueCard({
   venue,
   dateQuery,
   showDistance,
+  canSave,
+  isSaved,
+  onToggleSave,
 }: {
   venue: DiscoverVenue;
   dateQuery: string;
   showDistance?: boolean;
+  canSave?: boolean;
+  isSaved?: boolean;
+  onToggleSave?: (venueId: string) => void;
 }) {
+  const gamesLabel = venue.games.map((g) => g.name).join(' · ');
+  const cityLine = [gamesLabel, venue.city].filter(Boolean).join(' · ');
+
   return (
     <Link
       to={`/venue/${venue.id}${dateQuery}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+      className="group flex flex-col overflow-hidden rounded-2xl transition-colors"
+      style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}
     >
-      <div className="relative aspect-[16/10] overflow-hidden bg-muted">
-        <ImageWithFallback
-          src={venuePhoto({ games: venue.games })}
-          fallback={FALLBACK_VENUE_PHOTO}
-          alt={venue.name}
-          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-        />
-        {showDistance && venue.distanceKm != null && (
-          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground shadow-sm">
-            <Navigation className="h-3 w-3 fill-current" />
-            {formatDistance(venue.distanceKm)}
-          </span>
-        )}
-        {venue.minPrice != null && (
-          <span className="absolute right-3 top-3 rounded-full bg-card/90 px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm backdrop-blur-sm">
-            from ₹{venue.minPrice}
-          </span>
-        )}
+      {/* Gradient image strip with sport emoji + heart */}
+      <div
+        className="flex h-24 items-end justify-between p-3"
+        style={{
+          background:
+            'linear-gradient(135deg, color-mix(in oklab, var(--brand) 40%, var(--surface-2)), var(--surface-2))',
+        }}
+      >
+        <span style={{ fontSize: 30, lineHeight: 1 }}>{sportEmoji(venue.games)}</span>
+        <div className="flex items-center gap-2">
+          {canSave && (
+            <button
+              type="button"
+              aria-label={isSaved ? 'Remove from saved' : 'Save ground'}
+              aria-pressed={isSaved}
+              onClick={(e) => {
+                // The card is a Link — don't navigate when toggling the heart.
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleSave?.(venue.id);
+              }}
+              className="grid h-8 w-8 place-items-center rounded-full"
+              style={{ background: 'color-mix(in oklab, var(--bg) 55%, transparent)' }}
+            >
+              <Heart
+                className="h-4 w-4 transition-colors"
+                style={
+                  isSaved
+                    ? { fill: 'var(--brand)', color: 'var(--brand)' }
+                    : { color: 'var(--chalk)' }
+                }
+              />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 p-5">
-        <div className="min-w-0">
-          <h3 className="font-display text-lg font-semibold leading-tight text-foreground">
+      <div className="flex flex-1 flex-col px-3.5 pb-4 pt-3">
+        <div className="flex items-baseline justify-between gap-2.5">
+          <h3
+            className="fl-display"
+            style={{ fontSize: 18, fontWeight: 700, color: 'var(--chalk)' }}
+          >
             {venue.name}
           </h3>
-          {venue.city && (
-            <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-              <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{venue.city}</span>
-            </p>
+          {showDistance && venue.distanceKm != null && (
+            <span
+              className="fl-mono whitespace-nowrap text-xs"
+              style={{ color: 'var(--faint)' }}
+            >
+              {formatDistance(venue.distanceKm)}
+            </span>
           )}
         </div>
 
-        {venue.games.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {venue.games.map((g) => (
-              <span
-                key={g.id}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-foreground"
-              >
-                <SportIcon name={g.name} className="h-3.5 w-3.5" />
-                {g.name}
-              </span>
-            ))}
-          </div>
+        {cityLine && (
+          <p className="mt-1 text-[12.5px]" style={{ color: 'var(--muted)' }}>
+            {cityLine}
+          </p>
         )}
 
-        <Button className="mt-auto w-full" tabIndex={-1}>
-          View &amp; book
-        </Button>
+        <div className="mt-auto flex items-center justify-between pt-3">
+          {venue.minPrice != null ? (
+            <div className="fl-mono text-[13px]" style={{ color: 'var(--faint)' }}>
+              from{' '}
+              <span style={{ color: 'var(--brand)', fontWeight: 600, fontSize: 16 }}>
+                {flMoney(venue.minPrice)}
+              </span>
+            </div>
+          ) : (
+            <span />
+          )}
+          <span
+            className="text-xs font-semibold"
+            style={{ color: 'var(--brand)' }}
+          >
+            View slots →
+          </span>
+        </div>
       </div>
     </Link>
   );

@@ -14,15 +14,26 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   IndianRupee,
   Loader2,
   MoreVertical,
   Plus,
+  Search,
   Swords,
   Trophy,
   Users,
 } from 'lucide-react';
-import { api, type FixtureBoard, type FixtureMatch } from '../../api/client';
+import {
+  api,
+  type FixtureBoard,
+  type FixtureMatch,
+  type OwnerTournamentDetail,
+  type OwnerTournamentListItem,
+  type OwnerTournamentStatus,
+  type TournamentParticipant,
+} from '../../api/client';
 import {
   Card,
   EmptyState,
@@ -32,6 +43,7 @@ import {
   Select,
   Stat,
   StatusPill,
+  Tabs,
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
@@ -58,6 +70,12 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetHeader,
+} from '../../components/ui/sheet';
+import {
   Table,
   TableBody,
   TableCell,
@@ -65,28 +83,6 @@ import {
   TableHeader,
   TableRow,
 } from '../../components/ui/table';
-
-/** A registered participant as surfaced on a tournament (additive API shape). */
-interface Participant {
-  id: string;
-  teamName?: string | null;
-  captainName: string;
-  captainMobile: string;
-  roster?: string[] | null;
-  paid: boolean;
-}
-
-/** A tournament row from GET /tournaments/manage/venue/:venueId. */
-interface TournamentRow {
-  id: string;
-  name: string;
-  capacity: number;
-  regType?: RegistrationType;
-  regCloseAt?: string | null;
-  refundAllowedAfterClose?: boolean;
-  participants?: Participant[];
-  _count?: { participants: number };
-}
 
 /** Human-readable labels for the registration enums (sentence case). */
 const FORMAT_LABEL: Record<TournamentFormat, string> = {
@@ -104,7 +100,7 @@ const FEE_BASIS_LABEL: Record<FeeBasis, string> = {
 };
 
 /** True once the registration window has closed (per stored regCloseAt). */
-function regClosed(t: TournamentRow): boolean {
+function regClosed(t: { regCloseAt?: string | null }): boolean {
   return !!t.regCloseAt && new Date(t.regCloseAt) < new Date();
 }
 
@@ -158,63 +154,169 @@ function NumberField({
   );
 }
 
-/** Owner: create tournaments + manage participants (PRD §4.7). */
+/** Pill label + a hidden tone token (-> common.tsx StatusPill toneFor). */
+const STATUS_META: Record<OwnerTournamentStatus, { label: string; pill: string }> = {
+  open: { label: 'Open', pill: 'active' }, // green
+  closing_soon: { label: 'Closing soon', pill: 'await' }, // amber
+  in_progress: { label: 'In progress', pill: 'new' }, // blue
+  completed: { label: 'Completed', pill: 'off' }, // muted
+};
+
+/** Lifecycle tabs, in attention order; ids map to the status filter. */
+const STATUS_TABS: { id: 'all' | OwnerTournamentStatus; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'open', label: 'Open' },
+  { id: 'closing_soon', label: 'Closing soon' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'completed', label: 'Completed' },
+];
+
+const PAGE_SIZE = 12;
+
+/** Short, friendly date (e.g. "16 Jul 2026"). */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+/** Whole-day count from now to a date (negative = past). */
+function daysUntil(iso: string): number {
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+}
+
+/** The "when it matters" line for a row/header, by lifecycle bucket. */
+function scheduleLine(t: {
+  status: OwnerTournamentStatus;
+  regCloseAt: string | null;
+  startDate: string;
+  endDate: string;
+}): string {
+  switch (t.status) {
+    case 'open':
+    case 'closing_soon': {
+      if (!t.regCloseAt) return 'Open until kickoff';
+      const d = daysUntil(t.regCloseAt);
+      if (d <= 0) return 'Closes today';
+      if (d === 1) return 'Closes tomorrow';
+      if (d <= 7) return `Closes in ${d} days`;
+      return `Closes ${fmtDate(t.regCloseAt)}`;
+    }
+    case 'in_progress':
+      return `Underway · started ${fmtDate(t.startDate)}`;
+    case 'completed':
+      return `Ended ${fmtDate(t.endDate)}`;
+  }
+}
+
+/** A slim entries/capacity meter (the list's signature read on each event). */
+function EntriesMeter({ entries, capacity }: { entries: number; capacity: number }) {
+  const pct = capacity ? Math.min(100, Math.round((entries / capacity) * 100)) : 0;
+  return (
+    <div className="min-w-[7.5rem]">
+      <div className="mb-1 text-xs tabular-nums">
+        <span className="font-medium text-foreground">{entries}</span>
+        <span className="text-muted-foreground">/{capacity} entries</span>
+      </div>
+      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted" aria-hidden>
+        <div
+          className="h-full rounded-full bg-primary transition-[width]"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Owner: tournaments master list (PRD §4.7). A scalable, paginated, filterable
+ * roster grouped by lifecycle — each row opens a slide-over drawer to manage
+ * its participants and fixtures. Creating a tournament stays here.
+ */
 export function TournamentsAdminPage() {
   const venues = useLoad(() => api.listVenues());
-  const [venueId, setVenueId] = useState('');
 
-  // Create-tournament modal (form state lives inside the dialog).
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [venueId, setVenueId] = useState(''); // '' = all venues
+  const [statusTab, setStatusTab] = useState<'all' | OwnerTournamentStatus>('all');
+  const [page, setPage] = useState(1);
+
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fixturesFor, setFixturesFor] = useState<{
+    id: string;
+    name: string;
+    format?: string;
+  } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
+  // Debounce free-text search so we don't refetch on every keystroke.
   useEffect(() => {
-    if (!venueId && venues.data?.[0]) setVenueId(venues.data[0].id);
-  }, [venues.data, venueId]);
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const tournaments = useLoad<TournamentRow[]>(
-    () => (venueId ? api.listOwnerTournaments(venueId) : Promise.resolve([])),
-    [venueId],
+  // Any filter change returns to the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [debounced, venueId, statusTab]);
+
+  const result = useLoad(
+    () =>
+      api.listOwnerTournamentsPage({
+        q: debounced || undefined,
+        venueId: venueId || undefined,
+        status: statusTab === 'all' ? undefined : statusTab,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+    [debounced, venueId, statusTab, page],
   );
 
-  // Roll-up stats for the overview strip.
-  const stats = useMemo(() => {
-    const rows = tournaments.data ?? [];
-    let entries = 0;
-    let capacityTotal = 0;
-    let openCount = 0;
-    for (const t of rows) {
-      const count = (t.participants ?? []).length || t._count?.participants || 0;
-      entries += count;
-      capacityTotal += t.capacity;
-      if (!regClosed(t)) openCount += 1;
-    }
-    const fill = capacityTotal ? Math.round((entries / capacityTotal) * 100) : 0;
-    return { total: rows.length, openCount, entries, capacityTotal, fill };
-  }, [tournaments.data]);
+  const items = result.data?.items ?? [];
+  const counts = result.data?.counts;
+  const summary = result.data?.summary;
+  const total = result.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasFilters = !!(debounced || venueId || statusTab !== 'all');
 
-  // Participant pending cancellation (drives the confirm dialog).
-  const [pending, setPending] = useState<{ t: TournamentRow; p: Participant } | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelMsg, setCancelMsg] = useState<string | null>(null);
-  const [fixturesFor, setFixturesFor] = useState<TournamentRow | null>(null);
+  const venueOpts = useMemo(
+    () => [
+      { value: '', label: 'All venues' },
+      ...(venues.data ?? []).map((v: any) => ({ value: v.id, label: v.name })),
+    ],
+    [venues.data],
+  );
 
-  const confirmCancel = async () => {
-    if (!pending) return;
-    setCancelling(true);
-    setCancelMsg(null);
-    try {
-      const res = await api.cancelTournamentRegistration(pending.t.id, pending.p.id);
-      setCancelMsg(
-        res.refunded
-          ? 'Registration cancelled and entry fee refunded.'
-          : 'Registration cancelled. No refund was issued per policy.',
-      );
-      setPending(null);
-      tournaments.reload();
-    } catch (e) {
-      setCancelMsg((e as Error).message);
-    } finally {
-      setCancelling(false);
-    }
+  const openCount = (counts?.open ?? 0) + (counts?.closing_soon ?? 0);
+  const fill =
+    summary && summary.capacity
+      ? Math.round((summary.entries / summary.capacity) * 100)
+      : 0;
+
+  // Lifecycle tabs with live counts baked into the label.
+  const tabDefs = STATUS_TABS.map((t) => ({
+    id: t.id,
+    label: (
+      <span className="inline-flex items-center gap-1.5">
+        {t.label}
+        {counts && (
+          <span className="tabular-nums text-xs opacity-60">
+            {t.id === 'all' ? counts.all : counts[t.id]}
+          </span>
+        )}
+      </span>
+    ),
+  }));
+
+  const clearFilters = () => {
+    setSearch('');
+    setVenueId('');
+    setStatusTab('all');
   };
 
   return (
@@ -223,143 +325,411 @@ export function TournamentsAdminPage() {
         title="Tournaments"
         subtitle="Set up events, take registrations, and manage entries"
         action={
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)} disabled={!(venues.data ?? []).length}>
             <Plus className="h-4 w-4" /> New tournament
           </Button>
         }
       />
 
-      {/* Overview strip — live roll-up across the selected venue. */}
+      {/* Overview strip — live roll-up across the current search/venue scope. */}
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Tournaments" value={stats.total} icon={Trophy} accent="primary" />
+        <Stat label="Tournaments" value={counts?.all ?? 0} icon={Trophy} accent="primary" />
         <Stat
           label="Open for entry"
-          value={stats.openCount}
-          sub={stats.total ? `${stats.total - stats.openCount} closed` : undefined}
+          value={openCount}
+          sub={counts ? `${counts.completed} completed` : undefined}
           icon={CalendarDays}
           accent="blue"
         />
-        <Stat label="Entries" value={stats.entries} icon={Users} accent="accent" />
+        <Stat
+          label="Entries"
+          value={summary?.entries ?? 0}
+          sub={summary ? `${summary.paidEntries} paid` : undefined}
+          icon={Users}
+          accent="accent"
+        />
         <Stat
           label="Capacity filled"
-          value={`${stats.fill}%`}
-          sub={stats.capacityTotal ? `${stats.entries} of ${stats.capacityTotal} slots` : undefined}
+          value={`${fill}%`}
+          sub={
+            summary?.capacity
+              ? `${summary.entries} of ${summary.capacity} slots`
+              : undefined
+          }
           icon={CheckCircle2}
           accent="emerald"
         />
       </div>
 
-      <Card title="Participants" subtitle="View entries, cancel and refund registrations" topAccent="accent">
-        <div className="mb-4">
-          <SectionLabel icon={Users}>Manage entries</SectionLabel>
-        </div>
+      {flash && <Msg text={flash} />}
 
-        {cancelMsg && (
-          <div className="mb-4">
-            <Msg text={cancelMsg} />
-          </div>
-        )}
-
-        {tournaments.loading ? (
-          <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading tournaments…
-          </div>
-        ) : tournaments.error ? (
-          <Msg text={tournaments.error} />
-        ) : !(tournaments.data ?? []).length ? (
-          <EmptyState
-            title="No tournaments yet"
-            hint="Use “New tournament” to set up an event and start taking registrations."
+      {/* Toolbar: lifecycle tabs + search + venue filter */}
+      <Card className="mb-4">
+        <div className="-mx-1 mb-4 overflow-x-auto px-1 pb-1">
+          <Tabs
+            tabs={tabDefs}
+            active={statusTab}
+            onChange={setStatusTab}
+            className="flex-nowrap"
           />
-        ) : (
-          <div className="space-y-5">
-            {(tournaments.data ?? []).map((t) => {
-              const participants = t.participants ?? [];
-              const count = participants.length || t._count?.participants || 0;
-              const closed = regClosed(t);
-              const fill = t.capacity ? Math.min(100, Math.round((count / t.capacity) * 100)) : 0;
-              return (
-                <div
-                  key={t.id}
-                  className="rounded-2xl border border-border bg-elevated/40 overflow-hidden"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary">
-                        <Trophy className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-display font-semibold text-sm truncate leading-tight">
-                          {t.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {t.regCloseAt
-                            ? `Registration ${closed ? 'closed' : 'closes'} ${new Date(
-                                t.regCloseAt,
-                              ).toLocaleDateString()}`
-                            : 'Open until the event starts'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="hidden sm:flex flex-col items-end">
-                        <span className="text-xs font-medium text-foreground">
-                          {count}/{t.capacity} entries
-                        </span>
-                        <span
-                          className="mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-border"
-                          aria-hidden
-                        >
-                          <span
-                            className="block h-full rounded-full bg-primary"
-                            style={{ width: `${fill}%` }}
-                          />
-                        </span>
-                      </div>
-                      <StatusPill status={closed ? 'closed' : 'open'}>
-                        {closed ? 'Registration closed' : 'Open'}
-                      </StatusPill>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setFixturesFor(t)}
-                      >
-                        <Swords className="h-4 w-4" /> Fixtures
-                      </Button>
-                    </div>
-                  </div>
+        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <label className="block flex-1 min-w-0">
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Search
+            </span>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search tournaments by name"
+                className="h-10 w-full rounded-xl border border-border bg-input-background pl-9 pr-3.5 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+              />
+            </div>
+          </label>
+          <div className="lg:w-72">
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Venue
+            </span>
+            <SearchableSelect
+              value={venueId}
+              onChange={setVenueId}
+              options={venueOpts}
+              placeholder="All venues"
+              searchPlaceholder="Find a venue"
+            />
+          </div>
+        </div>
+      </Card>
 
-                  {!participants.length ? (
-                    <p className="px-4 py-6 text-sm text-muted-foreground">
-                      No registrations yet for this tournament.
+      {/* Results */}
+      {result.loading && items.length === 0 ? (
+        <Card>
+          <div className="space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        </Card>
+      ) : result.error ? (
+        <Card>
+          <EmptyState title="Couldn't load tournaments" hint={result.error} />
+          <div className="flex justify-center pb-4">
+            <Button variant="outline" onClick={result.reload}>
+              Try again
+            </Button>
+          </div>
+        </Card>
+      ) : items.length === 0 ? (
+        <Card>
+          {hasFilters ? (
+            <>
+              <EmptyState
+                title="No tournaments match these filters"
+                hint="Try a different search, switch tabs, or clear the filters to see everything."
+              />
+              <div className="flex justify-center pb-4">
+                <Button variant="outline" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              title="No tournaments yet"
+              hint="Use “New tournament” to set up an event and start taking registrations."
+            />
+          )}
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-5">Tournament</TableHead>
+                  <TableHead className="hidden md:table-cell">Registration</TableHead>
+                  <TableHead>Entries</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-10 pr-5" aria-label="Open" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((t) => (
+                  <TournamentListRow
+                    key={t.id}
+                    t={t}
+                    onOpen={() => setSelectedId(t.id)}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination footer */}
+          <div className="flex flex-col items-center justify-between gap-3 border-t border-border px-5 py-3.5 sm:flex-row">
+            <p className="text-xs text-muted-foreground">
+              Page <span className="font-medium text-foreground">{page}</span> of{' '}
+              <span className="font-medium text-foreground">{pageCount}</span>
+              <span className="mx-1.5 opacity-40">·</span>
+              {total} {total === 1 ? 'tournament' : 'tournaments'}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || result.loading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= pageCount || result.loading}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              >
+                Next <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {selectedId && (
+        <TournamentDrawer
+          tournamentId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onChanged={result.reload}
+          onOpenFixtures={setFixturesFor}
+        />
+      )}
+
+      <CreateTournamentDialog
+        open={createOpen}
+        venues={venues.data ?? []}
+        defaultVenueId={venueId || (venues.data ?? [])[0]?.id || ''}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false);
+          setFlash('Tournament created.');
+          result.reload();
+        }}
+      />
+
+      {fixturesFor && (
+        <FixturesDialog
+          tournament={fixturesFor}
+          onClose={() => setFixturesFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* One tournament row — whole row opens the detail drawer              */
+/* ------------------------------------------------------------------ */
+
+function TournamentListRow({
+  t,
+  onOpen,
+}: {
+  t: OwnerTournamentListItem;
+  onOpen: () => void;
+}) {
+  const meta = STATUS_META[t.status];
+  const sub = [t.venueName, FORMAT_LABEL[t.format]].filter(Boolean).join(' · ');
+  return (
+    <TableRow
+      role="link"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className="group cursor-pointer outline-none transition-colors hover:bg-primary/[0.04] focus-visible:bg-primary/[0.06]"
+    >
+      <TableCell className="pl-5">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary">
+            <Trophy className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <span className="block truncate font-medium text-foreground">{t.name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{sub}</span>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell
+        className={
+          'hidden md:table-cell text-sm ' +
+          (t.status === 'closing_soon' ? 'font-medium text-amber-500' : 'text-muted-foreground')
+        }
+      >
+        {scheduleLine(t)}
+      </TableCell>
+      <TableCell>
+        <EntriesMeter entries={t.entries} capacity={t.capacity} />
+      </TableCell>
+      <TableCell>
+        <StatusPill status={meta.pill}>{meta.label}</StatusPill>
+      </TableCell>
+      <TableCell className="pr-5 text-right">
+        <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Detail drawer — participants + cancel/refund, fetched on demand     */
+/* ------------------------------------------------------------------ */
+
+function TournamentDrawer({
+  tournamentId,
+  onClose,
+  onChanged,
+  onOpenFixtures,
+}: {
+  tournamentId: string;
+  onClose: () => void;
+  onChanged: () => void;
+  onOpenFixtures: (t: { id: string; name: string; format?: string }) => void;
+}) {
+  const detail = useLoad<OwnerTournamentDetail>(
+    () => api.getOwnerTournament(tournamentId),
+    [tournamentId],
+  );
+  const [pending, setPending] = useState<TournamentParticipant | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const t = detail.data;
+
+  const confirmCancel = async () => {
+    if (!pending || !t) return;
+    setCancelling(true);
+    setMsg(null);
+    try {
+      const res = await api.cancelTournamentRegistration(t.id, pending.id);
+      setMsg(
+        res.refunded
+          ? 'Registration cancelled and entry fee refunded.'
+          : 'Registration cancelled. No refund was issued per policy.',
+      );
+      setPending(null);
+      detail.reload();
+      onChanged();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const closed = t ? regClosed(t) : false;
+
+  return (
+    <>
+      <Sheet open onOpenChange={(o) => !o && !cancelling && onClose()}>
+        <SheetContent>
+          {detail.loading && !t ? (
+            <SheetBody>
+              <Skeleton className="mb-3 h-7 w-2/3" />
+              <Skeleton className="mb-6 h-4 w-1/2" />
+              <Skeleton className="h-40 w-full" />
+            </SheetBody>
+          ) : detail.error ? (
+            <SheetBody>
+              <Msg text={detail.error} />
+            </SheetBody>
+          ) : t ? (
+            <>
+              <SheetHeader>
+                <div className="flex items-start gap-3 pr-8">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary">
+                    <Trophy className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-display text-lg font-semibold leading-tight">
+                      {t.name}
                     </p>
-                  ) : (
+                    <p className="truncate text-sm text-muted-foreground">
+                      {[t.venueName, FORMAT_LABEL[t.format]].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <StatusPill status={STATUS_META[t.status].pill}>
+                    {STATUS_META[t.status].label}
+                  </StatusPill>
+                  <span className="text-xs text-muted-foreground">{scheduleLine(t)}</span>
+                  <div className="ml-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        onOpenFixtures({ id: t.id, name: t.name, format: t.format })
+                      }
+                    >
+                      <Swords className="h-4 w-4" /> Fixtures
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <EntriesMeter entries={t.entries} capacity={t.capacity} />
+                </div>
+              </SheetHeader>
+
+              <SheetBody>
+                <div className="mb-3">
+                  <SectionLabel icon={Users}>Participants</SectionLabel>
+                </div>
+
+                {msg && (
+                  <div className="mb-4">
+                    <Msg text={msg} />
+                  </div>
+                )}
+
+                {!t.participants.length ? (
+                  <EmptyState
+                    title="No registrations yet"
+                    hint="Entries will appear here as participants register and pay."
+                  />
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-border">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{t.regType === RegistrationType.TEAM ? 'Team' : 'Player'}</TableHead>
-                          <TableHead>Captain</TableHead>
+                          <TableHead>
+                            {t.regType === RegistrationType.TEAM ? 'Team' : 'Player'}
+                          </TableHead>
                           <TableHead className="hidden sm:table-cell">Contact</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead className="text-right">Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {participants.map((p) => {
+                        {t.participants.map((p) => {
                           const cancelled = !p.paid;
                           return (
                             <TableRow key={p.id}>
                               <TableCell className="font-medium">
                                 {p.teamName || p.captainName}
-                                {p.roster && p.roster.length > 0 && (
-                                  <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                                    {p.roster.join(', ')}
-                                  </span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {p.captainName}
+                                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                                  {p.roster && p.roster.length > 0
+                                    ? p.roster.join(', ')
+                                    : `Captain ${p.captainName}`}
+                                </span>
                               </TableCell>
                               <TableCell className="hidden sm:table-cell text-muted-foreground">
                                 {p.captainMobile}
@@ -385,8 +755,8 @@ export function TournamentsAdminPage() {
                                       variant="destructive"
                                       disabled={cancelled}
                                       onSelect={() => {
-                                        setCancelMsg(null);
-                                        setPending({ t, p });
+                                        setMsg(null);
+                                        setPending(p);
                                       }}
                                     >
                                       Cancel &amp; refund
@@ -399,15 +769,18 @@ export function TournamentsAdminPage() {
                         })}
                       </TableBody>
                     </Table>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+                  </div>
+                )}
+              </SheetBody>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
-      <Dialog open={!!pending} onOpenChange={(o) => !o && !cancelling && setPending(null)}>
+      <Dialog
+        open={!!pending}
+        onOpenChange={(o) => !o && !cancelling && setPending(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -415,14 +788,13 @@ export function TournamentsAdminPage() {
               Cancel registration?
             </DialogTitle>
             <DialogDescription>
-              {pending && (
+              {pending && t && (
                 <>
                   This cancels{' '}
                   <span className="font-medium text-foreground">
-                    {pending.p.teamName || pending.p.captainName}
+                    {pending.teamName || pending.captainName}
                   </span>{' '}
-                  from{' '}
-                  <span className="font-medium text-foreground">{pending.t.name}</span>.
+                  from <span className="font-medium text-foreground">{t.name}</span>.
                 </>
               )}
             </DialogDescription>
@@ -431,27 +803,23 @@ export function TournamentsAdminPage() {
           <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/50 px-3.5 py-2.5 text-sm text-muted-foreground">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <span>
-              {pending && regClosed(pending.t) && !pending.t.refundAllowedAfterClose ? (
+              {t && closed && !t.refundAllowedAfterClose ? (
                 <>
                   Registration has closed for this tournament, so the entry fee will{' '}
-                  <span className="font-medium text-foreground">not be refunded</span>.
-                  The participant will still be removed.
+                  <span className="font-medium text-foreground">not be refunded</span>. The
+                  participant will still be removed.
                 </>
               ) : (
                 <>
-                  The entry fee will be refunded to the participant where applicable. Refunds may
-                  be closed once registration has closed.
+                  The entry fee will be refunded to the participant where applicable. Refunds
+                  may be closed once registration has closed.
                 </>
               )}
             </span>
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setPending(null)}
-              disabled={cancelling}
-            >
+            <Button variant="outline" onClick={() => setPending(null)} disabled={cancelling}>
               Keep registration
             </Button>
             <Button variant="destructive" onClick={confirmCancel} disabled={cancelling}>
@@ -461,25 +829,7 @@ export function TournamentsAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <CreateTournamentDialog
-        open={createOpen}
-        venues={venues.data ?? []}
-        defaultVenueId={venueId}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false);
-          tournaments.reload();
-        }}
-      />
-
-      {fixturesFor && (
-        <FixturesDialog
-          tournament={fixturesFor}
-          onClose={() => setFixturesFor(null)}
-        />
-      )}
-    </div>
+    </>
   );
 }
 

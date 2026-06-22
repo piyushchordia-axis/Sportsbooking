@@ -74,14 +74,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sportsbooking/shared build
-      - run: pnpm --filter @sportsbooking/api db:generate
-      # Schema is managed via `prisma db push` (no migration history yet).
-      - run: pnpm --filter @sportsbooking/api exec prisma db push --skip-generate
-      - run: psql "$DATABASE_URL" -f apps/api/prisma/sql/rls.sql
+      # Drizzle (not Prisma): db:push applies the schema, the RLS GUC functions +
+      # policies, and the restricted runtime role in one step.
+      - run: pnpm --filter @sportsbooking/api db:push
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
-      # playwright.config.ts boots the full stack (pnpm dev) and waits for :5173.
+      # playwright.config.ts boots the full stack (pnpm dev: API :3001 + web) and
+      # waits for E2E_BASE_URL. The dev Vite port is 5000.
       - run: pnpm test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:5000
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

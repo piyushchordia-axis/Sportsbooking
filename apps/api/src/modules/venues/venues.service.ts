@@ -906,7 +906,18 @@ export class VenuesService {
     });
   }
 
-  /** Block a range of slots for maintenance/private use (PRD §4.3). */
+  /**
+   * Block a range of slots for maintenance/private use (PRD §4.3).
+   *
+   * Without `dto.recurrence`: blocks the single [start,end] window, granularity-
+   * sliced; any clash aborts with a 409 (behaviour unchanged).
+   *
+   * With `dto.recurrence` (weekly): the window is repeated for `count` total
+   * weeks (including the first), shifting +7 days per occurrence via luxon so
+   * wall-clock time survives DST. Mirroring booking recurrence, an occurrence
+   * whose slots already exist is SKIPPED (recorded) rather than aborting the
+   * whole call. Returns a summary of how many slots were blocked.
+   */
   async block(user: RequestUser, dto: BlockSlotsDto) {
     const ownerId = this.ownerId(user);
     return this.db.withTenant(async (tx) => {
@@ -923,38 +934,174 @@ export class VenuesService {
       if (!unit) throw new NotFoundException('Unit not found');
       const granularity = unit.gameCatalogue.slotGranularityMin;
 
-      let cursor = DateTime.fromISO(dto.start);
+      const start = DateTime.fromISO(dto.start);
       const end = DateTime.fromISO(dto.end);
-      const created: string[] = [];
-      while (cursor < end) {
-        const next = cursor.plus({ minutes: granularity });
-        try {
-          const slot = (
-            await tx
-              .insert(slots)
-              .values({
-                id: randomUUID(),
-                unitId: dto.unitId,
-                ownerId,
-                startsAt: cursor.toJSDate(),
-                endsAt: next.toJSDate(),
-                status: 'blocked',
-                blockReason: dto.reason,
-              })
-              .returning()
-          )[0];
-          created.push(slot.id);
-        } catch (err) {
-          if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+
+      // No recurrence → single window; a clash aborts (unchanged behaviour).
+      if (!dto.recurrence) {
+        const created = await this.blockWindow(
+          tx,
+          dto.unitId,
+          ownerId,
+          start,
+          end,
+          granularity,
+          dto.reason,
+          true,
+        );
+        return { blocked: created };
+      }
+
+      // Recurring weekly: repeat the window for `count` total weeks. Each
+      // occurrence is best-effort — a clashing week is skipped (recorded) so
+      // one collision doesn't abort the rest of the series.
+      let blocked = 0;
+      const skipped: { start: string; reason: string }[] = [];
+      for (let week = 0; week < dto.recurrence.count; week++) {
+        const wStart = start.plus({ weeks: week });
+        const wEnd = end.plus({ weeks: week });
+
+        const conflict = await this.findBlockConflict(
+          tx,
+          dto.unitId,
+          wStart,
+          wEnd,
+          granularity,
+        );
+        if (conflict) {
+          skipped.push({ start: wStart.toISO()!, reason: conflict });
+          continue;
+        }
+
+        blocked += await this.blockWindow(
+          tx,
+          dto.unitId,
+          ownerId,
+          wStart,
+          wEnd,
+          granularity,
+          dto.reason,
+          false,
+        );
+      }
+
+      return { blocked, weeks: dto.recurrence.count, skipped };
+    });
+  }
+
+  /**
+   * Insert blocked slot rows for a single [start,end) window, sliced by
+   * granularity. When `throwOnConflict` is true a unique violation surfaces as a
+   * 409 (single-window path); when false the caller has pre-checked conflicts
+   * so a stray collision is swallowed (recurring path, defensive). Returns the
+   * number of slots created.
+   */
+  private async blockWindow(
+    tx: DbTx,
+    unitId: string,
+    ownerId: string,
+    start: DateTime,
+    end: DateTime,
+    granularity: number,
+    reason: string | undefined,
+    throwOnConflict: boolean,
+  ): Promise<number> {
+    let cursor = start;
+    let created = 0;
+    while (cursor < end) {
+      const next = cursor.plus({ minutes: granularity });
+      try {
+        await tx.insert(slots).values({
+          id: randomUUID(),
+          unitId,
+          ownerId,
+          startsAt: cursor.toJSDate(),
+          endsAt: next.toJSDate(),
+          status: 'blocked',
+          blockReason: reason,
+        });
+        created++;
+      } catch (err) {
+        if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+          if (throwOnConflict) {
             throw new ConflictException(
               `Slot at ${cursor.toISO()} is already booked/blocked`,
             );
           }
+          // Recurring path: pre-checked, so just skip this stray collision.
+        } else {
           throw err;
         }
-        cursor = next;
       }
-      return { blocked: created.length };
+      cursor = next;
+    }
+    return created;
+  }
+
+  /**
+   * Pre-check whether any slice of a [start,end) window already has a Slot row
+   * (booked/blocked) for the unit. Used by the recurring block path to SKIP a
+   * clashing week instead of letting an insert throw a unique violation — which
+   * in Postgres would abort the whole transaction. Returns a human-readable
+   * reason for the first clash, or null if the window is entirely free.
+   */
+  private async findBlockConflict(
+    tx: DbTx,
+    unitId: string,
+    start: DateTime,
+    end: DateTime,
+    granularity: number,
+  ): Promise<string | null> {
+    const starts: Date[] = [];
+    let cursor = start;
+    while (cursor < end) {
+      starts.push(cursor.toJSDate());
+      cursor = cursor.plus({ minutes: granularity });
+    }
+    if (starts.length === 0) return null;
+
+    const existing = await tx.query.slots.findFirst({
+      where: and(
+        eq(slots.unitId, unitId),
+        inArray(slots.startsAt, starts),
+      ),
+    });
+    if (!existing) return null;
+    return existing.status === 'blocked'
+      ? 'Slot is blocked for this time.'
+      : 'Slot is already booked for this time.';
+  }
+
+  /**
+   * Read a unit's stored pricing grid for the editor to preload (PRD §4.2).
+   * Owner/staff-scoped with the same ownership check as setPricing(). Returns
+   * the rules' editable fields (id, dayType, timeBand, dateOverride,
+   * minDuration, price).
+   */
+  async getPricing(user: RequestUser, unitId: string) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone,
+      // which is bypassed when the app connects as a superuser (SEC-6).
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
+      });
+      if (!unit) throw new NotFoundException('Unit not found');
+
+      const rules = await tx.query.pricingRules.findMany({
+        where: eq(pricingRules.unitId, unitId),
+      });
+      return rules.map((r) => ({
+        id: r.id,
+        dayType: r.dayType,
+        timeBand: r.timeBand,
+        dateOverride: r.dateOverride,
+        minDuration: r.minDuration,
+        price: num(r.price),
+      }));
     });
   }
 }

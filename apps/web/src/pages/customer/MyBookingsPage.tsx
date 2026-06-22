@@ -1,25 +1,8 @@
 import { BookingStatus, PaymentStatus, PayMode, SkillLevel } from '@sportsbooking/shared';
-import { CalendarClock, Check, MapPin, Minus, Plus, Users, XCircle } from 'lucide-react';
+import { Check, Minus, Plus, Users } from 'lucide-react';
 import { useState } from 'react';
 import { api, CustomerBooking } from '../../api/client';
-import {
-  Card,
-  EmptyState,
-  Msg,
-  PageHeader,
-  StatusPill,
-  useLoad,
-} from '../../components/common';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '../../components/ui/table';
-import { Skeleton } from '../../components/ui/skeleton';
-import { Button } from '../../components/ui/button';
+import { Msg, useLoad } from '../../components/common';
 import {
   Dialog,
   DialogContent,
@@ -35,10 +18,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
+import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 
 const STATUS_LABEL: Record<BookingStatus, string> = {
   [BookingStatus.CONFIRMED]: 'Confirmed',
-  [BookingStatus.COMPLETED]: 'Completed',
+  [BookingStatus.COMPLETED]: 'Played',
   [BookingStatus.NO_SHOW]: 'No-show',
   [BookingStatus.CANCELLED]: 'Cancelled',
 };
@@ -57,6 +41,34 @@ const PAY_MODE_LABEL: Record<PayMode, string> = {
   [PayMode.AT_VENUE]: 'Pay at venue',
 };
 
+/**
+ * Pill colours per booking status, following the Floodlit design:
+ * confirmed/played → brand, awaiting → amber, no-show/cancelled → danger.
+ */
+function statusStyle(b: CustomerBooking): { bg: string; color: string } {
+  switch (b.status) {
+    case BookingStatus.CONFIRMED:
+    case BookingStatus.COMPLETED:
+      return { bg: 'var(--brand)', color: 'var(--on-brand)' };
+    case BookingStatus.NO_SHOW:
+    case BookingStatus.CANCELLED:
+      return {
+        bg: 'color-mix(in oklab, var(--danger) 16%, var(--surface))',
+        color: 'var(--danger)',
+      };
+    default:
+      return { bg: 'var(--surface-2)', color: 'var(--chalk)' };
+  }
+}
+
+/** Awaiting-payment bookings get the warm amber accent on their pill. */
+function isAwaitingPayment(b: CustomerBooking): boolean {
+  return (
+    b.paymentStatus === PaymentStatus.PENDING ||
+    b.paymentStatus === PaymentStatus.AWAITING_VENUE_SETTLEMENT
+  );
+}
+
 /** Skill levels in ascending order, used for the min/max range pickers. */
 const SKILL_ORDER: SkillLevel[] = [
   SkillLevel.BEGINNER,
@@ -74,13 +86,6 @@ const SKILL_LABEL: Record<SkillLevel, string> = {
 
 const MIN_SPOTS = 1;
 const MAX_SPOTS = 12;
-
-const inr = (n: number) =>
-  new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n);
 
 /** Date + time range for a booking's slots (first slot start → last slot end). */
 function whenLabel(b: CustomerBooking): { date: string; time: string } {
@@ -112,6 +117,16 @@ function whenLabel(b: CustomerBooking): { date: string; time: string } {
 /** Distinct court/unit names for a booking. */
 const courtLabel = (b: CustomerBooking) =>
   [...new Set(b.slots.map((s) => s.unitName))].join(', ') || '—';
+
+/**
+ * A booking is "upcoming" if it's confirmed and its first slot is in the future;
+ * everything else (completed, no-show, cancelled, or past confirmed) is "past".
+ */
+function isUpcoming(b: CustomerBooking): boolean {
+  if (b.status !== BookingStatus.CONFIRMED) return false;
+  if (b.slots.length === 0) return true;
+  return new Date(b.slots[0].start).getTime() > Date.now();
+}
 
 /**
  * A booking can be cancelled while it's still CONFIRMED and its first slot is
@@ -152,11 +167,12 @@ export function MyBookingsPage() {
     () => api.myBookings(),
     [],
   );
+  const { flash } = useFloodlitToast();
 
-  const [target, setTarget] = useState<CustomerBooking | null>(null);
-  const [cancelling, setCancelling] = useState(false);
+  // Which booking has its inline cancel-policy panel expanded.
+  const [policyOpen, setPolicyOpen] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
 
   // Host-an-open-match dialog state.
   const [hostTarget, setHostTarget] = useState<CustomerBooking | null>(null);
@@ -169,14 +185,7 @@ export function MyBookingsPage() {
   // immediately (the bookings feed doesn't carry an "is hosted" flag).
   const [hostedIds, setHostedIds] = useState<Set<string>>(new Set());
 
-  const closeDialog = () => {
-    if (cancelling) return;
-    setTarget(null);
-    setCancelError(null);
-  };
-
   const openHost = (b: CustomerBooking) => {
-    setResult(null);
     setHostError(null);
     setOpenSpots(1);
     setSkillMin(SkillLevel.BEGINNER);
@@ -212,7 +221,7 @@ export function MyBookingsPage() {
         skillMax,
       });
       const spotsLabel = openSpots === 1 ? '1 spot' : `${openSpots} spots`;
-      setResult(`Match opened — ${spotsLabel} now visible to nearby players.`);
+      flash(`Match opened — ${spotsLabel} now visible to nearby players.`);
       setHostedIds((prev) => new Set(prev).add(hostTarget.id));
       setHostTarget(null);
       reload();
@@ -223,187 +232,116 @@ export function MyBookingsPage() {
     }
   };
 
-  const confirmCancel = async () => {
-    if (!target) return;
-    setCancelling(true);
+  const confirmCancel = async (b: CustomerBooking) => {
+    setCancellingId(b.id);
     setCancelError(null);
     try {
-      await api.cancelBooking(target.id);
+      await api.cancelBooking(b.id);
       const message =
-        target.payMode === PayMode.PREPAY &&
-        target.paymentStatus === PaymentStatus.PAID
+        b.payMode === PayMode.PREPAY &&
+        b.paymentStatus === PaymentStatus.PAID
           ? 'Booking cancelled. Any eligible refund will be credited per the venue’s cancellation policy.'
           : 'Booking cancelled.';
-      setResult(message);
-      setTarget(null);
+      flash(message);
+      setPolicyOpen(null);
       reload();
     } catch (e) {
       setCancelError((e as Error).message);
     } finally {
-      setCancelling(false);
+      setCancellingId(null);
     }
   };
 
   const bookings = data ?? [];
+  const upcoming = bookings.filter(isUpcoming);
+  const past = bookings.filter((b) => !isUpcoming(b));
 
   return (
-    <div className="container">
-      <PageHeader
-        title="My bookings"
-        subtitle="Your upcoming and past court bookings"
-        badge={
-          !loading && bookings.length > 0 ? (
-            <StatusPill status="active">{bookings.length} total</StatusPill>
-          ) : undefined
-        }
-      />
+    <div className="space-y-1" style={{ padding: '4px 2px 24px' }}>
+      <h1 className="fl-display" style={{ fontSize: 30, lineHeight: 1.05 }}>
+        My bookings
+      </h1>
+      <p className="text-sm" style={{ color: 'var(--muted)', marginTop: 2 }}>
+        Your upcoming and past court bookings
+      </p>
 
-      <Card title="Booking history" topAccent="primary">
-        <Msg text={error} />
-        {result ? (
-          <div className="mb-3 rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground">
-            {result}
+      <Msg text={error} />
+
+      {loading ? (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 mt-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                height: 120,
+                borderRadius: 14,
+                background: 'var(--surface)',
+                border: '1px solid var(--line)',
+                opacity: 0.6,
+              }}
+            />
+          ))}
+        </div>
+      ) : bookings.length === 0 ? (
+        <div
+          className="text-center mt-5 mx-auto"
+          style={{
+            maxWidth: 460,
+            padding: '34px 22px',
+            background: 'var(--surface)',
+            border: '1px dashed var(--line-strong)',
+            borderRadius: 16,
+          }}
+        >
+          <div style={{ fontSize: 30 }}>📋</div>
+          <div
+            className="fl-display"
+            style={{ fontSize: 18, marginTop: 10 }}
+          >
+            No bookings yet
           </div>
-        ) : null}
-
-        {loading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full rounded-xl" />
-            ))}
+          <div
+            className="text-sm"
+            style={{ color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}
+          >
+            Once you book a court it will show up here with its date, status and
+            payment.
           </div>
-        ) : bookings.length === 0 ? (
-          <EmptyState
-            title="No bookings yet"
-            hint="Once you book a court it will show up here with its date, status and payment."
-          />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead>Ground</TableHead>
-                <TableHead>Court</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Payment</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {bookings.map((b) => {
-                const when = whenLabel(b);
-                return (
-                  <TableRow key={b.id}>
-                    <TableCell className="font-medium">
-                      <span className="inline-flex items-center gap-2">
-                        <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                        {when.date}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{when.time}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-2">
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                        {b.venueName}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {courtLabel(b)}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums">
-                      {inr(b.total)}
-                    </TableCell>
-                    <TableCell>
-                      <StatusPill status={b.status}>
-                        {STATUS_LABEL[b.status] ?? b.status}
-                      </StatusPill>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-0.5">
-                        <StatusPill status={b.paymentStatus}>
-                          {PAYMENT_LABEL[b.paymentStatus] ?? b.paymentStatus}
-                        </StatusPill>
-                        <span className="text-[11px] text-muted-foreground">
-                          {PAY_MODE_LABEL[b.payMode] ?? b.payMode}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isCancellable(b) || isHostable(b) ? (
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {isHostable(b) &&
-                            (hostedIds.has(b.id) ? (
-                              <Button variant="ghost" size="sm" disabled>
-                                <Check className="h-4 w-4" />
-                                Match open
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openHost(b)}
-                              >
-                                <Users className="h-4 w-4" />
-                                Host an open match
-                              </Button>
-                            ))}
-                          {isCancellable(b) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setResult(null);
-                                setCancelError(null);
-                                setTarget(b);
-                              }}
-                            >
-                              <XCircle className="h-4 w-4" />
-                              Cancel booking
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
-
-      <Dialog open={target != null} onOpenChange={(open) => !open && closeDialog()}>
-        <DialogContent showCloseButton={!cancelling}>
-          <DialogHeader>
-            <DialogTitle>Cancel this booking?</DialogTitle>
-            <DialogDescription>
-              {target ? (
-                <>
-                  {whenLabel(target).date} · {whenLabel(target).time} ·{' '}
-                  {target.venueName}. {refundOutcome(target)}
-                </>
-              ) : null}
-            </DialogDescription>
-          </DialogHeader>
-          <Msg text={cancelError} />
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={cancelling}>
-              Keep booking
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmCancel}
-              disabled={cancelling}
-            >
-              {cancelling ? 'Cancelling…' : 'Cancel booking'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      ) : (
+        <>
+          {upcoming.length > 0 && (
+            <Section
+              title="Upcoming"
+              bookings={upcoming}
+              dim={false}
+              policyOpen={policyOpen}
+              setPolicyOpen={setPolicyOpen}
+              cancellingId={cancellingId}
+              cancelError={cancelError}
+              setCancelError={setCancelError}
+              confirmCancel={confirmCancel}
+              openHost={openHost}
+              hostedIds={hostedIds}
+            />
+          )}
+          {past.length > 0 && (
+            <Section
+              title="Past"
+              bookings={past}
+              dim
+              policyOpen={policyOpen}
+              setPolicyOpen={setPolicyOpen}
+              cancellingId={cancellingId}
+              cancelError={cancelError}
+              setCancelError={setCancelError}
+              confirmCancel={confirmCancel}
+              openHost={openHost}
+              hostedIds={hostedIds}
+            />
+          )}
+        </>
+      )}
 
       <Dialog
         open={hostTarget != null}
@@ -429,18 +367,22 @@ export function MyBookingsPage() {
                 Open spots
               </span>
               <div className="flex items-center gap-3">
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="icon"
                   aria-label="Remove a spot"
                   disabled={hosting || openSpots <= MIN_SPOTS}
                   onClick={() =>
                     setOpenSpots((n) => Math.max(MIN_SPOTS, n - 1))
                   }
+                  className="grid h-10 w-10 place-items-center rounded-xl disabled:opacity-40"
+                  style={{
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--line-strong)',
+                    color: 'var(--chalk)',
+                  }}
                 >
                   <Minus className="h-4 w-4" />
-                </Button>
+                </button>
                 <input
                   type="number"
                   inputMode="numeric"
@@ -453,21 +395,30 @@ export function MyBookingsPage() {
                     if (Number.isNaN(n)) return;
                     setOpenSpots(Math.min(MAX_SPOTS, Math.max(MIN_SPOTS, n)));
                   }}
-                  className="h-10 w-20 rounded-xl border border-border bg-input-background px-3 text-center text-sm font-semibold tabular-nums text-foreground outline-none transition-[color,box-shadow] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  className="fl-mono h-10 w-20 rounded-xl px-3 text-center text-sm font-semibold outline-none"
+                  style={{
+                    background: 'var(--bg)',
+                    border: '1px solid var(--line-strong)',
+                    color: 'var(--chalk)',
+                  }}
                 />
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="icon"
                   aria-label="Add a spot"
                   disabled={hosting || openSpots >= MAX_SPOTS}
                   onClick={() =>
                     setOpenSpots((n) => Math.min(MAX_SPOTS, n + 1))
                   }
+                  className="grid h-10 w-10 place-items-center rounded-xl disabled:opacity-40"
+                  style={{
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--line-strong)',
+                    color: 'var(--chalk)',
+                  }}
                 >
                   <Plus className="h-4 w-4" />
-                </Button>
-                <span className="text-sm text-muted-foreground">
+                </button>
+                <span className="text-sm" style={{ color: 'var(--muted)' }}>
                   player{openSpots === 1 ? '' : 's'} can join
                 </span>
               </div>
@@ -521,15 +472,251 @@ export function MyBookingsPage() {
 
           <Msg text={hostError} />
           <DialogFooter>
-            <Button variant="outline" onClick={closeHost} disabled={hosting}>
+            <button
+              onClick={closeHost}
+              disabled={hosting}
+              className="rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--line-strong)',
+                color: 'var(--muted)',
+              }}
+            >
               Cancel
-            </Button>
-            <Button onClick={confirmHost} disabled={hosting}>
+            </button>
+            <button
+              onClick={confirmHost}
+              disabled={hosting}
+              className="rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
+              style={{ background: 'var(--brand)', color: 'var(--on-brand)' }}
+            >
               {hosting ? 'Opening match…' : 'Open match'}
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+interface SectionProps {
+  title: string;
+  bookings: CustomerBooking[];
+  dim: boolean;
+  policyOpen: string | null;
+  setPolicyOpen: (id: string | null) => void;
+  cancellingId: string | null;
+  cancelError: string | null;
+  setCancelError: (s: string | null) => void;
+  confirmCancel: (b: CustomerBooking) => void;
+  openHost: (b: CustomerBooking) => void;
+  hostedIds: Set<string>;
+}
+
+function Section({
+  title,
+  bookings,
+  dim,
+  policyOpen,
+  setPolicyOpen,
+  cancellingId,
+  cancelError,
+  setCancelError,
+  confirmCancel,
+  openHost,
+  hostedIds,
+}: SectionProps) {
+  return (
+    <div>
+      <div
+        className="fl-mono"
+        style={{
+          fontSize: 11,
+          letterSpacing: '.1em',
+          color: 'var(--faint)',
+          margin: '24px 0 10px',
+        }}
+      >
+        {title}
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {bookings.map((b) => {
+          const when = whenLabel(b);
+          const pill = isAwaitingPayment(b)
+            ? { bg: 'var(--amber)', color: 'var(--on-amber)' }
+            : statusStyle(b);
+          const expanded = policyOpen === b.id;
+          const busy = cancellingId === b.id;
+          return (
+            <div
+              key={b.id}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--line)',
+                borderRadius: 14,
+                padding: 15,
+                opacity: dim ? 0.85 : 1,
+              }}
+            >
+              <div className="flex items-start justify-between gap-2.5">
+                <div>
+                  <div className="fl-display" style={{ fontSize: 17 }}>
+                    {b.venueName}
+                  </div>
+                  <div
+                    className="text-xs"
+                    style={{ color: 'var(--muted)', marginTop: 3 }}
+                  >
+                    {courtLabel(b)} · {when.date} · {when.time}
+                  </div>
+                </div>
+                <span
+                  className="whitespace-nowrap"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: '5px 9px',
+                    borderRadius: 7,
+                    background: pill.bg,
+                    color: pill.color,
+                  }}
+                >
+                  {isAwaitingPayment(b)
+                    ? PAYMENT_LABEL[b.paymentStatus]
+                    : STATUS_LABEL[b.status] ?? b.status}
+                </span>
+              </div>
+
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: '1px solid var(--line)',
+                }}
+              >
+                <span className="fl-mono" style={{ fontSize: 13 }}>
+                  {flMoney(b.total)} · {PAY_MODE_LABEL[b.payMode] ?? b.payMode}
+                </span>
+                <div className="flex gap-2">
+                  {isHostable(b) &&
+                    (hostedIds.has(b.id) ? (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: '7px 11px',
+                          borderRadius: 8,
+                          color: 'var(--muted)',
+                        }}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Match open
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => openHost(b)}
+                        className="inline-flex items-center gap-1"
+                        style={{
+                          cursor: 'pointer',
+                          background: 'transparent',
+                          border: '1px solid var(--line-strong)',
+                          color: 'var(--muted)',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: '7px 11px',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        Host
+                      </button>
+                    ))}
+                  {isCancellable(b) && (
+                    <button
+                      onClick={() => {
+                        setCancelError(null);
+                        setPolicyOpen(expanded ? null : b.id);
+                      }}
+                      style={{
+                        cursor: 'pointer',
+                        background: 'transparent',
+                        border: '1px solid var(--line-strong)',
+                        color: 'var(--muted)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: '7px 13px',
+                        borderRadius: 8,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {expanded && isCancellable(b) && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '11px 13px',
+                    borderRadius: 10,
+                    background: 'var(--bg)',
+                    border: '1px solid var(--line)',
+                    fontSize: 12,
+                    color: 'var(--muted)',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {refundOutcome(b)}
+                  {cancelError ? (
+                    <div style={{ marginTop: 8 }}>
+                      <Msg text={cancelError} />
+                    </div>
+                  ) : null}
+                  <div className="flex gap-2" style={{ marginTop: 10 }}>
+                    <button
+                      onClick={() => confirmCancel(b)}
+                      disabled={busy}
+                      style={{
+                        cursor: 'pointer',
+                        flex: 1,
+                        background: 'var(--danger)',
+                        color: '#fff',
+                        border: 'none',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        padding: 9,
+                        borderRadius: 8,
+                        opacity: busy ? 0.6 : 1,
+                      }}
+                    >
+                      {busy ? 'Cancelling…' : 'Confirm cancel'}
+                    </button>
+                    <button
+                      onClick={() => setPolicyOpen(null)}
+                      disabled={busy}
+                      style={{
+                        cursor: 'pointer',
+                        flex: 1,
+                        background: 'transparent',
+                        color: 'var(--muted)',
+                        border: '1px solid var(--line-strong)',
+                        fontSize: 12,
+                        padding: 9,
+                        borderRadius: 8,
+                      }}
+                    >
+                      Keep it
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

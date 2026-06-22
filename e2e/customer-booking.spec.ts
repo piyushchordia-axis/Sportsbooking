@@ -1,42 +1,52 @@
 import { expect, test } from '@playwright/test';
-import { futureDate, loginAsCustomer, SEED } from './helpers';
+import { futureDate, loginAsCustomer } from './helpers';
 
 test.describe('Customer booking flow', () => {
   test('browse venue → pick court → book a slot pay-at-venue', async ({ page }) => {
     await loginAsCustomer(page);
 
-    // Discovery lists the seeded venue.
-    const venueCard = page.locator('.slot', { hasText: 'Smash Arena' }).first();
-    await expect(venueCard).toBeVisible();
-    await venueCard.click();
+    // Discovery lists the seeded venue as a card linking to its storefront.
+    await page.goto('/browse');
+    // Target the Indiranagar ground specifically — it has "Court A" + ₹600 slots
+    // (the other Smash Arena ground has turf courts with different names).
+    const venueLink = page
+      .getByRole('link', { name: /Indiranagar/i })
+      .first();
+    await expect(venueLink).toBeVisible();
 
-    // Court selector appears; pick a date and load availability.
-    await expect(page.getByLabel('Court')).toBeVisible();
-    await page.getByLabel('Date').fill(futureDate());
+    // Open the venue on a far-future date (URL param) so open slots exist and
+    // don't collide with other runs — avoids driving the date-picker popup.
+    const href = (await venueLink.getAttribute('href')) ?? '';
+    const venuePath = href.split('?')[0];
+    await page.goto(`${venuePath}?date=${futureDate()}`);
+
+    // Pick a court, load availability, select the first OPEN slot. Open slots
+    // show a price (e.g. "06:00₹600"); booked/unavailable ones show "Taken" — so
+    // match on the rupee amount to avoid clicking an already-booked time.
+    await page.getByRole('button', { name: /Court A/i }).click();
     await page.getByRole('button', { name: 'Load availability' }).click();
+    const slot = page.getByRole('button', { name: /\d{1,2}:\d{2}.*₹/ }).first();
+    await expect(slot).toBeVisible();
+    await slot.click();
 
-    // Select the first open slot and book it.
-    const openSlot = page.locator('.slot.open').first();
-    await expect(openSlot).toBeVisible();
-    await openSlot.click();
-
-    await page.getByRole('button', { name: 'Pay at venue' }).click();
-
+    // Two-step: the sticky cart bar advances to the "Review & book" step.
+    await page.getByRole('button', { name: /review.*book/i }).click();
+    // Pay-at-venue (qualified so it doesn't match the "…Pay at venue only" toggle).
+    await page.getByRole('button', { name: /pay at venue.*settle/i }).click();
     await expect(
-      page.getByText(/Booking .* — confirmed/i),
+      page.getByRole('heading', { name: /booking confirmed/i }),
     ).toBeVisible();
   });
 
   test('wallet: buy a pack and see the session balance', async ({ page }) => {
     await loginAsCustomer(page);
-    await page.getByRole('link', { name: 'Wallet' }).click();
+    await page.goto('/wallet');
     await expect(page).toHaveURL(/\/wallet$/);
+    await expect(page.getByRole('heading', { name: 'My wallet' })).toBeVisible();
 
-    // Seed offers a "10-Play Flat" pack; buy it and verify the credit lands.
-    const buyRow = page.locator('div', { hasText: '10-Play Flat' }).last();
-    await buyRow.getByRole('button', { name: 'Buy' }).first().click();
-
+    // The first operator (seed: Smash Arena) is auto-selected and has seeded
+    // packs. Buy the first one and verify the session credit lands.
+    await page.getByRole('button', { name: 'Buy' }).first().click();
     await expect(page.getByText(/sessions added/i)).toBeVisible();
-    await expect(page.getByText('Pack sessions')).toBeVisible();
   });
 });

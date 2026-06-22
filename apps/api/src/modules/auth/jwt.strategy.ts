@@ -70,6 +70,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: resolveJwtSecret(config),
+      // Pin the accepted algorithm so a token can never be verified under an
+      // unexpected algorithm (alg-confusion hardening). We only ever sign HS256.
+      algorithms: ['HS256'],
     });
   }
 

@@ -1,20 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Trophy, Users, Ticket, XCircle } from 'lucide-react';
 import { api, DiscoverVenue } from '../../api/client';
-import {
-  Card,
-  EmptyState,
-  Field,
-  ImageWithFallback,
-  Msg,
-  PageHeader,
-  SectionLabel,
-  Select,
-  StatusPill,
-  useLoad,
-} from '../../components/common';
-import { Button } from '../../components/ui/button';
-import { Skeleton } from '../../components/ui/skeleton';
+import { useLoad } from '../../components/common';
 import {
   Dialog,
   DialogContent,
@@ -23,8 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
-import { EMPTY_TROPHY, FALLBACK_VENUE_PHOTO, tournamentBanner } from '../../lib/imagery';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
+import { useFloodlitToast, flMoney } from '../../floodlit/toast';
+import { label } from '../../lib/labels';
+import { useAuth } from '../../auth/AuthContext';
 
 /** Accept a 10-digit Indian mobile, optionally with a +91 / 0 prefix. */
 function isValidMobile(raw: string): boolean {
@@ -32,13 +20,92 @@ function isValidMobile(raw: string): boolean {
   return /^[6-9]\d{9}$/.test(digits);
 }
 
+/** Format an ISO reg-close timestamp for the chalk reg-close line. */
+function fmtCloses(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/* ── Floodlit primitives (inline, local to this page) ─────────────────── */
+
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  background: 'var(--bg-2)',
+  border: '1px solid var(--line)',
+  borderRadius: 11,
+  padding: '11px 13px',
+  fontSize: 14,
+  color: 'var(--chalk)',
+  outline: 'none',
+};
+
+function FlField({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  placeholder,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+  hint?: string;
+}) {
+  return (
+    <label className="block">
+      <span
+        className="fl-mono mb-1.5 block"
+        style={{ fontSize: 11, letterSpacing: '0.06em', color: 'var(--muted)', textTransform: 'uppercase' }}
+      >
+        {label}
+      </span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={fieldStyle}
+      />
+      {hint && (
+        <span className="mt-1 block" style={{ fontSize: 11, color: 'var(--danger)' }}>
+          {hint}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function Chip({ children, accent }: { children: React.ReactNode; accent?: 'amber' }) {
+  return (
+    <span
+      className="fl-mono"
+      style={{
+        fontSize: 11,
+        padding: '5px 9px',
+        borderRadius: 7,
+        background: 'var(--surface-2)',
+        color: accent === 'amber' ? 'var(--amber)' : 'var(--muted)',
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** Customer: browse and register for tournaments (PRD §4.7, §5.4). */
 export function TournamentsPage() {
+  const { flash } = useFloodlitToast();
+  const { user } = useAuth();
   const [venueId, setVenueId] = useState('');
   const [team, setTeam] = useState('');
   const [roster, setRoster] = useState('');
-  const [name, setName] = useState('Captain');
-  const [mobile, setMobile] = useState('+919800000099');
+  const [name, setName] = useState(user?.name ?? '');
+  const [mobile, setMobile] = useState(user?.mobile ?? '');
   const [msg, setMsg] = useState<string | null>(null);
   const [registering, setRegistering] = useState<string | null>(null);
 
@@ -98,14 +165,16 @@ export function TournamentsPage() {
           name: selectedVenue?.name ?? 'Tournament registration',
           prefill: { name, contact: mobile },
           onSuccess: () => {
-            setMsg(`Registered & paid ₹${res.fee} — see you on the court!`);
+            setMsg(`Registered & paid ${flMoney(res.fee)} — see you on the court!`);
+            flash('Registration confirmed');
             tournaments.reload();
           },
         });
         return;
       }
 
-      setMsg(`Registered — pay ₹${res.fee} (order ${res.razorpayOrderId}).`);
+      setMsg(`Registered — pay ${flMoney(res.fee)} (order ${res.razorpayOrderId}).`);
+      flash('Registration confirmed');
       tournaments.reload();
     } catch (e) {
       setMsg((e as Error).message);
@@ -148,88 +217,142 @@ export function TournamentsPage() {
   };
 
   const selectedVenue = venues.data?.find((v) => v.id === venueId);
-  const sportOf = (gameId: string) =>
-    selectedVenue?.games.find((g) => g.id === gameId)?.name;
+  const sportOf = (gameId: string) => selectedVenue?.games.find((g) => g.id === gameId)?.name;
 
   const rows = tournaments.data ?? [];
 
   return (
-    <div className="container">
-      <PageHeader title="Tournaments" subtitle="Browse & register your team" />
+    <div style={{ padding: '20px 0', animation: 'rise .3s ease' }}>
+      <h1 className="fl-display" style={{ fontSize: 30, lineHeight: 1, color: 'var(--chalk)' }}>
+        Tournaments
+      </h1>
+      <p className="mt-1" style={{ fontSize: 13, color: 'var(--muted)' }}>
+        Browse &amp; register your team
+      </p>
 
-      <Card title="Your details" subtitle="We'll use these to register your team" topAccent="primary">
-        <Select
-          label="Venue"
-          value={venueId}
-          onChange={setVenueId}
-          options={(venues.data ?? []).map((v) => ({ value: v.id, label: v.name }))}
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="Captain name" value={name} onChange={setName} />
-          <div>
-            <Field
-              label="Mobile"
-              type="tel"
-              value={mobile}
-              onChange={setMobile}
-              placeholder="10-digit mobile"
-            />
-            {mobile && !mobileValid && (
-              <p className="-mt-1.5 mb-3 text-xs text-destructive">
-                Enter a valid 10-digit mobile number.
-              </p>
-            )}
-          </div>
-          <Field label="Team (optional)" value={team} onChange={setTeam} />
+      {/* ── Your details ─────────────────────────────────────────── */}
+      <div
+        className="mt-5"
+        style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, padding: 16 }}
+      >
+        <div
+          className="fl-mono mb-4"
+          style={{ fontSize: 11, letterSpacing: '0.08em', color: 'var(--muted)', textTransform: 'uppercase' }}
+        >
+          Your details
         </div>
+
         <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-foreground">
-            Team roster <span className="text-muted-foreground">(optional)</span>
+          <span
+            className="fl-mono mb-1.5 block"
+            style={{ fontSize: 11, letterSpacing: '0.06em', color: 'var(--muted)', textTransform: 'uppercase' }}
+          >
+            Venue
+          </span>
+          <select value={venueId} onChange={(e) => setVenueId(e.target.value)} style={fieldStyle}>
+            {(venues.data ?? []).map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <FlField label="Captain name" value={name} onChange={setName} />
+          <FlField
+            label="Mobile"
+            type="tel"
+            value={mobile}
+            onChange={setMobile}
+            placeholder="10-digit mobile"
+            hint={mobile && !mobileValid ? 'Enter a valid 10-digit mobile number.' : undefined}
+          />
+          <FlField label="Team (optional)" value={team} onChange={setTeam} />
+        </div>
+
+        <label className="mt-3 block">
+          <span
+            className="fl-mono mb-1.5 block"
+            style={{ fontSize: 11, letterSpacing: '0.06em', color: 'var(--muted)', textTransform: 'uppercase' }}
+          >
+            Team roster (optional)
           </span>
           <textarea
             value={roster}
             onChange={(e) => setRoster(e.target.value)}
             rows={3}
             placeholder={'One player per line\nAarav Sharma\nMeera Rao'}
-            className="w-full rounded-xl border border-border bg-input-background px-3.5 py-2.5 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+            style={{ ...fieldStyle, resize: 'vertical' }}
           />
-          <span className="mt-1 block text-xs text-muted-foreground">
+          <span className="mt-1 block" style={{ fontSize: 11, color: 'var(--faint)' }}>
             For team events — list your players, one per line.
           </span>
         </label>
-      </Card>
+      </div>
 
-      <SectionLabel icon={Trophy} className="mb-3">
+      <div
+        className="fl-mono mt-6 mb-3"
+        style={{ fontSize: 11, letterSpacing: '0.08em', color: 'var(--muted)', textTransform: 'uppercase' }}
+      >
         Available Tournaments
-      </SectionLabel>
+      </div>
 
       {tournaments.error ? (
-        <Card>
-          <EmptyState
-            image={EMPTY_TROPHY}
-            title="Couldn’t load tournaments"
-            hint={tournaments.error}
-          />
-          <div className="flex justify-center">
-            <Button variant="secondary" size="sm" onClick={tournaments.reload}>
-              Try again
-            </Button>
-          </div>
-        </Card>
+        <div
+          style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, padding: 24 }}
+          className="text-center"
+        >
+          <p className="fl-display" style={{ fontSize: 18, color: 'var(--chalk)' }}>
+            Couldn’t load tournaments
+          </p>
+          <p className="mt-1" style={{ fontSize: 13, color: 'var(--muted)' }}>
+            {tournaments.error}
+          </p>
+          <button
+            onClick={tournaments.reload}
+            className="mt-4"
+            style={{
+              cursor: 'pointer',
+              padding: '10px 18px',
+              borderRadius: 11,
+              fontWeight: 700,
+              fontSize: 14,
+              border: '1px solid var(--line-strong)',
+              background: 'var(--surface-2)',
+              color: 'var(--chalk)',
+            }}
+          >
+            Load availability
+          </button>
+        </div>
       ) : tournaments.loading && !tournaments.data ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-72 w-full rounded-2xl" />
+            <div
+              key={i}
+              style={{
+                height: 220,
+                borderRadius: 16,
+                background: 'var(--surface)',
+                border: '1px solid var(--line)',
+                opacity: 0.6,
+              }}
+            />
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <Card>
-          <EmptyState
-            image={EMPTY_TROPHY}
-            title="No tournaments here yet"
-            hint="This venue hasn’t scheduled any tournaments. Check back soon or try another venue."
-          />
-        </Card>
+        <div
+          style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, padding: 24 }}
+          className="text-center"
+        >
+          <p className="fl-display" style={{ fontSize: 18, color: 'var(--chalk)' }}>
+            No tournaments here yet
+          </p>
+          <p className="mt-1" style={{ fontSize: 13, color: 'var(--muted)' }}>
+            This venue hasn’t scheduled any tournaments. Check back soon or try another venue.
+          </p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {rows.map((t) => {
@@ -237,72 +360,122 @@ export function TournamentsPage() {
             const full = t.capacity != null && registered >= t.capacity;
             const myParticipantId = myEntries[t.id];
             const busy = registering === t.id;
+            const closes = fmtCloses(t.regCloseAt);
             return (
               <div
                 key={t.id}
-                className="flex flex-col bg-card border border-border rounded-2xl overflow-hidden"
+                className="flex flex-col"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 16,
+                  overflow: 'hidden',
+                }}
               >
-                <div className="relative h-32">
-                  <ImageWithFallback
-                    src={tournamentBanner(sportOf(t.gameId))}
-                    fallback={FALLBACK_VENUE_PHOTO}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-card via-card/75 to-card/10" />
-                  <div className="absolute top-3 right-3">
-                    <StatusPill status={full ? 'full' : 'open'}>
-                      {full ? 'Full' : 'Open'}
-                    </StatusPill>
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 p-4">
-                    <p className="font-display font-semibold text-lg leading-tight text-foreground">
+                {/* brand-tinted header */}
+                <div
+                  style={{
+                    padding: '14px 16px',
+                    background:
+                      'linear-gradient(150deg, color-mix(in oklab,var(--brand) 22%, var(--surface)), var(--surface))',
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div
+                      className="fl-display"
+                      style={{ fontSize: 20, lineHeight: 1, color: 'var(--chalk)' }}
+                    >
                       {t.name}
-                    </p>
-                    <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">
-                      {t.format} · {t.regType}
-                    </p>
+                    </div>
+                    <span
+                      className="fl-mono"
+                      style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}
+                    >
+                      {flMoney(t.fee)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5" style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    {sportOf(t.gameId) ?? t.gameId} · {selectedVenue?.name ?? ''}
                   </div>
                 </div>
 
-                <div className="flex flex-1 flex-col gap-4 p-4">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Ticket className="h-4 w-4 text-primary" />
-                      <span className="font-medium text-foreground">₹{t.fee}</span>
-                      <span className="text-xs">({t.feeBasis})</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Users className="h-4 w-4 text-rail-blue" />
-                      {registered}/{t.capacity} registered
-                    </span>
+                {/* body */}
+                <div className="flex flex-1 flex-col" style={{ padding: '14px 16px' }}>
+                  <div className="flex flex-wrap" style={{ gap: 7 }}>
+                    <Chip>{label(t.format)}</Chip>
+                    <Chip>{label(t.regType)}</Chip>
+                    <Chip accent="amber">
+                      {registered}/{t.capacity}
+                    </Chip>
+                    <Chip>{label(t.feeBasis)}</Chip>
                   </div>
 
+                  {closes && (
+                    <div className="fl-mono mt-2.5" style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+                      Registration closes {closes}
+                    </div>
+                  )}
+
                   {myParticipantId ? (
-                    <div className="mt-auto flex flex-col gap-2">
-                      <p className="text-sm font-medium text-primary">
-                        You’re registered for this tournament.
-                      </p>
-                      <Button
-                        variant="outline"
-                        className="w-full"
+                    <div className="mt-auto pt-3 flex flex-col gap-2">
+                      <button
+                        disabled
+                        style={{
+                          width: '100%',
+                          padding: 13,
+                          borderRadius: 11,
+                          fontWeight: 700,
+                          fontSize: 14,
+                          border: '1px solid var(--green)',
+                          background: 'color-mix(in oklab, var(--green) 18%, var(--surface))',
+                          color: 'var(--green)',
+                        }}
+                      >
+                        Registered ✓
+                      </button>
+                      <button
                         onClick={() => {
                           setMsg(null);
                           setCancelError(null);
                           setCancelTarget({ id: t.id, name: t.name });
                         }}
+                        style={{
+                          cursor: 'pointer',
+                          width: '100%',
+                          padding: 11,
+                          borderRadius: 11,
+                          fontWeight: 600,
+                          fontSize: 13,
+                          border: '1px solid var(--line)',
+                          background: 'transparent',
+                          color: 'var(--muted)',
+                        }}
                       >
-                        <XCircle className="h-4 w-4" />
                         Cancel registration
-                      </Button>
+                      </button>
                     </div>
                   ) : (
-                    <Button
+                    <button
                       onClick={() => register(t.id)}
                       disabled={full || busy}
-                      className="mt-auto w-full"
+                      className="mt-auto"
+                      style={{
+                        cursor: full || busy ? 'default' : 'pointer',
+                        marginTop: 'auto',
+                        width: '100%',
+                        padding: 13,
+                        borderRadius: 11,
+                        fontWeight: 700,
+                        fontSize: 14,
+                        marginBlockStart: 12,
+                        border: '1px solid var(--brand)',
+                        background: full ? 'var(--surface-2)' : 'var(--brand)',
+                        color: full ? 'var(--faint)' : 'var(--on-brand)',
+                        opacity: busy ? 0.7 : 1,
+                      }}
                     >
                       {full ? 'Tournament full' : busy ? 'Registering…' : 'Register'}
-                    </Button>
+                    </button>
                   )}
                 </div>
               </div>
@@ -311,7 +484,21 @@ export function TournamentsPage() {
         </div>
       )}
 
-      <Msg text={msg} />
+      {msg && (
+        <div
+          className="mt-4"
+          style={{
+            fontSize: 13,
+            color: 'var(--muted)',
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 11,
+            padding: '11px 13px',
+          }}
+        >
+          {msg}
+        </div>
+      )}
 
       <Dialog open={cancelTarget != null} onOpenChange={(open) => !open && closeCancel()}>
         <DialogContent showCloseButton={!cancelling}>
@@ -323,14 +510,43 @@ export function TournamentsPage() {
                 : null}
             </DialogDescription>
           </DialogHeader>
-          <Msg text={cancelError} />
+          {cancelError && (
+            <p style={{ fontSize: 13, color: 'var(--danger)' }}>{cancelError}</p>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={closeCancel} disabled={cancelling}>
+            <button
+              onClick={closeCancel}
+              disabled={cancelling}
+              style={{
+                cursor: 'pointer',
+                padding: '10px 16px',
+                borderRadius: 11,
+                fontWeight: 600,
+                fontSize: 14,
+                border: '1px solid var(--line)',
+                background: 'transparent',
+                color: 'var(--chalk)',
+              }}
+            >
               Keep registration
-            </Button>
-            <Button variant="destructive" onClick={confirmCancel} disabled={cancelling}>
+            </button>
+            <button
+              onClick={confirmCancel}
+              disabled={cancelling}
+              style={{
+                cursor: 'pointer',
+                padding: '10px 16px',
+                borderRadius: 11,
+                fontWeight: 700,
+                fontSize: 14,
+                border: '1px solid var(--danger)',
+                background: 'var(--danger)',
+                color: 'var(--on-brand)',
+                opacity: cancelling ? 0.7 : 1,
+              }}
+            >
               {cancelling ? 'Cancelling…' : 'Cancel registration'}
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -6,7 +6,7 @@ export const bookingStatus = pgEnum("BookingStatus", ['confirmed', 'cancelled', 
 export const dayType = pgEnum("DayType", ['weekday', 'weekend'])
 export const feeBasis = pgEnum("FeeBasis", ['per_player', 'per_team'])
 export const joinRequestStatus = pgEnum("JoinRequestStatus", ['requested', 'approved', 'rejected'])
-export const ledgerTxnType = pgEnum("LedgerTxnType", ['pack_buy', 'pack_debit', 'pack_refund', 'points_earn', 'points_redeem', 'referral_reward', 'no_show_fee', 'cash_refund', 'open_match_settle'])
+export const ledgerTxnType = pgEnum("LedgerTxnType", ['pack_buy', 'pack_debit', 'pack_refund', 'points_earn', 'points_redeem', 'referral_reward', 'no_show_fee', 'cash_refund', 'open_match_settle', 'pack_expire'])
 export const offerType = pgEnum("OfferType", ['percent', 'flat'])
 export const openMatchRepaymentMode = pgEnum("OpenMatchRepaymentMode", ['info', 'ledger'])
 export const openMatchStatus = pgEnum("OpenMatchStatus", ['open', 'full', 'cancelled', 'completed'])
@@ -47,8 +47,8 @@ export const owners = pgTable("owners", {
 	contactMobile: text(),
 	status: ownerStatus().default('pending').notNull(),
 	venueQuota: integer().default(1).notNull(),
-	allowedGameIds: text().array().default(["RAY"]),
-	featureFlags: text().array().default(["RAY"]),
+	allowedGameIds: text().array().default(sql`'{}'::text[]`),
+	featureFlags: text().array().default(sql`'{}'::text[]`),
 	logoUrl: text(),
 	primaryColor: text().default('#0EA5E9').notNull(),
 	secondaryColor: text().default('#0F172A').notNull(),
@@ -98,7 +98,7 @@ export const users = pgTable("users", {
 	email: text(),
 	mobile: text(),
 	passwordHash: text(),
-	assignedVenueIds: text().array().default(["RAY"]),
+	assignedVenueIds: text().array().default(sql`'{}'::text[]`),
 	active: boolean().default(true).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
@@ -170,7 +170,7 @@ export const playerProfiles = pgTable("player_profiles", {
 	customerId: text().notNull(),
 	name: text().notNull(),
 	mobile: text().notNull(),
-	games: text().array().default(["RAY"]),
+	games: text().array().default(sql`'{}'::text[]`),
 	skillLevel: skillLevel().default('beginner').notNull(),
 	consent: boolean().default(false).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -199,7 +199,7 @@ export const venues = pgTable("venues", {
 	address: text(),
 	city: text(),
 	contactPhone: text(),
-	photos: text().array().default(["RAY"]),
+	photos: text().array().default(sql`'{}'::text[]`),
 	openTime: text().default('06:00').notNull(),
 	closeTime: text().default('23:00').notNull(),
 	active: boolean().default(true).notNull(),
@@ -418,8 +418,8 @@ export const membershipPacks = pgTable("membership_packs", {
 	pricingMode: packPricingMode().default('flat').notNull(),
 	discountPct: numeric({ precision: 5, scale:  2 }),
 	flatRate: numeric({ precision: 10, scale:  2 }),
-	venueIds: text().array().default(["RAY"]),
-	unitIds: text().array().default(["RAY"]),
+	venueIds: text().array().default(sql`'{}'::text[]`),
+	unitIds: text().array().default(sql`'{}'::text[]`),
 	active: boolean().default(true).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
@@ -590,8 +590,8 @@ export const offers = pgTable("offers", {
 	autoApply: boolean().default(false).notNull(),
 	validFrom: timestamp({ precision: 3, mode: 'date' }),
 	validTo: timestamp({ precision: 3, mode: 'date' }),
-	venueIds: text().array().default(["RAY"]),
-	gameIds: text().array().default(["RAY"]),
+	venueIds: text().array().default(sql`'{}'::text[]`),
+	gameIds: text().array().default(sql`'{}'::text[]`),
 	segment: text(),
 	active: boolean().default(true).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -669,6 +669,39 @@ export const notifications = pgTable("notifications", {
 	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
 ]);
 
+// --- Saved venues / favourites (PRD §5.4): a customer bookmarks a venue. The
+// row is tenant-scoped by the venue's owner (RLS by ownerId) but written/read on
+// behalf of the customer via tenant bypass + explicit customerId filtering (the
+// same pattern as wallet/bookings, since customers carry no ownerId context). ---
+
+export const savedVenues = pgTable("saved_venues", {
+	id: text().primaryKey().notNull(),
+	ownerId: text().notNull(),
+	customerId: text().notNull(),
+	venueId: text().notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	uniqueIndex("saved_venues_customerId_venueId_key").using("btree", table.customerId.asc().nullsLast(), table.venueId.asc().nullsLast()),
+	index("saved_venues_customerId_idx").using("btree", table.customerId.asc().nullsLast()),
+	index("saved_venues_ownerId_idx").using("btree", table.ownerId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.venueId],
+			foreignColumns: [venues.id],
+			name: "saved_venues_venueId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.customerId],
+			foreignColumns: [users.id],
+			name: "saved_venues_customerId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.ownerId],
+			foreignColumns: [owners.id],
+			name: "saved_venues_ownerId_fkey"
+		}).onUpdate("cascade").onDelete("restrict"),
+	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
+]);
+
 // --- Auth persistence (DB-backed so OTP, refresh-token revocation and password
 // resets survive a restart and are shared across instances — replacing the old
 // in-memory Maps). These are GLOBAL infra tables (not tenant-scoped): no RLS
@@ -689,6 +722,17 @@ export const otpRequests = pgTable("otp_requests", {
 }, (table) => [
 	index("otp_requests_mobile_createdAt_idx").using("btree", table.mobile.asc().nullsLast(), table.createdAt.asc().nullsLast()),
 ]);
+
+// Per-mobile OTP verify lockout (security H2): cumulative failed verifies that
+// SURVIVE a code re-issue (issue() must not reset this), so an attacker cannot
+// reset their guess budget by requesting a fresh code. When failedCount exceeds
+// the threshold within the window, verifies are locked until lockedUntil.
+export const otpVerifyAttempts = pgTable("otp_verify_attempts", {
+	mobile: text().primaryKey().notNull(),
+	failedCount: integer().default(0).notNull(),
+	windowStartedAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	lockedUntil: timestamp({ precision: 3, mode: 'date' }),
+});
 
 export const revokedRefreshTokens = pgTable("revoked_refresh_tokens", {
 	jti: text().primaryKey().notNull(),

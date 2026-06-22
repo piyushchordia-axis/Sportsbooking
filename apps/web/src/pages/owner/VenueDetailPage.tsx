@@ -5,7 +5,7 @@ import {
   TimeBand,
   UnitLabel,
 } from '@sportsbooking/shared';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Building2,
@@ -32,6 +32,7 @@ import {
 import {
   api,
   Addon,
+  UnitPricingRule,
   VenueDetail,
   VenueDetailUnit,
   VenueOverview,
@@ -53,6 +54,7 @@ import {
   useLoad,
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -227,7 +229,7 @@ export function VenueDetailPage() {
         </TabsContent>
 
         <TabsContent value="availability" className="mt-5">
-          <AvailabilityTab venueId={v.id} onMsg={setMsg} />
+          <AvailabilityTab venue={v} onMsg={setMsg} />
         </TabsContent>
 
         <TabsContent value="addons" className="mt-5">
@@ -384,6 +386,10 @@ function EditVenueDialog({
     contactPhone: string;
     openTime: string;
     closeTime: string;
+    geoLat: number | null;
+    geoLng: number | null;
+    gameIds: string[];
+    photos: string[];
   }) => void;
 }) {
   const [name, setName] = useState('');
@@ -392,7 +398,18 @@ function EditVenueDialog({
   const [contactPhone, setContactPhone] = useState('');
   const [openTime, setOpenTime] = useState('06:00');
   const [closeTime, setCloseTime] = useState('22:00');
+  const [geoLat, setGeoLat] = useState('');
+  const [geoLng, setGeoLng] = useState('');
+  const [gameIds, setGameIds] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [photoDraft, setPhotoDraft] = useState('');
   const [loaded, setLoaded] = useState<string | null>(null);
+
+  // Game catalogue for the offered-games picker (id + name).
+  const games = useLoad(
+    () => api.discoverGames() as Promise<{ id: string; name: string }[]>,
+    [],
+  );
 
   if (venue && loaded !== venue.id) {
     setName(venue.name ?? '');
@@ -401,14 +418,44 @@ function EditVenueDialog({
     setContactPhone(venue.contactPhone ?? '');
     setOpenTime(venue.openTime ?? '06:00');
     setCloseTime(venue.closeTime ?? '22:00');
+    setGeoLat(venue.geoLat == null ? '' : String(venue.geoLat));
+    setGeoLng(venue.geoLng == null ? '' : String(venue.geoLng));
+    setGameIds(venue.games.map((g) => g.gameId));
+    setPhotos(venue.photos ?? []);
+    setPhotoDraft('');
     setLoaded(venue.id);
   }
   if (!venue && loaded !== null) setLoaded(null);
 
+  const toggleGame = (id: string) =>
+    setGameIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+  const addPhoto = () => {
+    const url = photoDraft.trim();
+    if (!url || photos.includes(url)) return;
+    setPhotos((p) => [...p, url]);
+    setPhotoDraft('');
+  };
+
   const save = () => {
     if (!venue) return;
-    onSave({ name, city, address, contactPhone, openTime, closeTime });
+    const lat = geoLat.trim();
+    const lng = geoLng.trim();
+    onSave({
+      name,
+      city,
+      address,
+      contactPhone,
+      openTime,
+      closeTime,
+      geoLat: lat === '' ? null : Number(lat),
+      geoLng: lng === '' ? null : Number(lng),
+      gameIds,
+      photos,
+    });
   };
+
+  const gameOpts = games.data ?? [];
 
   return (
     <Dialog open={!!venue} onOpenChange={(o) => !o && onClose()}>
@@ -416,7 +463,7 @@ function EditVenueDialog({
         <DialogHeader>
           <DialogTitle>Edit ground</DialogTitle>
           <DialogDescription>
-            Update this ground's name, location and opening hours.
+            Update this ground's details, location, games offered and photos.
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -429,6 +476,101 @@ function EditVenueDialog({
           <Field label="Opens" type="time" value={openTime} onChange={setOpenTime} />
           <Field label="Closes" type="time" value={closeTime} onChange={setCloseTime} />
         </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field
+            label="Latitude"
+            type="number"
+            value={geoLat}
+            onChange={setGeoLat}
+            placeholder="e.g. 19.0760"
+          />
+          <Field
+            label="Longitude"
+            type="number"
+            value={geoLng}
+            onChange={setGeoLng}
+            placeholder="e.g. 72.8777"
+          />
+        </div>
+
+        <div>
+          <SectionLabel className="mb-2">Games offered</SectionLabel>
+          {games.loading && gameOpts.length === 0 ? (
+            <Skeleton className="h-9 w-full" />
+          ) : gameOpts.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No games available.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {gameOpts.map((g) => {
+                const on = gameIds.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => toggleGame(g.id)}
+                    aria-pressed={on}
+                    className={
+                      on
+                        ? 'rounded-xl border border-primary bg-primary/12 px-3 py-1.5 text-sm font-medium text-foreground transition-colors'
+                        : 'rounded-xl border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground'
+                    }
+                  >
+                    {g.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <SectionLabel className="mb-2">Photos</SectionLabel>
+          {photos.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-3">
+              {photos.map((src, i) => (
+                <span key={src} className="relative">
+                  <img
+                    src={src}
+                    alt={`Photo ${i + 1}`}
+                    className="h-20 w-28 rounded-xl border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPhotos((p) => p.filter((x) => x !== src))}
+                    aria-label={`Remove photo ${i + 1}`}
+                    className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-card hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <label className="block flex-1">
+              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Photo URL
+              </span>
+              <input
+                value={photoDraft}
+                onChange={(e) => setPhotoDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addPhoto();
+                  }
+                }}
+                placeholder="https://…"
+                className="h-10 w-full rounded-xl border border-border bg-input-background px-3 text-sm outline-none focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+              />
+            </label>
+            <Button variant="outline" onClick={addPhoto} disabled={!photoDraft.trim()}>
+              <Plus className="h-4 w-4" /> Add
+            </Button>
+          </div>
+        </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel
@@ -876,6 +1018,42 @@ function buildRules(
   return rules;
 }
 
+/**
+ * Map stored pricing rules (GET /venues/units/:id/pricing) back into the
+ * editor's grid/base/tiers/overrides state so the grid preloads instead of
+ * starting from the static defaults.
+ */
+function rulesToState(
+  rules: UnitPricingRule[],
+  nextId: () => number,
+): { grid: GridState; base: string; tiers: Tier[]; overrides: Override[] } {
+  const grid: GridState = {};
+  const tiers: Tier[] = [];
+  const overrides: Override[] = [];
+  let base = '';
+
+  for (const r of rules) {
+    const price = String(r.price ?? '');
+    if (r.dateOverride) {
+      const d = fromISODate(r.dateOverride.slice(0, 10));
+      overrides.push({ id: nextId(), range: { from: d ?? undefined, to: d ?? undefined }, price });
+    } else if (r.minDuration != null) {
+      tiers.push({ id: nextId(), minDuration: String(r.minDuration), price });
+    } else if (r.dayType && r.timeBand) {
+      grid[cellKey(r.dayType as DayType, r.timeBand as TimeBand)] = price;
+    } else {
+      base = price;
+    }
+  }
+
+  return {
+    grid: Object.keys(grid).length > 0 ? grid : DEFAULT_GRID,
+    base: base || '600',
+    tiers,
+    overrides,
+  };
+}
+
 function PricingTab({
   venue: v,
   onMsg,
@@ -897,6 +1075,37 @@ function PricingTab({
   if (v.units.length > 0 && !v.units.some((u) => u.id === unitId)) {
     setUnitId(v.units[0].id);
   }
+
+  // Preload the grid from this court's stored rules when the court changes,
+  // falling back to the defaults when none are saved yet.
+  useEffect(() => {
+    if (!unitId) return;
+    let cancelled = false;
+    api
+      .getUnitPricing(unitId)
+      .then((rules) => {
+        if (cancelled) return;
+        if (!rules || rules.length === 0) {
+          setGrid(DEFAULT_GRID);
+          setBase('600');
+          setTiers([]);
+          setOverrides([]);
+          return;
+        }
+        const next = rulesToState(rules, nextId);
+        setGrid(next.grid);
+        setBase(next.base);
+        setTiers(next.tiers);
+        setOverrides(next.overrides);
+      })
+      .catch(() => {
+        /* leave the editor on its current state if the preload fails */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitId]);
 
   const unitOpts = v.units.map((u) => ({ value: u.id, label: u.name }));
   const activeName = v.units.find((u) => u.id === unitId)?.name ?? 'this court';
@@ -1386,18 +1595,20 @@ const hourLabel = (iso: string) =>
   new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 function AvailabilityTab({
-  venueId,
+  venue: v,
   onMsg,
 }: {
-  venueId: string;
+  venue: VenueDetail;
   onMsg: (m: string) => void;
 }) {
+  const venueId = v.id;
   const [date, setDate] = useState(todayISO());
   const schedule = useLoad<VenueSchedule>(() => api.venueSchedule(venueId, date), [
     venueId,
     date,
   ]);
   const [busyCell, setBusyCell] = useState<string | null>(null);
+  const [blockOpen, setBlockOpen] = useState(false);
 
   const data = schedule.data;
 
@@ -1441,6 +1652,14 @@ function AvailabilityTab({
       topAccent="primary"
       action={
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setBlockOpen(true)}
+            disabled={v.units.length === 0}
+          >
+            <CalendarClock className="h-4 w-4" /> Block range
+          </Button>
           <Button
             variant="outline"
             size="icon"
@@ -1530,7 +1749,162 @@ function AvailabilityTab({
           </table>
         </div>
       )}
+
+      <BlockRangeDialog
+        open={blockOpen}
+        venue={v}
+        onClose={() => setBlockOpen(false)}
+        onMsg={onMsg}
+        onDone={() => {
+          setBlockOpen(false);
+          schedule.reload();
+        }}
+      />
     </Card>
+  );
+}
+
+/**
+ * Block a court across a date RANGE for a given hour window, with an optional
+ * weekly recurrence (PRD §4.3). Each day in the range is blocked; recurrence is
+ * handed to the API so the window repeats weekly for `count` weeks.
+ */
+function BlockRangeDialog({
+  open,
+  venue: v,
+  onClose,
+  onMsg,
+  onDone,
+}: {
+  open: boolean;
+  venue: VenueDetail;
+  onClose: () => void;
+  onMsg: (m: string) => void;
+  onDone: () => void;
+}) {
+  const [unitId, setUnitId] = useState(v.units[0]?.id ?? '');
+  const [range, setRange] = useState<DateRangeValue>({});
+  const [startHour, setStartHour] = useState('06:00');
+  const [endHour, setEndHour] = useState('07:00');
+  const [reason, setReason] = useState('');
+  const [recurring, setRecurring] = useState(false);
+  const [weeks, setWeeks] = useState('4');
+  const [busy, setBusy] = useState(false);
+
+  if (open && unitId && !v.units.some((u) => u.id === unitId) && v.units[0]) {
+    setUnitId(v.units[0].id);
+  }
+
+  const unitOpts = v.units.map((u) => ({ value: u.id, label: u.name }));
+
+  // Build an ISO timestamp for a local date + "HH:MM" wall-clock time.
+  const isoAt = (day: Date, hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    const d = new Date(day);
+    d.setHours(h || 0, m || 0, 0, 0);
+    return d.toISOString();
+  };
+
+  const apply = async () => {
+    if (!unitId || !range.from) return;
+    onMsg('');
+    setBusy(true);
+    try {
+      const last = range.to ?? range.from;
+      let days = 0;
+      const recurrence = recurring
+        ? { frequency: 'weekly' as const, count: Math.max(1, Math.round(Number(weeks) || 1)) }
+        : undefined;
+      for (let d = new Date(range.from); d <= last; d.setDate(d.getDate() + 1)) {
+        await api.blockSlots({
+          unitId,
+          start: isoAt(new Date(d), startHour),
+          end: isoAt(new Date(d), endHour),
+          reason: reason.trim() || undefined,
+          recurrence,
+        });
+        days++;
+      }
+      onMsg(
+        `Blocked ${startHour}–${endHour} across ${days} ${days === 1 ? 'day' : 'days'}${
+          recurring ? `, repeating weekly for ${recurrence!.count} weeks` : ''
+        }.`,
+      );
+      onDone();
+    } catch (e) {
+      onMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Block a range</DialogTitle>
+          <DialogDescription>
+            Block an hour window across a span of dates, optionally repeating weekly — handy for
+            maintenance or private bookings.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="sm:max-w-xs">
+          <SearchableSelect
+            label="Court"
+            value={unitId}
+            onChange={setUnitId}
+            options={unitOpts}
+            placeholder="Pick a court"
+            searchPlaceholder="Search courts…"
+          />
+        </div>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Dates</span>
+          <DateRangePicker
+            value={range}
+            onChange={setRange}
+            placeholder="Pick the dates"
+            numberOfMonths={1}
+          />
+        </label>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="From" type="time" value={startHour} onChange={setStartHour} />
+          <Field label="To" type="time" value={endHour} onChange={setEndHour} />
+        </div>
+
+        <Field label="Reason (optional)" value={reason} onChange={setReason} />
+
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-elevated/40 px-3.5 py-3">
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">Repeat weekly</span>
+            <span className="block text-xs text-muted-foreground">
+              Repeat this window on the same weekday(s) for several weeks.
+            </span>
+          </span>
+          <Switch checked={recurring} onCheckedChange={setRecurring} aria-label="Repeat weekly" />
+        </label>
+        {recurring && (
+          <Field
+            label="Number of weeks"
+            type="number"
+            value={weeks}
+            onChange={setWeeks}
+          />
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={apply} disabled={busy || !unitId || !range.from}>
+            {busy ? 'Blocking…' : 'Block range'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1606,6 +1980,7 @@ function AddonsTab({
   const [type, setType] = useState<AddonType>(AddonType.RENTAL);
   const [price, setPrice] = useState('100');
   const [busy, setBusy] = useState(false);
+  const [editAddon, setEditAddon] = useState<Addon | null>(null);
 
   const add = async () => {
     onMsg('');
@@ -1659,11 +2034,29 @@ function AddonsTab({
           {list.map((a) => (
             <span
               key={a.id}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 text-sm shadow-card"
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm shadow-card ${
+                a.active === false
+                  ? 'border-dashed border-border bg-muted/40 opacity-70'
+                  : 'border-border bg-card'
+              }`}
             >
               <span className="font-medium">{a.name}</span>
               <span className="text-xs capitalize text-muted-foreground">{a.type}</span>
               <span className="font-medium text-primary">₹{a.price}</span>
+              {a.stock != null && (
+                <span className="text-xs text-muted-foreground">· {a.stock} in stock</span>
+              )}
+              {a.active === false && (
+                <span className="text-xs font-medium text-muted-foreground">· Inactive</span>
+              )}
+              <button
+                type="button"
+                onClick={() => setEditAddon(a)}
+                aria-label={`Edit ${a.name}`}
+                className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/20"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={() => remove(a)}
@@ -1709,7 +2102,128 @@ function AddonsTab({
           <PlusCircle className="h-4 w-4" /> {busy ? 'Adding…' : 'Add'}
         </Button>
       </div>
+
+      <EditAddonDialog
+        addon={editAddon}
+        onClose={() => setEditAddon(null)}
+        onSave={async (id, body) => {
+          onMsg('');
+          try {
+            await api.updateAddon(id, body);
+            onMsg('Add-on updated.');
+            setEditAddon(null);
+            addons.reload();
+          } catch (e) {
+            onMsg((e as Error).message);
+          }
+        }}
+      />
     </Card>
+  );
+}
+
+/** Edit an existing add-on — name, type, price, stock and active toggle. */
+function EditAddonDialog({
+  addon,
+  onClose,
+  onSave,
+}: {
+  addon: Addon | null;
+  onClose: () => void;
+  onSave: (
+    id: string,
+    body: {
+      name: string;
+      type: AddonType;
+      price: number;
+      stock: number | null;
+      active: boolean;
+    },
+  ) => void;
+}) {
+  const [name, setName] = useState('');
+  const [type, setType] = useState<AddonType>(AddonType.RENTAL);
+  const [price, setPrice] = useState('0');
+  const [stock, setStock] = useState('');
+  const [active, setActive] = useState(true);
+  const [loaded, setLoaded] = useState<string | null>(null);
+
+  if (addon && loaded !== addon.id) {
+    setName(addon.name ?? '');
+    setType((addon.type as AddonType) ?? AddonType.RENTAL);
+    setPrice(String(addon.price ?? 0));
+    setStock(addon.stock == null ? '' : String(addon.stock));
+    setActive(addon.active !== false);
+    setLoaded(addon.id);
+  }
+  if (!addon && loaded !== null) setLoaded(null);
+
+  const save = () => {
+    if (!addon) return;
+    const trimmedStock = stock.trim();
+    onSave(addon.id, {
+      name: name.trim(),
+      type,
+      price: Math.max(0, Number(price) || 0),
+      stock: trimmedStock === '' ? null : Math.max(0, Math.round(Number(trimmedStock) || 0)),
+      active,
+    });
+  };
+
+  return (
+    <Dialog open={!!addon} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit add-on</DialogTitle>
+          <DialogDescription>
+            Update this add-on's name, type, price, stock and availability.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Name" value={name} onChange={setName} />
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Type</span>
+            <UISelect value={type} onValueChange={(x) => setType(x as AddonType)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ADDON_TYPE_OPTS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="capitalize">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </UISelect>
+          </label>
+          <Field label="Price (₹)" type="number" value={price} onChange={setPrice} />
+          <Field
+            label="Stock"
+            type="number"
+            value={stock}
+            onChange={setStock}
+            placeholder="Blank = unlimited"
+          />
+        </div>
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-elevated/40 px-3.5 py-3">
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">Active</span>
+            <span className="block text-xs text-muted-foreground">
+              Inactive add-ons stay on file but can't be booked.
+            </span>
+          </span>
+          <Switch checked={active} onCheckedChange={setActive} aria-label="Add-on active" />
+        </label>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!name.trim()}>
+            Save changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

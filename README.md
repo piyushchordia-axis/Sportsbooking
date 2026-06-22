@@ -17,9 +17,9 @@ Super Admin console (with screen snapshots) see
 | Frontend | React + Vite, token-based white-label theming                     |
 | Backend  | NestJS (REST), modular per domain                                 |
 | Database | PostgreSQL 16, multi-tenant via Row-Level Security (tenant=owner) |
-| ORM      | Prisma                                                            |
+| ORM      | Drizzle ORM (schema in `apps/api/src/db/schema.ts`; `db:push`)    |
 | Payments | Razorpay (mocked when test keys absent)                           |
-| Auth     | OTP (customers) · email/password + RBAC (owner/staff)             |
+| Auth     | OTP (customers) · email/password + RBAC (owner/staff); refresh token in an httpOnly cookie |
 
 ## Monorepo layout
 

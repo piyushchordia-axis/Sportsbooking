@@ -327,9 +327,12 @@ export class AuthService {
 
   private async revokeRefresh(jti: string, exp?: number): Promise<void> {
     // Keep the entry only until the token would expire anyway, then it is moot.
-    const expiresAt = new Date(
-      exp ? exp * 1000 : Date.now() + RESET_TOKEN_TTL_MS,
-    );
+    // Fall back to the refresh-token TTL (not the much shorter reset-token TTL)
+    // so a revoked-but-unexpired token can never be purged from the denylist
+    // early and replayed.
+    const refreshTtlMs =
+      Number(this.config.get('JWT_REFRESH_TTL', 2592000)) * 1000;
+    const expiresAt = new Date(exp ? exp * 1000 : Date.now() + refreshTtlMs);
     await this.db.withTenantBypass((tx) =>
       tx
         .insert(revokedRefreshTokens)

@@ -15,6 +15,7 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
   lte,
   or,
   sql,
@@ -56,7 +57,15 @@ import { PaymentLedgerService } from '../payments/payment-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
 import { ReferralService } from '../referral/referral.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
-import { CartSlotDto, CreateBookingDto, ListBookingsQueryDto } from './dto';
+import {
+  CartSlotDto,
+  CreateBookingDto,
+  ListBookingsQueryDto,
+  findIntraRequestOverlap,
+  parseClockToMinutes,
+  validateSlotOnGrid,
+  type IntervalSlot,
+} from './dto';
 
 /** Postgres unique-violation SQLSTATE (23505). */
 const UNIQUE_VIOLATION = '23505';
@@ -255,6 +264,14 @@ export class BookingsService {
     },
   ): Promise<BookingResponse> {
     const { dto, venue, ownerId, customerId, slotInputs, payMode } = args;
+
+      // 0. Security M1: validate every requested slot server-side BEFORE pricing
+      // or locking. Rejects non-grid-aligned / out-of-hours slots (400) and any
+      // overlap — within this request or against existing slots — (409). Without
+      // this the only collision guard is UNIQUE(unitId, startsAt), so two
+      // overlapping-but-differently-anchored slots (10:00-11:00 and 10:30-11:30)
+      // on the same court would both succeed.
+      await this.validateRequestedSlots(tx, slotInputs);
 
       // 1. Price each slot (resolved per-court dynamic price).
       let slotSubtotal = dec(0);
@@ -536,6 +553,105 @@ export class BookingsService {
         lineItems.push({ label: 'Points', amount: -Number(pointsValue) });
 
       return { ...this.toResponse(booking, lineItems), razorpayOrderId };
+  }
+
+  /**
+   * Security M1: server-side validation of a requested set of slots, run inside
+   * the booking transaction BEFORE any pricing/locking. Three checks:
+   *  1. Grid alignment (pure): each slot must start on the unit's operating grid
+   *     (anchored at the venue openTime, stepped by the game's
+   *     slotGranularityMin), be exactly one granularity step long, and fall
+   *     within operating hours. A violation is a 400 — the client sent a slot the
+   *     availability calendar would never have offered.
+   *  2. Intra-request overlap (pure): no two slots in the SAME request may
+   *     overlap on the same unit (interval intersection). A violation is a 409.
+   *  3. Existing-slot overlap (DB): for each unit, reject if any existing slot
+   *     row intersects [start, end) — the interval check the UNIQUE(unitId,
+   *     startsAt) constraint cannot express. A violation is a 409, consistent
+   *     with the unique-violation handling on the slot insert.
+   *
+   * Wall-clock comparison mirrors availability.service exactly: slot instants are
+   * read in the server's local zone (via luxon) and compared by minute-of-day to
+   * the venue's openTime/closeTime, so an already-grid-aligned booking the
+   * calendar produced always passes.
+   */
+  private async validateRequestedSlots(
+    tx: DbTx,
+    slotInputs: { unitId: string; start: string; end: string }[],
+  ): Promise<void> {
+    if (slotInputs.length === 0) {
+      throw new BadRequestException('Pick at least one slot.');
+    }
+
+    // Load the operating window + granularity for each referenced unit once.
+    const unitIds = [...new Set(slotInputs.map((s) => s.unitId))];
+    const units = await tx.query.bookableUnits.findMany({
+      where: inArray(bookableUnits.id, unitIds),
+      with: { venue: true, gameCatalogue: true },
+    });
+    const unitById = new Map(units.map((u) => [u.id, u]));
+
+    // 1 + 2: per-slot grid validation and intra-request overlap detection. Both
+    // use the pure helpers so they are exercised by the unit tests.
+    const intervals: IntervalSlot[] = [];
+    for (const s of slotInputs) {
+      const unit = unitById.get(s.unitId);
+      if (!unit) throw new BadRequestException('Unknown court selected.');
+
+      const start = DateTime.fromISO(s.start);
+      const end = DateTime.fromISO(s.end);
+      if (!start.isValid || !end.isValid) {
+        throw new BadRequestException('Slot has an invalid start or end time.');
+      }
+      const openMin = parseClockToMinutes(unit.venue.openTime);
+      const closeMin = parseClockToMinutes(unit.venue.closeTime);
+      if (openMin == null || closeMin == null) {
+        throw new BadRequestException('Court operating hours are misconfigured.');
+      }
+
+      const reason = validateSlotOnGrid(
+        { startMin: start.hour * 60 + start.minute, endMin: end.hour * 60 + end.minute },
+        {
+          openMin,
+          closeMin,
+          granularityMin: unit.gameCatalogue.slotGranularityMin,
+        },
+      );
+      if (reason) throw new BadRequestException(reason);
+
+      intervals.push({
+        unitId: s.unitId,
+        startMs: start.toMillis(),
+        endMs: end.toMillis(),
+      });
+    }
+
+    if (findIntraRequestOverlap(intervals) != null) {
+      throw new ConflictException(
+        'Two of the selected slots overlap on the same court. Please pick non-overlapping times.',
+      );
+    }
+
+    // 3: existing-slot interval overlap (DB). For each requested slot, a clash
+    // exists if some slot row on that unit satisfies startsAt < newEnd AND
+    // endsAt > newStart. This catches partial overlaps the UNIQUE(unitId,
+    // startsAt) key misses (e.g. 10:00-11:00 vs an existing 10:30-11:30).
+    for (const iv of intervals) {
+      const clash = await tx.query.slots.findFirst({
+        where: and(
+          eq(slots.unitId, iv.unitId),
+          lt(slots.startsAt, new Date(iv.endMs)),
+          gt(slots.endsAt, new Date(iv.startMs)),
+        ),
+      });
+      if (clash) {
+        throw new ConflictException(
+          clash.status === 'blocked'
+            ? 'A selected time is blocked for this court. Please pick another.'
+            : 'A selected time overlaps an existing booking. Please pick another.',
+        );
+      }
+    }
   }
 
   /**

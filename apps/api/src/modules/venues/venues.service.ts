@@ -216,10 +216,70 @@ export class VenuesService {
 
       const where = and(...filters);
 
+      // Map a venue row -> list item (derived status + counts + occupancy).
+      const toItem = async (v: {
+        id: string;
+        name: string;
+        city: string | null;
+        active: boolean;
+        openTime: string;
+        closeTime: string;
+        bookableUnits?: { id: string; active: boolean }[];
+      }) => {
+        const allUnits = v.bookableUnits ?? [];
+        const courtCount = allUnits.length;
+        const unitIds = allUnits.map((u) => u.id);
+
+        // pricedCount: distinct units that have at least one pricing rule.
+        let pricedCount = 0;
+        if (unitIds.length > 0) {
+          const priced = await tx
+            .selectDistinct({ unitId: pricingRules.unitId })
+            .from(pricingRules)
+            .where(inArray(pricingRules.unitId, unitIds));
+          pricedCount = priced.length;
+        }
+
+        const activeUnitIds = allUnits.filter((u) => u.active).map((u) => u.id);
+
+        return {
+          id: v.id,
+          name: v.name,
+          city: v.city ?? null,
+          status: this.deriveStatus(v.active, courtCount, pricedCount),
+          courtCount,
+          occupancyPct: await this.occupancyPct(
+            tx,
+            activeUnitIds,
+            v.openTime,
+            v.closeTime,
+            activeUnitIds.length,
+          ),
+        };
+      };
+
+      // Derived statuses (draft / needs_setup) are computed per-row and can't be
+      // pushed to SQL, so the whole matching set must be evaluated BEFORE
+      // filtering + paginating — otherwise total and the page are both wrong.
+      if (query.status === 'draft' || query.status === 'needs_setup') {
+        const allRows = await tx.query.venues.findMany({
+          where,
+          with: { bookableUnits: true },
+          orderBy: [desc(venues.createdAt)],
+        });
+        const all = await Promise.all(allRows.map(toItem));
+        const filtered = all.filter((i) => i.status === query.status);
+        const start = (page - 1) * pageSize;
+        return {
+          items: filtered.slice(start, start + pageSize),
+          total: filtered.length,
+        };
+      }
+
+      // Non-derived statuses (active / inactive / all): count + page in SQL.
       const total = (
         await tx.select({ c: count() }).from(venues).where(where)
       )[0].c;
-
       const rows = await tx.query.venues.findMany({
         where,
         with: { bookableUnits: true },
@@ -227,53 +287,8 @@ export class VenuesService {
         limit: pageSize,
         offset: (page - 1) * pageSize,
       });
-
-      const items = await Promise.all(
-        rows.map(async (v) => {
-          const allUnits = v.bookableUnits ?? [];
-          const courtCount = allUnits.length;
-          const unitIds = allUnits.map((u) => u.id);
-
-          // pricedCount: distinct units that have at least one pricing rule.
-          let pricedCount = 0;
-          if (unitIds.length > 0) {
-            const priced = await tx
-              .selectDistinct({ unitId: pricingRules.unitId })
-              .from(pricingRules)
-              .where(inArray(pricingRules.unitId, unitIds));
-            pricedCount = priced.length;
-          }
-
-          const activeUnitIds = allUnits
-            .filter((u) => u.active)
-            .map((u) => u.id);
-
-          return {
-            id: v.id,
-            name: v.name,
-            city: v.city ?? null,
-            status: this.deriveStatus(v.active, courtCount, pricedCount),
-            courtCount,
-            occupancyPct: await this.occupancyPct(
-              tx,
-              activeUnitIds,
-              v.openTime,
-              v.closeTime,
-              activeUnitIds.length,
-            ),
-          };
-        }),
-      );
-
-      // status sub-filter for derived states (draft / needs_setup) — these are
-      // computed per-row, so apply post-query (total stays the broad count;
-      // acceptable for a best-effort list).
-      const filtered =
-        query.status === 'draft' || query.status === 'needs_setup'
-          ? items.filter((i) => i.status === query.status)
-          : items;
-
-      return { items: filtered, total };
+      const items = await Promise.all(rows.map(toItem));
+      return { items, total };
     });
   }
 

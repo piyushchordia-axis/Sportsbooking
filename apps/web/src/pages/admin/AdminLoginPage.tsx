@@ -40,8 +40,8 @@ export function AdminLoginPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [showPass, setShowPass] = useState(false);
 
-  const [email, setEmail] = useState(import.meta.env.DEV ? 'owner@smasharena.local' : '');
-  const [password, setPassword] = useState(import.meta.env.DEV ? 'owner12345' : '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Forgot-password: 'signin' → 'request' (enter email) → 'reset' (token + new pw).
   const [pwStep, setPwStep] = useState<'signin' | 'request' | 'reset'>('signin');

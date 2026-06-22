@@ -205,18 +205,16 @@ function MultiSelect({
             </p>
           ) : (
             <>
-              {options.length > 6 && (
-                <div className="relative mb-1">
-                  <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-                  <input
-                    autoFocus
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={`Search ${label.toLowerCase()}…`}
-                    className="h-9 w-full rounded-lg border border-border bg-input-background pr-2 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-primary/50"
-                  />
-                </div>
-              )}
+              <div className="relative mb-1">
+                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={`Search ${label.toLowerCase()}…`}
+                  className="h-9 w-full rounded-lg border border-border bg-input-background pr-2 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-primary/50"
+                />
+              </div>
               <div className="max-h-60 overflow-y-auto">
                 <button
                   type="button"

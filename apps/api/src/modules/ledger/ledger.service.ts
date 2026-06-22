@@ -9,7 +9,10 @@ export interface LedgerPost {
   type: LedgerTxnType;
   /** signed amount: positive = credit, negative = debit */
   amount: Prisma.Decimal | number;
-  /** balance lane: "pack:<packId>" | "points" | "cash" */
+  /**
+   * balance lane, e.g. "pack:<packId>" | "points:<ownerId>" |
+   * "credit:<ownerId>" | "cash" | "dues" (SEC-5: points/credit are per-owner).
+   */
   lane: string;
   refType?: string;
   refId?: string;
@@ -32,9 +35,20 @@ export class LedgerService {
     customerId: string,
     lane: string,
   ): Promise<Prisma.Decimal> {
+    // Deterministic latest-row read: two rows can share the same createdAt
+    // (same millisecond), so add a stable tiebreaker on id to guarantee a
+    // single, well-defined "latest" row regardless of insertion timing.
+    // NOTE (schema batch): id is a random uuid, so {createdAt desc, id desc}
+    // is deterministic but NOT guaranteed to match true insertion order when
+    // timestamps collide. A monotonic sequence column (e.g. `seq BigInt
+    // @default(autoincrement())`) indexed by [customerId, lane, seq] would let
+    // us order strictly by insertion order. The advisory lock in post() makes
+    // this moot for writes (posts on a lane are serialized), so this only
+    // matters for read-time tie resolution between historically equal-timestamp
+    // rows.
     const last = await tx.ledgerTxn.findFirst({
       where: { customerId, lane },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return last?.balanceAfter ?? new Prisma.Decimal(0);
   }
@@ -44,6 +58,16 @@ export class LedgerService {
     tx: Prisma.TransactionClient,
     entry: LedgerPost,
   ): Promise<Prisma.Decimal> {
+    // Serialize concurrent posts on the same (customer, lane) within their
+    // transactions. pg_advisory_xact_lock blocks until any other txn holding
+    // the same lock key commits/rolls back, so the read-modify-append below is
+    // race-free even for posts landing in the same millisecond. The lock is
+    // tied to the transaction and released automatically on commit/rollback.
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext(${entry.customerId} || ':' || ${entry.lane})
+      )
+    `;
     const current = await this.balance(tx, entry.customerId, entry.lane);
     const delta = new Prisma.Decimal(entry.amount);
     const next = current.add(delta);

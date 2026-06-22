@@ -7,36 +7,68 @@ import {
   SlotStatus,
 } from '@sportsbooking/shared';
 import { useEffect, useMemo, useState } from 'react';
+import {
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  CreditCard,
+  ListChecks,
+  Search,
+  SlidersHorizontal,
+  User,
+  X,
+} from 'lucide-react';
 import { api, OwnerVenue } from '../../api/client';
 import {
+  Card,
   EmptyState,
   Field,
+  InfoCard,
+  KeyVal,
   Msg,
   PageHeader,
+  SectionLabel,
   Select,
+  StatusPill,
   useLoad,
 } from '../../components/common';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import {
+  DateRangePicker,
+  type DateRangeValue,
+} from '../../components/ui/date-range-picker';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from '../../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '../../components/ui/dialog';
+import { Skeleton } from '../../components/ui/skeleton';
 
-const STATUS_META: Record<
-  BookingStatus,
-  { label: string; tone: 'green' | 'red' | 'amber' | 'blue' | 'gray' }
-> = {
-  [BookingStatus.CONFIRMED]: { label: 'Confirmed', tone: 'blue' },
-  [BookingStatus.COMPLETED]: { label: 'Completed', tone: 'green' },
-  [BookingStatus.NO_SHOW]: { label: 'No-show', tone: 'amber' },
-  [BookingStatus.CANCELLED]: { label: 'Cancelled', tone: 'red' },
+const STATUS_LABEL: Record<BookingStatus, string> = {
+  [BookingStatus.CONFIRMED]: 'Confirmed',
+  [BookingStatus.COMPLETED]: 'Completed',
+  [BookingStatus.NO_SHOW]: 'No-show',
+  [BookingStatus.CANCELLED]: 'Cancelled',
 };
 
-const PAYMENT_META: Record<
-  PaymentStatus,
-  { label: string; tone: 'green' | 'red' | 'amber' | 'blue' | 'gray' }
-> = {
-  [PaymentStatus.PENDING]: { label: 'Pending', tone: 'gray' },
-  [PaymentStatus.PAID]: { label: 'Paid', tone: 'green' },
-  [PaymentStatus.AWAITING_VENUE_SETTLEMENT]: { label: 'Awaiting', tone: 'amber' },
-  [PaymentStatus.SETTLED_AT_VENUE]: { label: 'Settled', tone: 'green' },
-  [PaymentStatus.REFUNDED]: { label: 'Refunded', tone: 'gray' },
-  [PaymentStatus.FAILED]: { label: 'Failed', tone: 'red' },
+const PAYMENT_LABEL: Record<PaymentStatus, string> = {
+  [PaymentStatus.PENDING]: 'Pending',
+  [PaymentStatus.PAID]: 'Paid',
+  [PaymentStatus.AWAITING_VENUE_SETTLEMENT]: 'Awaiting',
+  [PaymentStatus.SETTLED_AT_VENUE]: 'Settled',
+  [PaymentStatus.REFUNDED]: 'Refunded',
+  [PaymentStatus.FAILED]: 'Failed',
 };
 
 const PAY_MODE_LABEL: Record<PayMode, string> = {
@@ -44,23 +76,31 @@ const PAY_MODE_LABEL: Record<PayMode, string> = {
   [PayMode.AT_VENUE]: 'Pay at venue',
 };
 
-const TONE: Record<string, string> = {
-  green: 'bg-primary/15 text-primary',
-  red: 'bg-destructive/15 text-destructive',
-  amber: 'bg-amber-400/15 text-amber-500',
-  blue: 'bg-blue-400/15 text-blue-400',
-  gray: 'bg-secondary text-secondary-foreground/70',
+type BadgeVariant = 'default' | 'secondary' | 'accent' | 'destructive' | 'outline';
+
+const STATUS_VARIANT: Record<BookingStatus, BadgeVariant> = {
+  [BookingStatus.CONFIRMED]: 'default',
+  [BookingStatus.COMPLETED]: 'default',
+  [BookingStatus.NO_SHOW]: 'accent',
+  [BookingStatus.CANCELLED]: 'destructive',
 };
 
-function Pill({ text, tone }: { text: string; tone: string }) {
-  return (
-    <span
-      className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-widest ${TONE[tone]}`}
-    >
-      {text}
-    </span>
-  );
-}
+const PAYMENT_VARIANT: Record<PaymentStatus, BadgeVariant> = {
+  [PaymentStatus.PENDING]: 'accent',
+  [PaymentStatus.PAID]: 'default',
+  [PaymentStatus.AWAITING_VENUE_SETTLEMENT]: 'accent',
+  [PaymentStatus.SETTLED_AT_VENUE]: 'default',
+  [PaymentStatus.REFUNDED]: 'secondary',
+  [PaymentStatus.FAILED]: 'destructive',
+};
+
+/** Convert a Date to a local `YYYY-MM-DD` string the bookings API expects. */
+const toISODate = (d?: Date) =>
+  d
+    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate(),
+      ).padStart(2, '0')}`
+    : '';
 
 const fmtDateTime = (iso: string) =>
   new Date(iso).toLocaleString([], {
@@ -83,13 +123,15 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
  */
 export function BookingsPage() {
   const [venues, setVenues] = useState<OwnerVenue[]>([]);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [range, setRange] = useState<DateRangeValue>({});
   const [venueId, setVenueId] = useState('');
   const [unitId, setUnitId] = useState('');
   const [status, setStatus] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [q, setQ] = useState('');
+
+  const from = toISODate(range.from);
+  const to = toISODate(range.to);
 
   // Debounce filters into an "applied" key so typing doesn't refetch per keystroke.
   const [applied, setApplied] = useState({
@@ -108,6 +150,19 @@ export function BookingsPage() {
     );
     return () => clearTimeout(t);
   }, [from, to, venueId, unitId, status, paymentStatus, q]);
+
+  const hasFilters = Boolean(
+    range.from || range.to || venueId || unitId || status || paymentStatus || q,
+  );
+
+  const clearFilters = () => {
+    setRange({});
+    setVenueId('');
+    setUnitId('');
+    setStatus('');
+    setPaymentStatus('');
+    setQ('');
+  };
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -145,7 +200,7 @@ export function BookingsPage() {
   const editing = list.data?.find((b) => b.id === editingId) ?? null;
 
   const venueOpts = [
-    { value: '', label: 'All venues' },
+    { value: '', label: 'All grounds' },
     ...venues.map((v) => ({ value: v.id, label: v.name })),
   ];
   const unitOpts = [
@@ -153,18 +208,51 @@ export function BookingsPage() {
     ...venueUnits.map((u) => ({ value: u.id, label: u.name })),
   ];
 
+  const total = list.data?.length ?? 0;
+
   return (
     <div className="container">
       <PageHeader
         title="Bookings"
-        subtitle="View, reschedule, settle and update your bookings"
+        subtitle="Review, reschedule, settle and update your bookings"
+        badge={
+          list.data ? (
+            <Badge variant="outline" className="tabular-nums">
+              {total} {total === 1 ? 'booking' : 'bookings'}
+            </Badge>
+          ) : undefined
+        }
       />
 
       {/* Filters */}
-      <div className="bg-card border border-border rounded-xl p-5 mb-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4">
-          <Field label="From" type="date" value={from} onChange={setFrom} />
-          <Field label="To" type="date" value={to} onChange={setTo} />
+      <Card className="mb-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <SectionLabel icon={SlidersHorizontal}>Filters</SectionLabel>
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" /> Clear all
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Date range spans two columns so it reads as the primary control. */}
+          <div className="mb-3 sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Date range
+            </span>
+            <DateRangePicker
+              value={range}
+              onChange={setRange}
+              placeholder="Any date"
+              align="start"
+            />
+          </div>
           <Select label="Venue" value={venueId} onChange={pickVenue} options={venueOpts} />
           <Select label="Court" value={unitId} onChange={setUnitId} options={unitOpts} />
           <Select
@@ -196,123 +284,143 @@ export function BookingsPage() {
               { value: PaymentStatus.FAILED, label: 'Failed' },
             ]}
           />
-          <div className="lg:col-span-2">
-            <Field
-              label="Search customer"
-              value={q}
-              onChange={setQ}
-              placeholder="Name or mobile"
-            />
+          <div className="sm:col-span-2">
+            <label className="mb-3 block">
+              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Search customer
+              </span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={q}
+                  placeholder="Name or mobile"
+                  onChange={(e) => setQ(e.target.value)}
+                  className="flex h-10 w-full min-w-0 rounded-xl border border-border bg-input-background pl-9 pr-3.5 py-1 text-sm text-foreground outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                />
+              </div>
+            </label>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* List */}
       {list.error ? (
-        <Msg text={list.error} />
+        <Card>
+          <Msg text={list.error} />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={list.reload}
+            className="mt-3"
+          >
+            Try again
+          </Button>
+        </Card>
       ) : list.loading && !list.data ? (
-        <p className="text-muted-foreground text-sm py-6">Loading bookings…</p>
-      ) : !list.data || list.data.length === 0 ? (
-        <EmptyState
-          title="No bookings match"
-          hint="Try widening the date range or clearing filters."
-        />
-      ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left">
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Customer
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Venue / court
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    When
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Payment
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Pay mode
-                  </th>
-                  <th className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-right">
-                    Total
-                  </th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {list.data.map((b) => {
-                  const first = b.slots[0];
-                  const extra = b.slots.length - 1;
-                  return (
-                    <tr key={b.id} className="border-b border-border/60 last:border-0">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">
-                          {b.customerName ?? 'Unknown'}
-                        </p>
-                        <p className="text-xs text-muted-foreground font-mono">
-                          {b.customerMobile ?? '—'}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="text-foreground">{b.venueName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {first?.unitName ?? '—'}
-                          {extra > 0 && ` +${extra}`}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {first ? (
-                          <>
-                            <p className="text-foreground">{fmtDateTime(first.start)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {b.slots.length} slot{b.slots.length === 1 ? '' : 's'}
-                            </p>
-                          </>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Pill
-                          text={STATUS_META[b.status].label}
-                          tone={STATUS_META[b.status].tone}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <Pill
-                          text={PAYMENT_META[b.paymentStatus].label}
-                          tone={PAYMENT_META[b.paymentStatus].tone}
-                        />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted-foreground">
-                        {PAY_MODE_LABEL[b.payMode]}
-                      </td>
-                      <td className="px-4 py-3 text-right font-display font-semibold whitespace-nowrap">
-                        ₹{b.total}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => setEditingId(b.id)}
-                          className="px-3 py-1.5 rounded-lg bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors"
-                        >
-                          Manage
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <Card className="p-0">
+          <div className="space-y-3 p-5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
           </div>
-        </div>
+        </Card>
+      ) : !list.data || list.data.length === 0 ? (
+        <Card>
+          <EmptyState
+            title={hasFilters ? 'No bookings match your filters' : 'No bookings yet'}
+            hint={
+              hasFilters
+                ? 'Widen the date range or clear filters to see more.'
+                : 'New bookings made at your venues will show up here.'
+            }
+          />
+          {hasFilters && (
+            <div className="flex justify-center pb-2">
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="px-5">Customer</TableHead>
+                <TableHead className="px-5">Venue / court</TableHead>
+                <TableHead className="px-5">When</TableHead>
+                <TableHead className="px-5">Status</TableHead>
+                <TableHead className="px-5">Payment</TableHead>
+                <TableHead className="px-5">Pay mode</TableHead>
+                <TableHead className="px-5 text-right">Total</TableHead>
+                <TableHead className="px-5" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.data.map((b) => {
+                const first = b.slots[0];
+                const extra = b.slots.length - 1;
+                return (
+                  <TableRow key={b.id}>
+                    <TableCell className="px-5 py-3.5">
+                      <p className="font-medium text-foreground">
+                        {b.customerName ?? 'Unknown'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {b.customerMobile ?? '—'}
+                      </p>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5">
+                      <p className="text-foreground">{b.venueName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {first?.unitName ?? '—'}
+                        {extra > 0 && ` +${extra}`}
+                      </p>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5 whitespace-nowrap">
+                      {first ? (
+                        <>
+                          <p className="text-foreground">{fmtDateTime(first.start)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {b.slots.length} slot{b.slots.length === 1 ? '' : 's'}
+                          </p>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5">
+                      <Badge variant={STATUS_VARIANT[b.status]}>
+                        {STATUS_LABEL[b.status]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5">
+                      <Badge variant={PAYMENT_VARIANT[b.paymentStatus]}>
+                        {PAYMENT_LABEL[b.paymentStatus]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5 whitespace-nowrap text-sm text-muted-foreground">
+                      {PAY_MODE_LABEL[b.payMode]}
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5 text-right font-display font-semibold whitespace-nowrap">
+                      ₹{b.total}
+                    </TableCell>
+                    <TableCell className="px-5 py-3.5 text-right">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setEditingId(b.id)}
+                      >
+                        Manage
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       {editing && (
@@ -389,6 +497,41 @@ function BookingEditor({
   const setStatus = (s: BookingStatus, ok: string) =>
     run(() => api.updateBookingStatus(booking.id, s), ok);
 
+  // Mark no-show: backend applies the venue's flat no-show fee (idempotent via
+  // Booking.noShowFeeApplied). Confirm first so staff know the customer will be
+  // charged, then surface the outcome.
+  const markNoShow = () => {
+    const ok = window.confirm(
+      "Mark this booking as a no-show? The venue's no-show fee will be charged to the customer.",
+    );
+    if (!ok) return;
+    return run(
+      () => api.updateBookingStatus(booking.id, BookingStatus.NO_SHOW),
+      "Marked as no-show — the venue's no-show fee has been applied to the customer.",
+    );
+  };
+
+  // Cancel: backend refunds per the venue's cancellation policy. Cash for
+  // prepaid bookings (a cancellation fee may be withheld), session/loyalty
+  // credit otherwise. Confirm first, then surface the expected outcome.
+  const cancelBooking = () => {
+    const prepaid =
+      booking.payMode === PayMode.PREPAY &&
+      booking.paymentStatus === PaymentStatus.PAID;
+    const ok = window.confirm(
+      prepaid
+        ? "Cancel this booking? The customer will be refunded per the venue's cancellation policy — a cancellation fee may be withheld."
+        : 'Cancel this booking? Any pack sessions or loyalty credit used will be returned to the customer.',
+    );
+    if (!ok) return;
+    return run(
+      () => api.cancelBooking(booking.id),
+      prepaid
+        ? "Booking cancelled — refund issued per the venue's cancellation policy (any cancellation fee withheld)."
+        : 'Booking cancelled — any pack sessions or loyalty credit have been returned.',
+    );
+  };
+
   const settle = () =>
     run(() => api.settleBooking(booking.id), 'Payment recorded — settled at venue.');
 
@@ -442,44 +585,54 @@ function BookingEditor({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 overflow-y-auto"
-      onClick={onClose}
-    >
-      <div
-        className="bg-card border border-border rounded-xl w-full max-w-2xl my-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3 p-5 border-b border-border">
-          <div>
-            <h3 className="font-display font-bold text-xl">Manage booking</h3>
-            <p className="text-xs text-muted-foreground font-mono mt-1">
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogHeader className="flex flex-row items-start justify-between gap-3 p-5 border-b border-border text-left space-y-0">
+          <div className="min-w-0">
+            <DialogTitle className="font-display font-bold text-xl">
+              Manage booking
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground mt-1 truncate">
               {booking.venueName} · {booking.customerName ?? 'Unknown'}
-            </p>
+            </DialogDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <Pill text={STATUS_META[booking.status].label} tone={STATUS_META[booking.status].tone} />
-            <button
-              onClick={onClose}
-              className="grid place-items-center h-8 w-8 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              ✕
-            </button>
+          <div className="flex items-center gap-2 shrink-0 pr-8">
+            <StatusPill status={booking.status}>{STATUS_LABEL[booking.status]}</StatusPill>
           </div>
-        </div>
+        </DialogHeader>
 
-        <div className="p-5 space-y-6">
+        <div className="p-5 space-y-4">
+          {/* Booking detail */}
+          <InfoCard title="Booking detail" icon={CalendarDays} accent="blue">
+            <KeyVal label="Venue" value={booking.venueName} />
+            <KeyVal label="Customer" value={booking.customerName ?? 'Unknown'} />
+            <KeyVal label="Mobile" value={booking.customerMobile ?? ''} />
+            <KeyVal
+              label="Status"
+              value={<StatusPill status={booking.status}>{STATUS_LABEL[booking.status]}</StatusPill>}
+            />
+            <KeyVal
+              label="Payment"
+              value={
+                <StatusPill status={booking.paymentStatus}>
+                  {PAYMENT_LABEL[booking.paymentStatus]}
+                </StatusPill>
+              }
+            />
+            <KeyVal label="Pay mode" value={PAY_MODE_LABEL[booking.payMode]} />
+            <KeyVal label="Total" value={`₹${booking.total}`} />
+          </InfoCard>
+
           {/* Current slots */}
           <div>
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            <SectionLabel icon={CalendarClock} className="mb-2">
               Current slots
-            </p>
+            </SectionLabel>
             <div className="flex flex-wrap gap-2">
               {booking.slots.map((s) => (
                 <span
                   key={s.start}
-                  className="px-2.5 py-1 rounded-lg bg-secondary text-secondary-foreground text-xs"
+                  className="px-2.5 py-1 rounded-lg bg-muted text-foreground text-xs"
                 >
                   {s.unitName} · {fmtDateTime(s.start)}–{fmtTime(s.end)}
                 </span>
@@ -492,69 +645,78 @@ function BookingEditor({
 
           {/* Status + payment */}
           <div>
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            <SectionLabel icon={ListChecks} className="mb-2">
               Status &amp; payment
-            </p>
+            </SectionLabel>
             <div className="flex flex-wrap gap-2">
-              <button
+              <Button
                 onClick={() =>
                   setStatus(BookingStatus.COMPLETED, 'Marked as completed.')
                 }
                 disabled={busy || cancelled || booking.status === BookingStatus.COMPLETED}
-                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors"
+                size="sm"
               >
-                Mark completed
-              </button>
-              <button
-                onClick={() => setStatus(BookingStatus.NO_SHOW, 'Marked as no-show.')}
+                <CheckCircle2 className="h-4 w-4" /> Mark completed
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={markNoShow}
                 disabled={busy || cancelled || booking.status === BookingStatus.NO_SHOW}
-                className="px-3 py-1.5 rounded-lg border border-amber-400/60 text-amber-500 text-sm font-medium disabled:opacity-40 hover:bg-amber-400/10 transition-colors"
+                className="border-amber-500/40 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/60"
               >
                 Mark no-show
-              </button>
+              </Button>
               {canSettle && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={settle}
                   disabled={busy}
-                  className="px-3 py-1.5 rounded-lg bg-accent text-accent-foreground text-sm font-medium disabled:opacity-40 hover:bg-accent/90 transition-colors"
                 >
-                  Record payment
-                </button>
+                  <CreditCard className="h-4 w-4" /> Record payment
+                </Button>
               )}
-              <button
-                onClick={() => setStatus(BookingStatus.CANCELLED, 'Booking cancelled.')}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={cancelBooking}
                 disabled={busy || cancelled}
-                className="px-3 py-1.5 rounded-lg border border-destructive/60 text-destructive text-sm font-medium disabled:opacity-40 hover:bg-destructive/10 transition-colors ml-auto"
+                className="ml-auto border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60"
               >
                 Cancel booking
-              </button>
+              </Button>
             </div>
+            {!cancelled && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                No-show charges the venue&apos;s no-show fee to the customer.
+                Cancelling refunds the customer per the venue&apos;s cancellation
+                policy (any cancellation fee withheld), or returns pack/loyalty
+                credit.
+              </p>
+            )}
           </div>
 
           {/* Customer */}
           <div>
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            <SectionLabel icon={User} className="mb-2">
               Customer details
-            </p>
+            </SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
               <Field label="Name" value={name} onChange={setName} />
               <Field label="Mobile" value={mobile} onChange={setMobile} />
             </div>
-            <button
-              onClick={saveCustomer}
-              disabled={busy}
-              className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm font-semibold disabled:opacity-40 hover:bg-secondary/80 transition-colors"
-            >
+            <Button variant="secondary" size="sm" onClick={saveCustomer} disabled={busy}>
               Save customer
-            </button>
+            </Button>
           </div>
 
           {/* Reschedule */}
           {!cancelled && (
             <div>
-              <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+              <SectionLabel icon={CalendarClock} className="mb-2">
                 Reschedule
-              </p>
+              </SectionLabel>
               <div className="flex flex-wrap items-end gap-3">
                 <div className="w-40">
                   <Select
@@ -567,13 +729,14 @@ function BookingEditor({
                 <div className="w-40">
                   <Field label="Date" type="date" value={rDate} onChange={setRDate} />
                 </div>
-                <button
+                <Button
+                  className="mb-3"
+                  size="sm"
                   onClick={loadAvailability}
                   disabled={!rUnit || busy}
-                  className="mb-3 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-40 hover:bg-primary/90 transition-colors"
                 >
                   Load availability
-                </button>
+                </Button>
               </div>
 
               {slots.length > 0 && (
@@ -589,16 +752,16 @@ function BookingEditor({
                           'border-primary bg-primary/15 ring-1 ring-primary/40 cursor-pointer';
                       else if (!isOpen)
                         cls =
-                          'border-transparent bg-secondary/40 opacity-50 cursor-not-allowed';
+                          'border-transparent bg-muted/40 opacity-50 cursor-not-allowed';
                       return (
                         <button
                           key={s.start}
                           onClick={() => toggle(s)}
                           disabled={!isOpen}
                           aria-pressed={isSel}
-                          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border py-2 transition-colors ${cls}`}
+                          className={`flex flex-col items-center justify-center gap-0.5 rounded-xl border py-2 transition-colors ${cls}`}
                         >
-                          <span className="text-[11px] font-mono text-muted-foreground">
+                          <span className="text-[11px] text-muted-foreground">
                             {fmtTime(s.start)}
                           </span>
                           <span
@@ -616,13 +779,13 @@ function BookingEditor({
                     <span className="text-sm text-muted-foreground">
                       {selected.size} slot(s) · ₹{newTotal}
                     </span>
-                    <button
+                    <Button
+                      size="sm"
                       onClick={confirmReschedule}
                       disabled={busy || selected.size === 0}
-                      className="px-4 py-2 rounded-lg bg-accent text-accent-foreground text-sm font-semibold disabled:opacity-40 hover:bg-accent/90 transition-colors"
                     >
                       Confirm reschedule
-                    </button>
+                    </Button>
                   </div>
                 </>
               )}
@@ -631,7 +794,7 @@ function BookingEditor({
 
           <Msg text={msg} />
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

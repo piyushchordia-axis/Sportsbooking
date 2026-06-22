@@ -88,6 +88,33 @@ export interface CartSlotInput {
   end: string; // ISO
 }
 
+/**
+ * Optional weekly recurrence for a booking (PRD §5.2 v1). When present, the
+ * booking is repeated weekly at the same time-of-day on the same court(s),
+ * `count` total occurrences (including the first), capped server-side.
+ */
+export interface BookingRecurrence {
+  frequency: 'weekly';
+  /** total occurrences including the first; capped at 12 server-side */
+  count: number;
+}
+
+/** A single occurrence that could not be created because its slot(s) clashed. */
+export interface BookingSeriesConflict {
+  /** ISO start of the first slot of the skipped occurrence */
+  start: string;
+  reason: string;
+}
+
+/** Summary of a created recurring series, returned alongside the first booking. */
+export interface BookingSeriesSummary {
+  seriesId: string;
+  /** number of occurrences actually created */
+  created: number;
+  /** occurrences skipped due to slot conflicts/blocks */
+  skipped: BookingSeriesConflict[];
+}
+
 export interface CreateBookingRequest {
   venueId: string;
   slots: CartSlotInput[];
@@ -98,6 +125,12 @@ export interface CreateBookingRequest {
   pointsToRedeem?: number;
   /** customer contact for player capture if not already authenticated */
   customer?: { name: string; mobile: string; consent: boolean };
+  /**
+   * Optional weekly recurrence (PRD §5.2 v1). Absent → a single booking with
+   * the response shape unchanged. Present → a weekly series; the response adds
+   * a `series` summary. Only supported for AT_VENUE pay mode.
+   */
+  recurrence?: BookingRecurrence;
 }
 
 /** Owner CRM directory row (PRD §4.9) — name/mobile sourced from the player
@@ -132,6 +165,12 @@ export interface BookingResponse {
   total: number;
   lineItems: BookingLineItem[];
   razorpayOrderId?: string;
+  /**
+   * Present only for recurring bookings (PRD §5.2 v1). Omitted entirely for a
+   * single (non-recurring) booking so the response shape is unchanged. `id`,
+   * `total` and `lineItems` above always describe the FIRST occurrence.
+   */
+  series?: BookingSeriesSummary;
 }
 
 /** A single occupying slot on an owner's booking, with the court's name. */

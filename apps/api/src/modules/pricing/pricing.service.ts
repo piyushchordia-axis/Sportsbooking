@@ -87,17 +87,28 @@ export class PricingService {
       durationMin,
     };
 
-    let best: { score: number; price: Prisma.Decimal } | null = null;
+    let best: { score: number; price: Prisma.Decimal; id: string } | null =
+      null;
     for (const rule of rules) {
       const s = this.score(rule, ctx);
       if (s < 0) continue;
       if (!best || s > best.score) {
-        best = { score: s, price: rule.price };
+        best = { score: s, price: rule.price, id: rule.id };
+        continue;
+      }
+      // Deterministic tiebreaker for equal specificity: prefer the lower
+      // price, then the lexicographically smaller rule id, so resolution is
+      // stable regardless of row ordering (BUG-12).
+      if (s === best.score) {
+        const cmp = rule.price.comparedTo(best.price);
+        if (cmp < 0 || (cmp === 0 && rule.id < best.id)) {
+          best = { score: s, price: rule.price, id: rule.id };
+        }
       }
     }
     if (!best) {
       // fall back to a base rule (no dimensions) if present; else first rule
-      best = { score: 0, price: rules[0].price };
+      best = { score: 0, price: rules[0].price, id: rules[0].id };
     }
     return { price: best.price, dayType: ctx.dayType, timeBand: ctx.timeBand };
   }

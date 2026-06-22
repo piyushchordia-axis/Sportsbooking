@@ -143,6 +143,26 @@ The **Owners** table lists every account with live oversight columns:
 Use **Venues vs Quota** to spot owners approaching their cap. The newest owners
 appear at the top.
 
+### AMC renewal reminders & auto-suspend
+
+The platform runs a daily **AMC (annual maintenance contract)** sweep (PRD §3.2):
+owners whose `amcRenewalDate` falls within the next 7 days get a renewal reminder
+(WhatsApp + SMS via the notification adapter), and owners more than 7 days overdue
+are **auto-suspended**.
+
+- **Run now:** the **Owners** page has a **Run AMC check** button that triggers
+  the sweep on demand (`POST /api/super-admin/amc/run`) and reports how many
+  owners were reminded / suspended.
+- **Safety:** auto-suspension only mutates data when the API runs with
+  `NODE_ENV=production`. In dev/local it is a **dry-run** — it logs which owners
+  *would* be suspended but changes nothing, so the seeded demo owner survives
+  local testing.
+- Suspended owners can be set back to **active** with the status control above.
+
+> Reminder delivery depends on a configured notification gateway
+> (`NOTIFICATION_DRIVER=live` + `SMS_API_URL` / `WHATSAPP_API_URL`); with the
+> default `log` driver the messages are only logged to the API console.
+
 ---
 
 ## 6. Common tasks — quick reference
@@ -153,7 +173,9 @@ appear at the top.
 | Add a new sport everyone can offer | **Games** | Fill *Add game* → **Add game** |
 | Bring a new venue business online | **Owners** | Fill *Onboard owner* → **Onboard owner** |
 | See an owner's venue usage vs cap | **Owners** | Read the *Venues* / *Quota* columns |
-| End your session | Any page | **Logout** (top-right) |
+| Send AMC reminders / suspend lapsed owners | **Owners** | **Run AMC check** |
+| Change your admin password | Account/profile | Use **change password** (`POST /api/auth/password`) |
+| End your session | Any page | **Logout** (top-right) — revokes the refresh token |
 
 ---
 
@@ -166,9 +188,14 @@ For automation or integration, the Super Admin console calls these REST endpoint
 |--------|---------------|
 | List games | `GET /api/super-admin/games` |
 | Create game | `POST /api/super-admin/games` |
+| Update game | `PATCH /api/super-admin/games/:id` |
 | List owners | `GET /api/super-admin/owners` |
 | Onboard owner | `POST /api/super-admin/owners` |
+| Update owner status | `PATCH /api/super-admin/owners/:id/status/:status` (validated against the status enum) |
+| Run AMC reminder/suspend sweep | `POST /api/super-admin/amc/run` |
 | Platform report | `GET /api/reports/platform` |
+| Change own password | `POST /api/auth/password` |
+| Log out (revoke refresh token) | `POST /api/auth/logout` |
 
 ---
 

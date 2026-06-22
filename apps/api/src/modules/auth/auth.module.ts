@@ -5,7 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtStrategy } from './jwt.strategy';
+import { JwtStrategy, resolveJwtSecret } from './jwt.strategy';
 import { OtpService } from './otp.service';
 
 @Module({
@@ -16,7 +16,7 @@ import { OtpService } from './otp.service';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET', 'change-me-in-prod'),
+        secret: resolveJwtSecret(config),
       }),
     }),
   ],

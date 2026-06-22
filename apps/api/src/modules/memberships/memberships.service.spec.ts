@@ -11,7 +11,7 @@ describe('MembershipsService.evaluatePack', () => {
   const service = new MembershipsService({} as never, ledger as never);
 
   const tx = (pack: Record<string, unknown>) =>
-    ({ membershipPack: { findUnique: jest.fn().mockResolvedValue(pack) } }) as never;
+    ({ membershipPack: { findFirst: jest.fn().mockResolvedValue(pack) } }) as never;
 
   beforeEach(() => ledger.balance.mockResolvedValue(new Prisma.Decimal(10)));
 
@@ -24,9 +24,10 @@ describe('MembershipsService.evaluatePack', () => {
       discountPct: null,
     };
     const app = await service.evaluatePack(
-      tx(pack),
-      'p1',
+      'o1',
       'c1',
+      'p1',
+      tx(pack),
       'v1',
       ['u1'],
       2,
@@ -45,9 +46,10 @@ describe('MembershipsService.evaluatePack', () => {
       discountPct: new Prisma.Decimal(25),
     };
     const app = await service.evaluatePack(
-      tx(pack),
-      'p1',
+      'o1',
       'c1',
+      'p1',
+      tx(pack),
       'v1',
       ['u1'],
       1,
@@ -65,7 +67,7 @@ describe('MembershipsService.evaluatePack', () => {
       discountPct: null,
     };
     await expect(
-      service.evaluatePack(tx(pack), 'p1', 'c1', 'v1', ['u1'], 1, new Prisma.Decimal(800)),
+      service.evaluatePack('o1', 'c1', 'p1', tx(pack), 'v1', ['u1'], 1, new Prisma.Decimal(800)),
     ).rejects.toThrow(/not valid at this venue/);
   });
 
@@ -79,7 +81,7 @@ describe('MembershipsService.evaluatePack', () => {
       discountPct: null,
     };
     await expect(
-      service.evaluatePack(tx(pack), 'p1', 'c1', 'v1', ['u1'], 2, new Prisma.Decimal(1600)),
+      service.evaluatePack('o1', 'c1', 'p1', tx(pack), 'v1', ['u1'], 2, new Prisma.Decimal(1600)),
     ).rejects.toThrow(/Not enough pack sessions/);
   });
 });

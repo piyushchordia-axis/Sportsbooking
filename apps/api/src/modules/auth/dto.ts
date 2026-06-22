@@ -38,3 +38,36 @@ export class StaffLoginDto {
   @MinLength(8)
   password!: string;
 }
+
+export class RefreshTokenDto {
+  @IsString()
+  refreshToken!: string;
+}
+
+export class LogoutDto {
+  @IsString()
+  refreshToken!: string;
+}
+
+export class ChangePasswordDto {
+  @IsString()
+  currentPassword!: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+
+export class PasswordResetRequestDto {
+  @IsEmail()
+  email!: string;
+}
+
+export class PasswordResetDto {
+  @IsString()
+  token!: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}

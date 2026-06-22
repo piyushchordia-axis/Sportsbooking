@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "port": 5001,
+      "autoPort": false
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@sportsbooking/web",
+        "exec",
+        "vite",
+        "--port",
+        "5055",
+        "--strictPort",
+        "--host"
+      ],
+      "port": 5055,
+      "autoPort": false
+    }
+  ]
+}

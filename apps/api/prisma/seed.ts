@@ -254,6 +254,8 @@ async function seed(prisma: PrismaClient) {
       photos: ['/images/venues/pickleball.jpg', '/images/venues/badminton.jpg'],
       city: 'Bengaluru',
       address: '100ft Road, Indiranagar',
+      geoLat: 12.9719,
+      geoLng: 77.6412,
       contactPhone: '+919900000010',
       openTime: '06:00',
       closeTime: '23:00',
@@ -268,6 +270,8 @@ async function seed(prisma: PrismaClient) {
       photos: ['/images/venues/turf-football.jpg', '/images/venues/box-cricket.jpg'],
       city: 'Bengaluru',
       address: '80ft Road, Koramangala',
+      geoLat: 12.9352,
+      geoLng: 77.6245,
       contactPhone: '+919900000011',
       openTime: '06:00',
       closeTime: '23:00',
@@ -499,7 +503,7 @@ async function seed(prisma: PrismaClient) {
   });
   await prisma.user.create({ data: { role: 'owner', ownerId: baseline.id, name: 'Baseline Admin', email: 'admin@baseline.local', passwordHash: ownerPass } });
   const bv = await prisma.venue.create({
-    data: { ownerId: baseline.id, name: 'Baseline — HSR Layout', photos: ['/images/venues/pickleball.jpg'], city: 'Bengaluru', address: '27th Main, HSR', openTime: '06:00', closeTime: '22:00', games: { create: [{ gameId: pickleball.id }] }, settings: { create: { noShowFee: 150 } } },
+    data: { ownerId: baseline.id, name: 'Baseline — HSR Layout', photos: ['/images/venues/pickleball.jpg'], city: 'Bengaluru', address: '27th Main, HSR', geoLat: 12.9116, geoLng: 77.6389, openTime: '06:00', closeTime: '22:00', games: { create: [{ gameId: pickleball.id }] }, settings: { create: { noShowFee: 150 } } },
   });
   const bCourt = await makeUnit(bv.id, baseline.id, 'Court 1', 'court', pickleball.id, 4, { base: 550, weekend: 700, evening: 800, weekendEvening: 950 });
   await makeBooking({ ownerId: baseline.id, venueId: bv.id, unitId: bCourt.id, customerId: aarav.id, start: playAt(-4, 18), status: 'completed', payMode: 'prepay', paymentStatus: 'paid', subtotal: 800, total: 800 });

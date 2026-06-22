@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -34,6 +35,22 @@ export class CustomerCaptureDto {
 
   @IsBoolean()
   consent!: boolean;
+}
+
+/** Max occurrences in a single weekly series (PRD §5.2 v1 cap). */
+export const MAX_RECURRENCE_COUNT = 12;
+
+export class RecurrenceDto {
+  // v1 supports weekly only; modelled as an enum-of-one so adding daily/monthly
+  // later is a non-breaking extension.
+  @IsIn(['weekly'])
+  frequency!: 'weekly';
+
+  /** total occurrences INCLUDING the first; 2..MAX_RECURRENCE_COUNT */
+  @IsInt()
+  @Min(2)
+  @Max(MAX_RECURRENCE_COUNT)
+  count!: number;
 }
 
 export class CreateBookingDto {
@@ -75,6 +92,16 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  /**
+   * Optional weekly recurrence (PRD §5.2 v1). Absent → a single booking
+   * (behaviour unchanged). Present → a weekly series; only AT_VENUE pay mode is
+   * supported (PREPAY + recurrence is rejected by the service).
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecurrenceDto)
+  recurrence?: RecurrenceDto;
 }
 
 export class ConfirmPaymentDto {

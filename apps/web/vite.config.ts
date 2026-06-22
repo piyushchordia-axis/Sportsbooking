@@ -6,6 +6,10 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
+    // With pnpm's symlinked store, Radix/Recharts can resolve their own copy of
+    // React, which breaks hooks ("Invalid hook call … more than one copy of
+    // React"). Force a single instance.
+    dedupe: ['react', 'react-dom'],
     alias: {
       // Resolve the shared contract to its TS source so Vite can statically
       // analyse enum exports (the CJS dist uses export* which bundlers can't
@@ -15,6 +19,9 @@ export default defineConfig({
       ),
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-dom/client'],
   },
   server: {
     host: '0.0.0.0',

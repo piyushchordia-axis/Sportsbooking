@@ -3,10 +3,23 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true preserves the unparsed request body so the Razorpay webhook
+  // can verify the HMAC signature against the exact bytes Razorpay signed.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: true, credentials: true });
+
+  // In production, restrict CORS to an allowlist from WEB_ORIGIN (comma-separated)
+  // instead of reflecting any origin. In dev, keep the permissive origin so local
+  // dev (Vite, etc.) keeps working without configuration.
+  const isProd = process.env.NODE_ENV === 'production';
+  const allowlist = (process.env.WEB_ORIGIN ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  const corsOrigin: boolean | string[] =
+    isProd && allowlist.length > 0 ? allowlist : true;
+  app.enableCors({ origin: corsOrigin, credentials: true });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

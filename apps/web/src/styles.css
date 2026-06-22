@@ -1,73 +1,118 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap');
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Sportline design tokens. White-label branding (see ThemeProvider) overrides
- * the source --primary / --secondary / --accent vars at runtime so the whole
- * app re-themes per owner while keeping the Sportline palette as the default.
+ * "Warm Industrial" palette — ported 1:1 from the Reflex Logistics TMS
+ * (src/app/globals.css): warm-neutral surfaces + a deep teal primary (OKLCH).
+ * Light mode: crisp, airy, high contrast. Dark mode: warm graphite.
  *
- * Light is the :root default; the `.dark` block below overrides only the
- * NEUTRAL surface tokens (background / card / popover / muted / border / input
- * + text). Brand tokens (--primary/--secondary/--accent + their foregrounds and
- * --ring) are mode-independent and re-themed at runtime by ThemeProvider, so
- * they live here once and stay consistent across dark/light. The dark/light
- * mode is toggled by adding/removing `.dark` on <html> (see ThemeProvider and
- * the no-flash bootstrap script in index.html).
+ * White-label branding (ThemeProvider) overrides --primary/--secondary/--accent
+ * + foregrounds + --ring ONLY when a real owner brand is active; the default app
+ * uses these exact tokens, per mode. Mode is toggled by .dark on <html>
+ * (ThemeProvider + the no-flash bootstrap in index.html).
+ *
+ * Tokens prefixed below that are NOT in shadcn's set (--border-faint, --row-hover,
+ * --input-background, --elevated, --rail-*) are app extensions used by our
+ * primitives (cards, tables, KPI rails).
  */
 :root {
   --font-size: 16px;
-  /* Neutral surfaces — light (default). Overridden by `.dark`. */
-  --background: #f3f5fa;
-  --foreground: #101828;
-  --card: #ffffff;
-  --card-foreground: #101828;
-  --popover: #ffffff;
-  --popover-foreground: #101828;
-  --muted: #eef1f8;
-  --muted-foreground: #5b6a85;
-  --border: rgba(13, 20, 36, 0.12);
-  --border-faint: rgba(13, 20, 36, 0.07);
-  --row-hover: rgba(13, 20, 36, 0.035);
+
+  /* Refined neutral daylight */
+  --background: oklch(0.972 0.004 84);
+  --foreground: oklch(0.19 0.014 58);
+  --card: oklch(0.995 0.002 84);
+  --card-foreground: oklch(0.19 0.014 58);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.014 58);
+
+  /* Deep teal — the distinctive primary. Not blue, not green. */
+  --primary: oklch(0.48 0.102 184);
+  --primary-foreground: oklch(0.98 0 0);
+
+  --secondary: oklch(0.93 0.005 84);
+  --secondary-foreground: oklch(0.27 0.015 58);
+  --muted: oklch(0.94 0.004 84);
+  --muted-foreground: oklch(0.47 0.016 58);
+
+  /* Accent: we repurpose Reflex's amber (chart-2) as a VIVID highlight, since our
+     primitives use `accent` for icon/rail color rather than a hover surface. */
+  --accent: oklch(0.65 0.14 65);
+  --accent-foreground: oklch(0.2 0.02 65);
+
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.86 0.007 84);
+  --border-faint: oklch(0.9 0.006 84);
+  --row-hover: color-mix(in oklab, var(--foreground) 4%, transparent);
   --input: transparent;
-  --input-background: #eef1f8;
-  /* Brand palette (mode-independent; overridden at runtime by ThemeProvider). */
-  --primary: #20d07a;
-  --primary-foreground: #040a10;
-  --secondary: #162038;
-  --secondary-foreground: #a0b0cc;
-  --accent: #f5a623;
-  --accent-foreground: #070b14;
-  --ring: #20d07a;
-  /* Mode-independent. */
-  --destructive: #e53e5a;
-  --destructive-foreground: #ffffff;
+  --input-background: oklch(0.94 0.004 84);
+  --ring: oklch(0.48 0.102 184);
+
+  /* App-shell surfaces */
+  --sidebar: oklch(0.955 0.004 84);
+  --elevated: oklch(0.985 0.003 84);
+
+  /* Charts: teal → amber → slate → copper → olive (Reflex) */
+  --chart-1: oklch(0.5 0.11 175);
+  --chart-2: oklch(0.65 0.14 65);
+  --chart-3: oklch(0.48 0.04 250);
+  --chart-4: oklch(0.6 0.13 45);
+  --chart-5: oklch(0.52 0.09 140);
+
+  /* Vivid card-rail accents (mode-independent mid-tones) */
+  --rail-blue: oklch(0.58 0.13 245);
+  --rail-emerald: oklch(0.6 0.12 178);
+  --rail-purple: oklch(0.55 0.17 300);
+  --rail-orange: oklch(0.66 0.15 55);
+  --rail-pink: oklch(0.62 0.21 8);
+
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: #20d07a;
-  --chart-2: #f5a623;
-  --chart-3: #3b82f6;
-  --chart-4: #a855f7;
-  --chart-5: #e53e5a;
   --radius: 0.625rem;
 }
 
-/* Dark mode — the original Sportline "stadium-night" neutral surfaces. */
+/* Dark mode — deep graphite with subtle warmth (Reflex). */
 .dark {
-  --background: #070b14;
-  --foreground: #e8edf8;
-  --card: #0d1424;
-  --card-foreground: #e8edf8;
-  --popover: #0d1424;
-  --popover-foreground: #e8edf8;
-  --muted: #111c30;
-  --muted-foreground: #6a7d9c;
-  --border: rgba(255, 255, 255, 0.07);
-  --border-faint: rgba(255, 255, 255, 0.04);
-  --row-hover: rgba(255, 255, 255, 0.02);
+  --background: oklch(0.15 0.01 56);
+  --foreground: oklch(0.93 0.007 82);
+  --card: oklch(0.19 0.012 56);
+  --card-foreground: oklch(0.93 0.007 82);
+  --popover: oklch(0.19 0.012 56);
+  --popover-foreground: oklch(0.93 0.007 82);
+
+  --primary: oklch(0.67 0.116 184);
+  --primary-foreground: oklch(0.16 0.012 56);
+
+  --secondary: oklch(0.23 0.015 56);
+  --secondary-foreground: oklch(0.87 0.008 82);
+  --muted: oklch(0.22 0.012 56);
+  --muted-foreground: oklch(0.66 0.014 70);
+
+  --accent: oklch(0.68 0.14 65);
+  --accent-foreground: oklch(0.16 0.02 65);
+
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.28 0.014 56);
+  --border-faint: oklch(0.24 0.014 56);
   --input: transparent;
-  --input-background: #111c30;
+  --input-background: oklch(0.22 0.012 56);
+  --ring: oklch(0.6 0.11 184);
+
+  --sidebar: oklch(0.145 0.012 56);
+  --elevated: oklch(0.22 0.012 56);
+
+  --chart-1: oklch(0.6 0.12 175);
+  --chart-2: oklch(0.68 0.14 65);
+  --chart-3: oklch(0.55 0.04 250);
+  --chart-4: oklch(0.65 0.12 45);
+  --chart-5: oklch(0.58 0.08 140);
 }
 
 @theme inline {
@@ -91,18 +136,26 @@
   --color-input: var(--input);
   --color-input-background: var(--input-background);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-elevated: var(--elevated);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --color-rail-blue: var(--rail-blue);
+  --color-rail-emerald: var(--rail-emerald);
+  --color-rail-purple: var(--rail-purple);
+  --color-rail-orange: var(--rail-orange);
+  --color-rail-pink: var(--rail-pink);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, monospace;
-  --font-display: 'Rajdhani', sans-serif;
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -117,9 +170,26 @@
   body {
     margin: 0;
     background-color: var(--background);
+    /* Refined "warm industrial" backdrop: a soft teal glow top-left + a vertical
+       lighten toward the top (ported from Reflex). Shows through the transparent
+       app-shell main column. */
+    background-image:
+      radial-gradient(
+        circle at top left,
+        color-mix(in oklab, var(--primary) 14%, transparent) 0%,
+        transparent 38%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--background) 78%, white) 0%,
+        var(--background) 100%
+      );
+    background-attachment: fixed;
     color: var(--foreground);
-    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'cv01', 'cv03', 'ss01';
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   a {
@@ -127,11 +197,6 @@
     text-decoration: none;
   }
 
-  /*
-   * Sensible dark-theme defaults for raw elements that appear across CRUD
-   * pages. These live in @layer base, so any Tailwind utility class on an
-   * element overrides them — bespoke screens stay in full control.
-   */
   button:not([class*='bg-']):not([class*='text-']) {
     cursor: pointer;
     font-family: inherit;
@@ -140,7 +205,7 @@
     color: var(--primary-foreground);
     background-color: var(--primary);
     border: none;
-    border-radius: 0.5rem;
+    border-radius: 0.625rem;
     padding: 0.5rem 0.9rem;
     transition: all 0.15s ease;
   }
@@ -154,6 +219,28 @@
     cursor: not-allowed;
   }
 
+  /*
+   * Tailwind v4's Preflight removed the default `cursor: pointer` on buttons, so
+   * styled controls render with the arrow cursor. Restore the pointer for every
+   * interactive control (links, native + ARIA-role widgets). Disabled controls
+   * keep the default cursor.
+   */
+  button:not(:disabled):not([aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true']),
+  [role='menuitemradio']:not([aria-disabled='true']),
+  [role='menuitemcheckbox']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']),
+  [role='switch']:not([aria-disabled='true']),
+  a[href],
+  label[for],
+  select:not(:disabled),
+  summary,
+  ::file-selector-button {
+    cursor: pointer;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -162,18 +249,18 @@
 
   th {
     text-align: left;
-    font-family: 'DM Mono', ui-monospace, monospace;
     font-size: 10px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.13em;
     color: var(--muted-foreground);
-    padding: 0.7rem 0.75rem;
+    padding: 0.75rem 0.85rem;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
   }
 
   td {
-    padding: 0.7rem 0.75rem;
+    padding: 0.8rem 0.85rem;
     border-bottom: 1px solid var(--border-faint);
     color: var(--foreground);
   }
@@ -193,7 +280,8 @@
 
 @layer utilities {
   .font-display {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
   }
 
   .hide-scrollbar::-webkit-scrollbar {
@@ -204,16 +292,117 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Subtle teal glow for the primary CTA. */
+  .glow-primary {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+      0 12px 40px -12px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
+
+  /* Engineering-mesh backdrop used on the login hero panel. */
+  .grid-backdrop {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 46px 46px;
+  }
+
+  .surface-elevated {
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--card) 92%, var(--primary) 5%),
+      var(--card)
+    );
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * "Floodlights" — the consumer landing identity. Scoped via these
+   * opt-in classes so the admin/owner console keeps the Geist look.
+   * Display = Archivo (athletic grotesque); scoreboard = Space Mono.
+   * ────────────────────────────────────────────────────────────────── */
+  .ff-display {
+    font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.03em;
+  }
+  .ff-score {
+    font-family: 'Space Mono', ui-monospace, monospace;
+    font-feature-settings: 'tnum';
+    letter-spacing: -0.01em;
+  }
+
+  /* Painted pitch markings — faint field lines behind the floodlit hero. */
+  .pitch-lines {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--accent) 22%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--accent) 16%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 64px 64px;
+    background-position: center;
+  }
+
+  /* The single floodlamp sweep across the slot board — the one bold motion. */
+  .flood-sweep {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      color-mix(in oklab, var(--accent) 14%, transparent) 48%,
+      transparent 66%
+    );
+    transform: translateX(-60%);
+    animation: flood-sweep 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes flood-sweep {
+    0%,
+    100% {
+      transform: translateX(-60%);
+    }
+    50% {
+      transform: translateX(60%);
+    }
+  }
+
+  /* Live "now" indicator — a soft breathing dot. */
+  .live-dot {
+    animation: live-dot 1.9s ease-in-out infinite;
+  }
+  @keyframes live-dot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.4;
+      transform: scale(0.78);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flood-sweep,
+    .live-dot {
+      animation: none;
+    }
+  }
 }
 
 /*
- * Page container. Defined unlayered so it reliably overrides Tailwind's
- * built-in `.container` utility (unlayered CSS wins over @layer rules).
- * Centers content and matches the app shell width.
+ * Page container. Unlayered so it reliably overrides Tailwind's built-in
+ * `.container`. Centers content + matches the shell content width.
  */
 .container {
   width: 100%;
-  max-width: 80rem;
+  max-width: 84rem;
   margin-inline: auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 1.75rem 1.5rem 4rem;
 }

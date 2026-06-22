@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { OwnerStatus, UserRole } from '@sportsbooking/shared';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { UserRole } from '@sportsbooking/shared';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { CreateGameDto, CreateOwnerDto } from './dto';
-import { SuperAdminService } from './super-admin.service';
+import { CreateGameDto, CreateOwnerDto, UpdateGameDto } from './dto';
+import { SuperAdminService, UpdateOwnerDto } from './super-admin.service';
 
 @Controller('super-admin')
 @UseGuards(RolesGuard)
@@ -21,6 +30,16 @@ export class SuperAdminController {
     return this.service.createGame(dto);
   }
 
+  @Patch('games/:id')
+  updateGame(@Param('id') id: string, @Body() dto: UpdateGameDto) {
+    return this.service.updateGame(id, dto);
+  }
+
+  @Delete('games/:id')
+  deleteGame(@Param('id') id: string) {
+    return this.service.deleteGame(id);
+  }
+
   @Post('owners')
   createOwner(@Body() dto: CreateOwnerDto) {
     return this.service.createOwner(dto);
@@ -31,8 +50,13 @@ export class SuperAdminController {
     return this.service.listOwners();
   }
 
+  @Patch('owners/:id')
+  updateOwner(@Param('id') id: string, @Body() dto: UpdateOwnerDto) {
+    return this.service.updateOwner(id, dto);
+  }
+
   @Patch('owners/:id/status/:status')
-  setStatus(@Param('id') id: string, @Param('status') status: OwnerStatus) {
+  setStatus(@Param('id') id: string, @Param('status') status: string) {
     return this.service.setOwnerStatus(id, status);
   }
 }

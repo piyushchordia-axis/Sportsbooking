@@ -1,13 +1,22 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { LedgerTxnType, ReferralStatus } from '@sportsbooking/shared';
+import {
+  LedgerTxnType,
+  PaymentStatus,
+  ReferralStatus,
+} from '@sportsbooking/shared';
 import { LedgerService } from '../ledger/ledger.service';
-import { CREDIT_LANE } from '../loyalty/loyalty.service';
+import { creditLane } from '../loyalty/loyalty.service';
 
 /**
  * Referral programme (PRD §4.5). Each player gets a per-owner referral code;
  * the reward credit is released to the referrer only after the referred
- * player's FIRST PAID booking. Reward lands in the redeemable `credit` lane.
+ * player's FIRST PAID booking. Reward lands in the referrer's PER-OWNER
+ * redeemable credit lane (SEC-5) for this referral's owner.
  */
 @Injectable()
 export class ReferralService {
@@ -50,6 +59,34 @@ export class ReferralService {
     });
     if (!ref) throw new NotFoundException('Invalid referral code');
     if (ref.referrerId === refereeId) return; // no self-referral
+
+    // Dedupe on the (ownerId, referrerId, refereeId) triple: if this referee
+    // has already been linked to this referrer for this owner, do not create a
+    // duplicate row — return the existing link instead. (Tenant-scoped by
+    // ownerId.)
+    const existing = await tx.referral.findFirst({
+      where: { ownerId, referrerId: ref.referrerId, refereeId },
+    });
+    if (existing) return;
+
+    // Reject if the referee is not actually a new customer: they already have a
+    // paid (or settled-at-venue) booking with this owner.
+    const paidBooking = await tx.booking.findFirst({
+      where: {
+        ownerId,
+        customerId: refereeId,
+        paymentStatus: {
+          in: [PaymentStatus.PAID, PaymentStatus.SETTLED_AT_VENUE],
+        },
+      },
+      select: { id: true },
+    });
+    if (paidBooking) {
+      throw new BadRequestException(
+        'Referral cannot be applied: this player is not a new customer',
+      );
+    }
+
     // clone into a per-referee pending row so one code can refer many players
     await tx.referral.create({
       data: {
@@ -84,7 +121,7 @@ export class ReferralService {
         customerId: ref.referrerId,
         type: LedgerTxnType.REFERRAL_REWARD,
         amount: reward,
-        lane: CREDIT_LANE,
+        lane: creditLane(ownerId),
         refType: 'referral',
         refId: ref.id,
         note: 'Referral reward (referee first paid booking)',

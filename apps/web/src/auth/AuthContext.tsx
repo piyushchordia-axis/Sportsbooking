@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { api } from '../api/client';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -42,6 +43,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(res.user);
       },
       logout: () => {
+        // Best-effort server-side revocation of the refresh token; ignore
+        // failures (network/expired) — local sign-out must always succeed.
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (refreshToken) {
+          void api.logout(refreshToken).catch(() => undefined);
+        }
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         setUser(null);

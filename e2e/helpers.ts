@@ -22,28 +22,26 @@ export function futureDate(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Customer OTP login → lands on /book. Returns the mobile used. */
+/** Customer OTP login (player storefront) → lands on the storefront home. */
 export async function loginAsCustomer(page: Page, name = 'E2E Player'): Promise<string> {
   const mobile = randomMobile();
   await page.goto('/login');
-  await page.getByRole('button', { name: 'Player (OTP)' }).click();
-  await page.getByLabel('Mobile').fill(mobile);
-  await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Send OTP' }).click();
-  await page.getByLabel('OTP code').fill(SEED.devOtp);
-  await page.getByRole('button', { name: 'Verify & continue' }).click();
-  await expect(page).toHaveURL(/\/book$/);
+  await page.getByLabel('Mobile number').fill(mobile);
+  await page.getByLabel('Your name').fill(name);
+  await page.getByRole('button', { name: 'Get my code' }).click();
+  await page.getByLabel('6-digit code').fill(SEED.devOtp);
+  await page.getByRole('button', { name: 'Verify & play' }).click();
+  await expect(page).toHaveURL(/\/$/);
   return mobile;
 }
 
-/** Email/password login for owner or admin. */
+/** Email/password login for owner or admin (console at /admin/login). */
 export async function loginWithPassword(
   page: Page,
   email: string,
   password: string,
 ): Promise<void> {
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'Owner / Staff / Admin' }).click();
+  await page.goto('/admin/login');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();

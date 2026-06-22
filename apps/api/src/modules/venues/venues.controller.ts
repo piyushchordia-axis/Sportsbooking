@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  ParseArrayPipe,
+  Patch,
   Post,
   Put,
   UseGuards,
@@ -19,6 +22,9 @@ import {
   CreateUnitDto,
   CreateVenueDto,
   PricingRuleDto,
+  SettingsDto,
+  UpdateUnitDto,
+  UpdateVenueDto,
 } from './dto';
 import { VenuesService } from './venues.service';
 
@@ -39,6 +45,40 @@ export class VenuesController {
     return this.venues.createVenue(user, dto);
   }
 
+  @Patch(':id')
+  @Roles(UserRole.OWNER)
+  update(
+    @CurrentUser() user: RequestUser,
+    @Param('id') venueId: string,
+    @Body() dto: UpdateVenueDto,
+  ) {
+    return this.venues.updateVenue(user, venueId, dto);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.OWNER)
+  remove(@CurrentUser() user: RequestUser, @Param('id') venueId: string) {
+    return this.venues.deleteVenue(user, venueId);
+  }
+
+  @Get(':id/settings')
+  getSettings(
+    @CurrentUser() user: RequestUser,
+    @Param('id') venueId: string,
+  ) {
+    return this.venues.getSettings(user, venueId);
+  }
+
+  @Put(':id/settings')
+  @Roles(UserRole.OWNER)
+  updateSettings(
+    @CurrentUser() user: RequestUser,
+    @Param('id') venueId: string,
+    @Body() dto: SettingsDto,
+  ) {
+    return this.venues.updateSettings(user, venueId, dto);
+  }
+
   @Post(':id/units')
   @Roles(UserRole.OWNER)
   addUnit(
@@ -49,12 +89,32 @@ export class VenuesController {
     return this.venues.addUnit(user, venueId, dto);
   }
 
+  @Patch('units/:unitId')
+  @Roles(UserRole.OWNER)
+  updateUnit(
+    @CurrentUser() user: RequestUser,
+    @Param('unitId') unitId: string,
+    @Body() dto: UpdateUnitDto,
+  ) {
+    return this.venues.updateUnit(user, unitId, dto);
+  }
+
+  @Delete('units/:unitId')
+  @Roles(UserRole.OWNER)
+  removeUnit(
+    @CurrentUser() user: RequestUser,
+    @Param('unitId') unitId: string,
+  ) {
+    return this.venues.deleteUnit(user, unitId);
+  }
+
   @Put('units/:unitId/pricing')
   @Roles(UserRole.OWNER)
   setPricing(
     @CurrentUser() user: RequestUser,
     @Param('unitId') unitId: string,
-    @Body() rules: PricingRuleDto[],
+    @Body(new ParseArrayPipe({ items: PricingRuleDto }))
+    rules: PricingRuleDto[],
   ) {
     return this.venues.setPricing(user, unitId, rules);
   }

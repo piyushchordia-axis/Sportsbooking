@@ -234,7 +234,7 @@ the current code. Remaining noteworthy mismatches:_
 5. ~~P1 Add a distinct stored gateway payment-id (and ideally a standalone payment/refund table) so tournament/booking refunds reference real Razorpay payments.~~ **DONE** — refunds already reference the stored `razorpayPaymentId`; added a `payments` ledger table (owner-scoped, RLS) recording captures + refunds with gateway id + status, wired into booking/tournament markPaid + cancel, exposed via GET /payments and the booking detail Payment history.
 6. ~~P1 Build the missing report dimensions…~~ **DONE** — ownerSummary now covers occupancy %, peak-hour, per-venue revenue, add-on revenue, tournaments, player growth and repeat-rate with a ?from=&to= date range; the dashboard exposes the range filter + CSV export.
 7. **DONE (expiry)** — FORFEIT packs time-expire sessions (expiresAt = purchase + validityDays); ROLLOVER/NONE never expire. _flatRate_ pricing remains the open part of this item.
-8. P2 Complete remaining CRUD lifecycle (update/delete/deactivate) for add-ons and units; add a logo-upload pipeline and selective per-owner game/feature-flag assignment at onboarding; add game delete.
+8. P2 _(partly done)_ — ✅ add-on/court CRUD lifecycle (via the Grounds detail revamp) and ✅ a **logo-upload pipeline** (generic S3/R2-compatible storage + local dev fallback; `POST /me/branding/logo`). _Still open:_ selective per-owner game/feature-flag assignment at onboarding; game delete.
 9. P2 Add targeted-segment marketing dispatch (uses the existing segmentation + DPDP consent flags).
 10. P2 Tournament fixtures/brackets/draws and per-player team-roster capture.
 11. P3 Surface a recurring-booking flow in the UI; add standalone loyalty/referral config + history screens.

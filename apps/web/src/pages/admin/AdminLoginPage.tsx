@@ -351,13 +351,6 @@ export function AdminLoginPage() {
 
               <Msg text={msg} />
             </div>
-
-            {import.meta.env.DEV && (
-              <p className="mt-4 text-center text-xs text-white/35">
-                Dev seed · owner@smasharena.local / owner12345 · admin@sportsbooking.local /
-                admin12345
-              </p>
-            )}
           </div>
         </div>
       </div>

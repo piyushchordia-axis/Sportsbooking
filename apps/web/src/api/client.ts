@@ -374,6 +374,169 @@ export interface SearchResults {
   bookings: SearchBookingResult[];
 }
 
+// ---------------------------------------------------------------------------
+// Grounds revamp (owner) — paginated list, detail, overview, schedule,
+// unblock, bulk pricing. All owner/staff-scoped (GET /venues/list, /venues/:id,
+// /venues/:id/overview, /venues/:id/schedule, POST /venues/unblock,
+// /venues/:id/bulk-pricing). These are ADDITIVE; the legacy array-form
+// GET /venues (api.listVenues) is unchanged.
+// ---------------------------------------------------------------------------
+
+/** Derived display status for a ground card (GET /venues/list). */
+export type VenueStatus = 'active' | 'inactive' | 'draft' | 'needs_setup';
+
+/** Filters for the paginated grounds list (GET /venues/list). All optional. */
+export interface ListVenuesPageParams {
+  /** Free-text match on venue name/city (ilike). */
+  q?: string;
+  city?: string;
+  gameId?: string;
+  status?: VenueStatus;
+  /** 1-based page number (defaults server-side to 1). */
+  page?: number;
+  /** Items per page (defaults server-side to 20). */
+  pageSize?: number;
+}
+
+/** One row in the paginated grounds list (GET /venues/list). */
+export interface VenueListItem {
+  id: string;
+  name: string;
+  city: string | null;
+  status: VenueStatus;
+  /** Total bookable units (courts) attached to the venue. */
+  courtCount: number;
+  /** Best-effort occupancy over the next 7 days (0–100). */
+  occupancyPct: number;
+}
+
+/** Paginated grounds list envelope (GET /venues/list). */
+export interface VenueListPage {
+  items: VenueListItem[];
+  /**
+   * Broad match count for the query. For derived status sub-filters
+   * (draft/needs_setup) this stays the unfiltered count; items are filtered
+   * per-page (mirrors the API's best-effort behavior).
+   */
+  total: number;
+}
+
+/** A bookable unit (court) on the shaped detail venue (GET /venues/:id). */
+export interface VenueDetailUnit {
+  id: string;
+  venueId: string;
+  ownerId: string;
+  name: string;
+  label: string;
+  gameId: string;
+  capacity: number;
+  active: boolean;
+}
+
+/** A game offered by the venue, on the shaped detail venue (GET /venues/:id). */
+export interface VenueDetailGame {
+  venueId: string;
+  gameId: string;
+}
+
+/** Raw per-venue settings row on the shaped detail venue (GET /venues/:id). */
+export interface VenueDetailSettings {
+  venueId: string;
+  cancellationTemplate: 'flexible' | 'moderate' | 'strict';
+  noShowFee: string | number;
+  loyaltyEarnRate: string | number | null;
+  loyaltyRedeemValue: string | number | null;
+  openMatchRepaymentMode: OpenMatchRepaymentMode;
+}
+
+/**
+ * Single shaped venue for the Grounds detail page (GET /venues/:id). The API's
+ * shapeVenue() maps Drizzle relation keys (bookableUnits/venueGames/
+ * venueSettings) onto the web contract (units/games/settings).
+ */
+export interface VenueDetail {
+  id: string;
+  ownerId: string;
+  name: string;
+  city: string | null;
+  address: string | null;
+  contactPhone: string | null;
+  openTime: string;
+  closeTime: string;
+  geoLat: number | null;
+  geoLng: number | null;
+  photos: string[] | null;
+  active: boolean;
+  createdAt: string;
+  units: VenueDetailUnit[];
+  games: VenueDetailGame[];
+  /** Per-venue settings row, or null when none has been created yet. */
+  settings: VenueDetailSettings | null;
+}
+
+/** Headline metrics for a ground's detail page (GET /venues/:id/overview). */
+export interface VenueOverview {
+  courtCount: number;
+  bookingsThisWeek: number;
+  revenueThisWeek: number;
+  /** Best-effort occupancy over the next 7 days (0–100). */
+  occupancyPct: number;
+}
+
+/** One cell in a court's day schedule (GET /venues/:id/schedule). */
+export interface VenueScheduleSlot {
+  /** ISO-8601 start time. */
+  start: string;
+  /** ISO-8601 end time. */
+  end: string;
+  status: 'free' | 'booked' | 'blocked';
+  /** Present only for booked cells backed by a booking. */
+  bookingId?: string;
+}
+
+/** One court row in a ground's day schedule (GET /venues/:id/schedule). */
+export interface VenueScheduleCourt {
+  id: string;
+  name: string;
+  slots: VenueScheduleSlot[];
+}
+
+/** Per-court hourly slot grid for a ground on a day (GET /venues/:id/schedule). */
+export interface VenueSchedule {
+  openTime: string;
+  closeTime: string;
+  courts: VenueScheduleCourt[];
+}
+
+/** Free blocked slots in a range for an owner's unit (POST /venues/unblock). */
+export interface UnblockSlotsInput {
+  unitId: string;
+  /** ISO-8601 timestamp */
+  start: string;
+  /** ISO-8601 timestamp */
+  end: string;
+}
+
+/**
+ * One pricing-grid rule for the bulk-pricing apply (POST /venues/:id/
+ * bulk-pricing). Mirrors the API PricingRuleDto: all scope fields optional,
+ * price required.
+ */
+export interface BulkPricingRule {
+  dayType?: string;
+  timeBand?: string;
+  /** ISO-8601 date override (specific calendar day). */
+  dateOverride?: string;
+  minDuration?: number;
+  price: number;
+}
+
+/** Apply one pricing grid to many courts of a ground (POST /venues/:id/bulk-pricing). */
+export interface BulkPricingInput {
+  unitIds: string[];
+  rules: BulkPricingRule[];
+}
+
 /** Block a court for maintenance / private use (POST /venues/block). */
 export interface BlockSlotsInput {
   unitId: string;
@@ -626,6 +789,39 @@ export const api = {
   ownerReport: (from?: string, to?: string) =>
     get<OwnerReport>(`/reports/owner${rangeQs(from, to)}`),
   listVenues: () => get<any[]>('/venues'),
+
+  // ---- owner: grounds revamp ----
+  /**
+   * Paginated/filterable grounds list (GET /venues/list). Distinct from the
+   * legacy array-form listVenues(); returns { items, total }. All params
+   * optional and serialized to query string.
+   */
+  listVenuesPage: (params: ListVenuesPageParams = {}) => {
+    const qs = new URLSearchParams();
+    const { q, city, gameId, status, page, pageSize } = params;
+    if (q) qs.append('q', q);
+    if (city) qs.append('city', city);
+    if (gameId) qs.append('gameId', gameId);
+    if (status) qs.append('status', status);
+    if (page !== undefined) qs.append('page', String(page));
+    if (pageSize !== undefined) qs.append('pageSize', String(pageSize));
+    const s = qs.toString();
+    return get<VenueListPage>(`/venues/list${s ? `?${s}` : ''}`);
+  },
+  /** Single shaped venue (units/games/settings) for the detail page. */
+  getVenue: (id: string) => get<VenueDetail>(`/venues/${id}`),
+  /** Headline metrics for a ground's detail page. */
+  venueOverview: (id: string) => get<VenueOverview>(`/venues/${id}/overview`),
+  /** Per-court hourly slot grid for a ground on a given day (YYYY-MM-DD). */
+  venueSchedule: (id: string, date: string) =>
+    get<VenueSchedule>(`/venues/${id}/schedule?date=${encodeURIComponent(date)}`),
+  /** Free blocked slots in a range for an owner's unit. */
+  unblockSlots: (body: UnblockSlotsInput) =>
+    post<{ unblocked: number }>('/venues/unblock', body),
+  /** Apply one pricing grid to multiple courts of a ground. */
+  bulkPricing: (venueId: string, body: BulkPricingInput) =>
+    post<{ updatedUnits: number }>(`/venues/${venueId}/bulk-pricing`, body),
+
   createVenue: (body: unknown) => post('/venues', body),
   updateVenue: (venueId: string, body: unknown) => patch(`/venues/${venueId}`, body),
   deleteVenue: (venueId: string) => del(`/venues/${venueId}`),

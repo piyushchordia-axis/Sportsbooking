@@ -81,6 +81,9 @@ const TournamentsAdminPage = lazy(() =>
 const VenuesPage = lazy(() =>
   import('./pages/owner/VenuesPage').then((m) => ({ default: m.VenuesPage })),
 );
+const OwnerVenueDetailPage = lazy(() =>
+  import('./pages/owner/VenueDetailPage').then((m) => ({ default: m.VenueDetailPage })),
+);
 const BrandingPage = lazy(() =>
   import('./pages/owner/BrandingPage').then((m) => ({ default: m.BrandingPage })),
 );
@@ -154,6 +157,10 @@ export function App() {
           <Route path="/owner/new-booking" element={owner(<NewBookingPage />)} />
           <Route path="/owner/bookings" element={owner(<BookingsPage />)} />
           <Route path="/owner/venues" element={owner(<VenuesPage />)} />
+          <Route
+            path="/owner/venues/:id"
+            element={owner(<OwnerVenueDetailPage />)}
+          />
           <Route path="/owner/branding" element={owner(<BrandingPage />)} />
           <Route path="/owner/packs" element={owner(<PacksPage />)} />
           <Route path="/owner/offers" element={owner(<OffersPage />)} />

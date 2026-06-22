@@ -5,11 +5,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, count, eq } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  lt,
+  or,
+} from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
-import { Decimal, money } from '../../db/money';
+import { Decimal, money, num } from '../../db/money';
 import {
   bookableUnits,
   bookings,
@@ -24,12 +34,16 @@ import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { OpenMatchRepaymentMode } from '@sportsbooking/shared';
 import {
   BlockSlotsDto,
+  BulkPricingDto,
   CreateUnitDto,
   CreateVenueDto,
   PricingRuleDto,
+  ScheduleQueryDto,
   SettingsDto,
+  UnblockSlotsDto,
   UpdateUnitDto,
   UpdateVenueDto,
+  VenueListQueryDto,
 } from './dto';
 
 /**
@@ -106,6 +120,395 @@ export class VenuesService {
       }),
     );
     return rows.map((v) => this.shapeVenue(v));
+  }
+
+  /**
+   * Derive the display status for a ground card (Grounds revamp list).
+   *  - inactive : venue.active === false
+   *  - draft    : active but has no bookable units yet
+   *  - needs_setup : has units but none of them carry a pricing rule
+   *  - active   : active, has units, and at least one priced unit
+   */
+  private deriveStatus(
+    active: boolean,
+    courtCount: number,
+    pricedCount: number,
+  ): 'active' | 'inactive' | 'draft' | 'needs_setup' {
+    if (!active) return 'inactive';
+    if (courtCount === 0) return 'draft';
+    if (pricedCount === 0) return 'needs_setup';
+    return 'active';
+  }
+
+  /**
+   * Best-effort occupancy over the next 7 days for a set of units: booked slots
+   * vs. a coarse capacity estimate (operating hours / 1h granularity * days *
+   * courtCount). Returns 0 when there is no capacity to divide by. This is a
+   * heuristic for the list/overview cards, not an exact accounting figure.
+   */
+  private async occupancyPct(
+    tx: DbTx,
+    unitIds: string[],
+    openTime: string,
+    closeTime: string,
+    courtCount: number,
+  ): Promise<number> {
+    if (unitIds.length === 0 || courtCount === 0) return 0;
+    const now = DateTime.now();
+    const horizon = now.plus({ days: 7 });
+    const booked = (
+      await tx
+        .select({ c: count() })
+        .from(slots)
+        .where(
+          and(
+            inArray(slots.unitId, unitIds),
+            eq(slots.status, 'booked'),
+            gte(slots.startsAt, now.toJSDate()),
+            lt(slots.startsAt, horizon.toJSDate()),
+          ),
+        )
+    )[0].c;
+
+    // Coarse capacity: hourly slots per court per day across the 7-day horizon.
+    const open = DateTime.fromISO(`2000-01-01T${openTime}`);
+    const close = DateTime.fromISO(`2000-01-01T${closeTime}`);
+    const hoursPerDay = Math.max(0, close.diff(open, 'hours').hours);
+    const capacity = Math.round(hoursPerDay * 7 * courtCount);
+    if (capacity <= 0) return 0;
+    return Math.min(100, Math.round((booked / capacity) * 100));
+  }
+
+  /**
+   * Paginated, filterable list of the owner's grounds (Grounds revamp). Each
+   * item carries display fields (status, court count, best-effort occupancy)
+   * for the list page. Owner-scoped + tenant-scoped; supports q (name/city
+   * ilike), city, gameId (via venueGames), and status filters.
+   */
+  async listVenuesPaginated(user: RequestUser, query: VenueListQueryDto) {
+    const ownerId = this.ownerId(user);
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const pageSize = query.pageSize && query.pageSize > 0 ? query.pageSize : 20;
+
+    return this.db.withTenant(async (tx) => {
+      // gameId filter: resolve the matching venue ids via venueGames first.
+      let gameVenueIds: string[] | null = null;
+      if (query.gameId) {
+        const vg = await tx
+          .select({ venueId: venueGames.venueId })
+          .from(venueGames)
+          .where(eq(venueGames.gameId, query.gameId));
+        gameVenueIds = vg.map((r) => r.venueId);
+        // No venue offers the game -> empty page (short-circuit).
+        if (gameVenueIds.length === 0) return { items: [], total: 0 };
+      }
+
+      const filters = [eq(venues.ownerId, ownerId)];
+      if (query.q) {
+        const like = `%${query.q}%`;
+        const qFilter = or(ilike(venues.name, like), ilike(venues.city, like));
+        if (qFilter) filters.push(qFilter);
+      }
+      if (query.city) filters.push(ilike(venues.city, `%${query.city}%`));
+      if (query.status === 'active') filters.push(eq(venues.active, true));
+      if (query.status === 'inactive') filters.push(eq(venues.active, false));
+      if (gameVenueIds) filters.push(inArray(venues.id, gameVenueIds));
+
+      const where = and(...filters);
+
+      const total = (
+        await tx.select({ c: count() }).from(venues).where(where)
+      )[0].c;
+
+      const rows = await tx.query.venues.findMany({
+        where,
+        with: { bookableUnits: true },
+        orderBy: [desc(venues.createdAt)],
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      });
+
+      const items = await Promise.all(
+        rows.map(async (v) => {
+          const allUnits = v.bookableUnits ?? [];
+          const courtCount = allUnits.length;
+          const unitIds = allUnits.map((u) => u.id);
+
+          // pricedCount: distinct units that have at least one pricing rule.
+          let pricedCount = 0;
+          if (unitIds.length > 0) {
+            const priced = await tx
+              .selectDistinct({ unitId: pricingRules.unitId })
+              .from(pricingRules)
+              .where(inArray(pricingRules.unitId, unitIds));
+            pricedCount = priced.length;
+          }
+
+          const activeUnitIds = allUnits
+            .filter((u) => u.active)
+            .map((u) => u.id);
+
+          return {
+            id: v.id,
+            name: v.name,
+            city: v.city ?? null,
+            status: this.deriveStatus(v.active, courtCount, pricedCount),
+            courtCount,
+            occupancyPct: await this.occupancyPct(
+              tx,
+              activeUnitIds,
+              v.openTime,
+              v.closeTime,
+              activeUnitIds.length,
+            ),
+          };
+        }),
+      );
+
+      // status sub-filter for derived states (draft / needs_setup) — these are
+      // computed per-row, so apply post-query (total stays the broad count;
+      // acceptable for a best-effort list).
+      const filtered =
+        query.status === 'draft' || query.status === 'needs_setup'
+          ? items.filter((i) => i.status === query.status)
+          : items;
+
+      return { items: filtered, total };
+    });
+  }
+
+  /** Single shaped venue for the detail page (PRD §4.1). 404 if not owner's. */
+  async getVenue(user: RequestUser, venueId: string) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+        with: { bookableUnits: true, venueGames: true, venueSettings: true },
+      });
+      if (!venue) throw new NotFoundException('Venue not found');
+      return this.shapeVenue(venue);
+    });
+  }
+
+  /**
+   * Best-effort headline metrics for a ground's detail page: court count plus
+   * this-week bookings/revenue and occupancy. Owner-scoped + tenant-scoped.
+   */
+  async getOverview(user: RequestUser, venueId: string) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+        with: { bookableUnits: true },
+      });
+      if (!venue) throw new NotFoundException('Venue not found');
+
+      const allUnits = venue.bookableUnits ?? [];
+      const courtCount = allUnits.length;
+      const activeUnitIds = allUnits.filter((u) => u.active).map((u) => u.id);
+
+      const weekStart = DateTime.now().startOf('week');
+      const weekEnd = weekStart.plus({ weeks: 1 });
+
+      const weekBookings = await tx.query.bookings.findMany({
+        where: and(
+          eq(bookings.venueId, venueId),
+          gte(bookings.createdAt, weekStart.toJSDate()),
+          lt(bookings.createdAt, weekEnd.toJSDate()),
+        ),
+      });
+
+      const bookingsThisWeek = weekBookings.length;
+      const revenueThisWeek = weekBookings.reduce(
+        (acc, b) =>
+          b.status === 'cancelled' ? acc : acc + num(b.total),
+        0,
+      );
+
+      return {
+        courtCount,
+        bookingsThisWeek,
+        revenueThisWeek,
+        occupancyPct: await this.occupancyPct(
+          tx,
+          activeUnitIds,
+          venue.openTime,
+          venue.closeTime,
+          activeUnitIds.length,
+        ),
+      };
+    });
+  }
+
+  /**
+   * Per-court hourly slot grid for a ground on a given day (Grounds revamp
+   * §4.3). Mirrors the availability calendar logic: operating hours sliced by
+   * each court's game granularity, overlaid with any booked/blocked slot rows.
+   * Owner-scoped + tenant-scoped.
+   */
+  async getSchedule(user: RequestUser, venueId: string, query: ScheduleQueryDto) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+        with: {
+          bookableUnits: { with: { gameCatalogue: true } },
+        },
+      });
+      if (!venue) throw new NotFoundException('Venue not found');
+
+      const date = query.date;
+      const dayStart = DateTime.fromISO(`${date}T${venue.openTime}`);
+      const dayEnd = DateTime.fromISO(`${date}T${venue.closeTime}`);
+
+      const activeCourts = (venue.bookableUnits ?? []).filter((u) => u.active);
+
+      const courts = await Promise.all(
+        activeCourts.map(async (court) => {
+          const granularity = court.gameCatalogue.slotGranularityMin;
+
+          const occupied = await tx.query.slots.findMany({
+            where: and(
+              eq(slots.unitId, court.id),
+              gte(slots.startsAt, dayStart.toJSDate()),
+              lt(slots.startsAt, dayEnd.toJSDate()),
+            ),
+          });
+          const occupiedByStart = new Map(
+            occupied.map((s) => [s.startsAt.toISOString(), s]),
+          );
+
+          const courtSlots: {
+            start: string;
+            end: string;
+            status: 'free' | 'booked' | 'blocked';
+            bookingId?: string;
+          }[] = [];
+          let cursor = dayStart;
+          while (cursor.plus({ minutes: granularity }) <= dayEnd) {
+            const start = cursor;
+            const end = cursor.plus({ minutes: granularity });
+            const existing = occupiedByStart.get(
+              start.toJSDate().toISOString(),
+            );
+            if (existing) {
+              courtSlots.push({
+                start: start.toISO()!,
+                end: end.toISO()!,
+                status: existing.status === 'blocked' ? 'blocked' : 'booked',
+                ...(existing.bookingId
+                  ? { bookingId: existing.bookingId }
+                  : {}),
+              });
+            } else {
+              courtSlots.push({
+                start: start.toISO()!,
+                end: end.toISO()!,
+                status: 'free',
+              });
+            }
+            cursor = end;
+          }
+
+          return { id: court.id, name: court.name, slots: courtSlots };
+        }),
+      );
+
+      return {
+        openTime: venue.openTime,
+        closeTime: venue.closeTime,
+        courts,
+      };
+    });
+  }
+
+  /**
+   * Free BLOCKED slots in a range for an owner's unit (Grounds revamp §4.3):
+   * delete blocked slot rows that carry no booking. Mirrors block()'s scoping.
+   * Booked slots are never touched.
+   */
+  async unblock(user: RequestUser, dto: UnblockSlotsDto) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      // Scope by ownerId explicitly (defense-in-depth): never rely on RLS alone,
+      // which is bypassed when the app connects as a superuser (SEC-6).
+      const unit = await tx.query.bookableUnits.findFirst({
+        where: and(
+          eq(bookableUnits.id, dto.unitId),
+          eq(bookableUnits.ownerId, ownerId),
+        ),
+      });
+      if (!unit) throw new NotFoundException('Unit not found');
+
+      const start = DateTime.fromISO(dto.start).toJSDate();
+      const end = DateTime.fromISO(dto.end).toJSDate();
+
+      const removed = await tx
+        .delete(slots)
+        .where(
+          and(
+            eq(slots.unitId, dto.unitId),
+            eq(slots.status, 'blocked'),
+            gte(slots.startsAt, start),
+            lt(slots.startsAt, end),
+          ),
+        )
+        .returning();
+      return { unblocked: removed.length };
+    });
+  }
+
+  /**
+   * Apply the same pricing grid to every listed court the owner owns (Grounds
+   * revamp §4.2). Reuses the setPricing replace-grid semantics per unit inside
+   * a single tenant transaction. Skips/owner-validates each unit.
+   */
+  async bulkPricing(user: RequestUser, venueId: string, dto: BulkPricingDto) {
+    const ownerId = this.ownerId(user);
+    return this.db.withTenant(async (tx) => {
+      const venue = await tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      });
+      if (!venue) throw new NotFoundException('Venue not found');
+
+      // Only operate on units that belong to this owner AND this venue.
+      const owned =
+        dto.unitIds.length === 0
+          ? []
+          : await tx.query.bookableUnits.findMany({
+              where: and(
+                inArray(bookableUnits.id, dto.unitIds),
+                eq(bookableUnits.ownerId, ownerId),
+                eq(bookableUnits.venueId, venueId),
+              ),
+            });
+      const ownedIds = owned.map((u) => u.id);
+      if (ownedIds.length === 0) {
+        throw new NotFoundException('No matching courts for this venue');
+      }
+
+      for (const unitId of ownedIds) {
+        await tx.delete(pricingRules).where(eq(pricingRules.unitId, unitId));
+        if (dto.rules.length > 0) {
+          await tx.insert(pricingRules).values(
+            dto.rules.map((r) => ({
+              id: randomUUID(),
+              unitId,
+              ownerId,
+              dayType: r.dayType,
+              timeBand: r.timeBand,
+              dateOverride: r.dateOverride
+                ? new Date(r.dateOverride).toISOString().slice(0, 10)
+                : null,
+              minDuration: r.minDuration,
+              price: money(new Decimal(r.price)),
+            })),
+          );
+        }
+      }
+
+      return { updatedUnits: ownedIds.length };
+    });
   }
 
   /** Create a venue, enforcing the owner's quota (PRD §4.1). */

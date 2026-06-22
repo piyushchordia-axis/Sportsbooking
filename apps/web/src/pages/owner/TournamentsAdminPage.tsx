@@ -3,7 +3,13 @@ import {
   RegistrationType,
   TournamentFormat,
 } from '@sportsbooking/shared';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   AlertTriangle,
   CalendarDays,
@@ -12,10 +18,11 @@ import {
   Loader2,
   MoreVertical,
   Plus,
+  Swords,
   Trophy,
   Users,
 } from 'lucide-react';
-import { api } from '../../api/client';
+import { api, type FixtureBoard, type FixtureMatch } from '../../api/client';
 import {
   Card,
   EmptyState,
@@ -29,6 +36,7 @@ import {
 } from '../../components/common';
 import { Button } from '../../components/ui/button';
 import { SearchableSelect } from '../../components/ui/combobox';
+import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import {
   DateRangePicker,
@@ -185,6 +193,7 @@ export function TournamentsAdminPage() {
   const [pending, setPending] = useState<{ t: TournamentRow; p: Participant } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelMsg, setCancelMsg] = useState<string | null>(null);
+  const [fixturesFor, setFixturesFor] = useState<TournamentRow | null>(null);
 
   const confirmCancel = async () => {
     if (!pending) return;
@@ -309,6 +318,13 @@ export function TournamentsAdminPage() {
                       <StatusPill status={closed ? 'closed' : 'open'}>
                         {closed ? 'Registration closed' : 'Open'}
                       </StatusPill>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFixturesFor(t)}
+                      >
+                        <Swords className="h-4 w-4" /> Fixtures
+                      </Button>
                     </div>
                   </div>
 
@@ -449,7 +465,315 @@ export function TournamentsAdminPage() {
           tournaments.reload();
         }}
       />
+
+      {fixturesFor && (
+        <FixturesDialog
+          tournament={fixturesFor}
+          onClose={() => setFixturesFor(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Round name for a knockout bracket of `totalRounds` rounds. */
+function roundLabel(round: number, totalRounds: number): string {
+  const fromEnd = totalRounds - round;
+  if (fromEnd === 0) return 'Final';
+  if (fromEnd === 1) return 'Semifinals';
+  if (fromEnd === 2) return 'Quarterfinals';
+  return `Round ${round}`;
+}
+
+const scoreInputCls =
+  'h-9 w-12 rounded-lg border border-border bg-input-background text-center text-sm text-foreground outline-none focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20';
+
+/** One bracket node / league pairing: participants, scores, winner, result entry. */
+function MatchCard({
+  m,
+  scores,
+  setScores,
+  onSave,
+  busy,
+}: {
+  m: FixtureMatch;
+  scores: Record<string, { a: string; b: string }>;
+  setScores: Dispatch<
+    SetStateAction<Record<string, { a: string; b: string }>>
+  >;
+  onSave: () => void;
+  busy: boolean;
+}) {
+  const both = !!(m.participantAId && m.participantBId);
+  const done = m.status === 'completed';
+  const s = scores[m.id] ?? { a: '', b: '' };
+  const set = (k: 'a' | 'b', v: string) =>
+    setScores((prev) => ({
+      ...prev,
+      [m.id]: { ...(prev[m.id] ?? { a: '', b: '' }), [k]: v },
+    }));
+  const label = (text: string | null) =>
+    text ?? (done ? 'Bye' : 'TBD');
+  const winA = !!m.winnerId && m.winnerId === m.participantAId;
+  const winB = !!m.winnerId && m.winnerId === m.participantBId;
+
+  const Row = ({
+    text,
+    score,
+    win,
+  }: {
+    text: string | null;
+    score: number | null;
+    win: boolean;
+  }) => (
+    <div className="flex items-center justify-between gap-2">
+      <span
+        className={
+          'truncate text-sm ' +
+          (win ? 'font-semibold text-foreground' : 'text-muted-foreground')
+        }
+      >
+        {label(text)}
+      </span>
+      {score != null && (
+        <span className="tabular-nums text-sm text-foreground">{score}</span>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-3 shadow-card">
+      <div className="space-y-1">
+        <Row text={m.aLabel} score={m.scoreA} win={winA} />
+        <Row text={m.bLabel} score={m.scoreB} win={winB} />
+      </div>
+      {done ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {m.winnerId ? 'Completed' : 'Draw'}
+        </p>
+      ) : both ? (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input
+            value={s.a}
+            onChange={(e) => set('a', e.target.value)}
+            inputMode="numeric"
+            placeholder="0"
+            className={scoreInputCls}
+          />
+          <span className="text-muted-foreground">–</span>
+          <input
+            value={s.b}
+            onChange={(e) => set('b', e.target.value)}
+            inputMode="numeric"
+            placeholder="0"
+            className={scoreInputCls}
+          />
+          <Button size="sm" className="ml-auto" onClick={onSave} disabled={busy}>
+            Save
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Awaiting participants
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Generate / view / score a tournament's fixtures (bracket or round-robin). */
+function FixturesDialog({
+  tournament,
+  onClose,
+}: {
+  tournament: { id: string; name: string; format?: string };
+  onClose: () => void;
+}) {
+  const board = useLoad<FixtureBoard>(
+    () => api.getFixtures(tournament.id),
+    [tournament.id],
+  );
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [scores, setScores] = useState<Record<string, { a: string; b: string }>>(
+    {},
+  );
+
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fn();
+      board.reload();
+      if (ok) setMsg(ok);
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const data = board.data;
+  const isKnockout = data?.format === 'knockout';
+
+  const generate = () =>
+    run(() => api.generateFixtures(tournament.id), 'Fixtures generated.');
+  const regenerate = () => {
+    if (
+      !window.confirm('Regenerate fixtures? All recorded results will be lost.')
+    )
+      return;
+    return run(async () => {
+      await api.clearFixtures(tournament.id);
+      await api.generateFixtures(tournament.id);
+    }, 'Fixtures regenerated.');
+  };
+  const saveResult = (m: FixtureMatch) => {
+    const s = scores[m.id];
+    const a = Number(s?.a);
+    const b = Number(s?.b);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+      setMsg('Enter both scores as whole non-negative numbers.');
+      return;
+    }
+    return run(
+      () => api.recordMatchResult(tournament.id, m.id, { scoreA: a, scoreB: b }),
+      'Result saved.',
+    );
+  };
+
+  const byRound = useMemo(() => {
+    const groups: Record<number, FixtureMatch[]> = {};
+    for (const m of data?.matches ?? []) (groups[m.round] ??= []).push(m);
+    return groups;
+  }, [data]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{tournament.name} — Fixtures</DialogTitle>
+          <DialogDescription>
+            {isKnockout
+              ? 'Single-elimination bracket — winners advance each round.'
+              : 'Round-robin — every entrant plays each other; standings update as results come in.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Msg text={msg || board.error} />
+
+        {board.loading && !data ? (
+          <Skeleton className="h-40 w-full rounded-xl" />
+        ) : !data?.generated ? (
+          <div className="py-8 text-center">
+            <p className="mb-4 text-sm text-muted-foreground">
+              No fixtures yet. Generate the draw from the paid participants (needs
+              at least 2).
+            </p>
+            <Button onClick={generate} disabled={busy}>
+              {busy ? 'Generating…' : 'Generate fixtures'}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={regenerate}
+                disabled={busy}
+              >
+                Regenerate
+              </Button>
+            </div>
+
+            {isKnockout ? (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {Object.keys(byRound)
+                  .map(Number)
+                  .sort((a, b) => a - b)
+                  .map((r) => (
+                    <div key={r} className="min-w-[210px] flex-1">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {roundLabel(r, data.rounds)}
+                      </p>
+                      <div className="flex h-full flex-col justify-around gap-3">
+                        {byRound[r].map((m) => (
+                          <MatchCard
+                            key={m.id}
+                            m={m}
+                            scores={scores}
+                            setScores={setScores}
+                            onSave={() => saveResult(m)}
+                            busy={busy}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Standings
+                  </p>
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="pl-4">#</TableHead>
+                          <TableHead>Entrant</TableHead>
+                          <TableHead className="text-center">P</TableHead>
+                          <TableHead className="text-center">W</TableHead>
+                          <TableHead className="text-center">D</TableHead>
+                          <TableHead className="text-center">L</TableHead>
+                          <TableHead className="pr-4 text-center">Pts</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.standings.map((s, i) => (
+                          <TableRow key={s.participantId}>
+                            <TableCell className="pl-4 text-muted-foreground">
+                              {i + 1}
+                            </TableCell>
+                            <TableCell className="font-medium">{s.label}</TableCell>
+                            <TableCell className="text-center">{s.played}</TableCell>
+                            <TableCell className="text-center">{s.won}</TableCell>
+                            <TableCell className="text-center">{s.drawn}</TableCell>
+                            <TableCell className="text-center">{s.lost}</TableCell>
+                            <TableCell className="pr-4 text-center font-semibold">
+                              {s.points}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Matches
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(data.matches ?? []).map((m) => (
+                      <MatchCard
+                        key={m.id}
+                        m={m}
+                        scores={scores}
+                        setScores={setScores}
+                        onSave={() => saveResult(m)}
+                        busy={busy}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -363,6 +363,39 @@ export interface AuditLogParams {
   pageSize?: number;
 }
 
+/** A tournament fixture match (knockout bracket node or round-robin pairing). */
+export interface FixtureMatch {
+  id: string;
+  round: number;
+  position: number;
+  participantAId: string | null;
+  participantBId: string | null;
+  aLabel: string | null;
+  bLabel: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
+  winnerId: string | null;
+  status: 'pending' | 'completed';
+}
+
+export interface FixtureStanding {
+  participantId: string;
+  label: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  points: number;
+}
+
+export interface FixtureBoard {
+  format: string;
+  generated: boolean;
+  rounds: number;
+  matches: FixtureMatch[];
+  standings: FixtureStanding[];
+}
+
 /** A gateway transaction (capture or refund) from the payments ledger. */
 export interface PaymentTxn {
   id: string;
@@ -852,6 +885,17 @@ export const api = {
     `/tournaments/${id}/register`,
     body,
   ),
+  // Owner back-office: tournament fixtures / bracket.
+  getFixtures: (id: string) => get<FixtureBoard>(`/tournaments/${id}/fixtures`),
+  generateFixtures: (id: string) =>
+    post<FixtureBoard>(`/tournaments/${id}/fixtures`),
+  clearFixtures: (id: string) => del<FixtureBoard>(`/tournaments/${id}/fixtures`),
+  recordMatchResult: (
+    id: string,
+    matchId: string,
+    body: { scoreA: number; scoreB: number },
+  ) =>
+    post<FixtureBoard>(`/tournaments/${id}/matches/${matchId}/result`, body),
   cancelTournamentRegistration: (tournamentId: string, participantId: string) =>
     post<{ cancelled: true; refunded: boolean }>(
       `/tournaments/${tournamentId}/participants/${participantId}/cancel`,

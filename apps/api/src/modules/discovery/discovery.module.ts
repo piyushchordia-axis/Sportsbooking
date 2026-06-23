@@ -1,8 +1,16 @@
 import { Controller, Get, Injectable, Module, Query } from '@nestjs/common';
-import { and, asc, eq, ilike } from 'drizzle-orm';
+import { UserRole } from '@sportsbooking/shared';
+import { and, asc, count, countDistinct, eq, gte, ilike } from 'drizzle-orm';
 import { Public } from '../../common/decorators/public.decorator';
 import { DbService } from '../../db/db.service';
-import { bookableUnits, gameCatalogue, venues } from '../../db/schema';
+import {
+  bookableUnits,
+  bookings,
+  gameCatalogue,
+  openMatches,
+  users,
+  venues,
+} from '../../db/schema';
 
 /** Great-circle distance in km between two lat/lng points (haversine). */
 function haversineKm(
@@ -178,6 +186,67 @@ export class DiscoveryService {
       orderBy: asc(gameCatalogue.name),
     });
   }
+
+  /**
+   * Public, real aggregate stats that drive the marketing landing page — scoped
+   * to one owner on a white-label storefront, global across the marketplace
+   * otherwise. Every figure is computed live from the DB (no illustrative
+   * constants): grounds/cities/sports from active venues, bookings in the
+   * trailing 7 days, players, and currently-open matches.
+   */
+  async stats(owner?: string) {
+    return this.db.withTenantBypass(async (tx) => {
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const ownerVenue = owner ? [eq(venues.ownerId, owner)] : [];
+      const ownerBooking = owner ? [eq(bookings.ownerId, owner)] : [];
+      const ownerMatch = owner ? [eq(openMatches.ownerId, owner)] : [];
+
+      // Active venues (scoped) → grounds, distinct cities, distinct sports.
+      const vrows = await tx.query.venues.findMany({
+        where: and(eq(venues.active, true), ...ownerVenue),
+        columns: { id: true, city: true },
+        with: { venueGames: { columns: { gameId: true } } },
+      });
+      const grounds = vrows.length;
+      const cities = new Set(
+        vrows.map((v) => v.city).filter((c): c is string => !!c),
+      ).size;
+      const sports = new Set(
+        vrows.flatMap((v) => v.venueGames.map((g) => g.gameId)),
+      ).size;
+
+      const [bk] = await tx
+        .select({ c: count() })
+        .from(bookings)
+        .where(and(gte(bookings.createdAt, since), ...ownerBooking));
+      const bookingsThisWeek = Number(bk?.c ?? 0);
+
+      const [om] = await tx
+        .select({ c: count() })
+        .from(openMatches)
+        .where(and(eq(openMatches.status, 'open'), ...ownerMatch));
+      const openMatchCount = Number(om?.c ?? 0);
+
+      // Players: registered customers across the platform, or — when scoped to
+      // an owner — the distinct customers who have actually booked there.
+      let players: number;
+      if (owner) {
+        const [p] = await tx
+          .select({ c: countDistinct(bookings.customerId) })
+          .from(bookings)
+          .where(eq(bookings.ownerId, owner));
+        players = Number(p?.c ?? 0);
+      } else {
+        const [p] = await tx
+          .select({ c: count() })
+          .from(users)
+          .where(eq(users.role, UserRole.CUSTOMER));
+        players = Number(p?.c ?? 0);
+      }
+
+      return { grounds, cities, sports, players, bookingsThisWeek, openMatches: openMatchCount };
+    });
+  }
 }
 
 @Controller('discover')
@@ -209,6 +278,13 @@ export class DiscoveryController {
   @Get('games')
   games() {
     return this.discovery.games();
+  }
+
+  /** Live marketing stats (PRD §5.2) — owner-scoped via ?owner, else global. */
+  @Public()
+  @Get('stats')
+  stats(@Query('owner') owner?: string) {
+    return this.discovery.stats(owner || undefined);
   }
 }
 

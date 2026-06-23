@@ -163,6 +163,46 @@ export class PlayersService {
   }
 
   /**
+   * The player's GLOBAL identity profile (skill + preferred games), independent
+   * of any operator — stored on the users row so a player edits ONE profile and
+   * never has to pick a "venue operator". Customer-self only: read under bypass,
+   * filtered to the caller's own id.
+   */
+  async getMyProfile(
+    user: RequestUser,
+  ): Promise<{ skillLevel: SkillLevel; games: string[] }> {
+    return this.db.withTenantBypass(async (tx) => {
+      const u = await tx.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: { skillLevel: true, games: true },
+      });
+      return {
+        skillLevel: (u?.skillLevel as SkillLevel) ?? SkillLevel.BEGINNER,
+        games: u?.games ?? [],
+      };
+    });
+  }
+
+  /** Update the player's global identity profile (skill + preferred games). */
+  async updateMyProfile(
+    user: RequestUser,
+    dto: UpdateProfileDto,
+  ): Promise<{ skillLevel: SkillLevel; games: string[] }> {
+    const data: { skillLevel?: SkillLevel; games?: string[] } = {};
+    if (dto.skillLevel !== undefined) data.skillLevel = dto.skillLevel;
+    if (dto.games !== undefined) data.games = dto.games;
+    return this.db.withTenantBypass(async (tx) => {
+      const u = (
+        await tx.update(users).set(data).where(eq(users.id, user.id)).returning()
+      )[0];
+      return {
+        skillLevel: (u?.skillLevel as SkillLevel) ?? SkillLevel.BEGINNER,
+        games: u?.games ?? [],
+      };
+    });
+  }
+
+  /**
    * Owner CRM directory with simple frequency/recency segmentation (PRD §4.9).
    * Optional `gameId` keeps customers whose player profile lists that game;
    * optional `venueId` keeps customers with at least one booking at that venue.
@@ -552,6 +592,25 @@ export class PlayersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.players.updateProfile(user, ownerId, dto);
+  }
+
+  /** The signed-in player's GLOBAL profile (skill + preferred games) — no
+   *  operator scope. This is what the consumer Profile page reads/writes. */
+  @Get('me/profile')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  getMyProfile(@CurrentUser() user: RequestUser) {
+    return this.players.getMyProfile(user);
+  }
+
+  @Put('me/profile')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  updateMyProfile(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.players.updateMyProfile(user, dto);
   }
 
   /** Owner CRM directory (PRD §4.9) with optional segment/game/venue filters. */

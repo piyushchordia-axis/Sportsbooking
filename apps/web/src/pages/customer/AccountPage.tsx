@@ -1,71 +1,74 @@
 import { SkillLevel } from '@sportsbooking/shared';
+import { Pencil } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { useLoad } from '../../components/common';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '../../components/ui/sheet';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useFloodlitToast } from '../../floodlit/toast';
 import { label } from '../../lib/labels';
+import { useMediaQuery } from '../../lib/useMediaQuery';
+import { useStorefront } from '../../storefront/StorefrontProvider';
+import { useTheme } from '../../theme/ThemeProvider';
 
-/** Customer account: profile, per-owner referral code + skill level, saved
- *  venues, offers inbox and DPDP marketing consent (PRD §4.5, §5.1, §5.4). */
+/** Customer profile: a single GLOBAL identity (skill + preferred games) the
+ *  player edits once — no "venue operator" to pick. Referral codes are
+ *  per-operator, so they only show on an operator's storefront (resolved from
+ *  the domain), never on the bare marketplace. */
 export function AccountPage() {
   const { user, logout } = useAuth();
   const { flash } = useFloodlitToast();
+  const { mode } = useTheme();
+  // Operator context comes from the storefront (subdomain / /s/:key / ?owner),
+  // never from the player. Null on the marketplace.
+  const { scoped, ownerId: sfOwnerId, ownerName } = useStorefront();
+  const isDesktop = useMediaQuery('(min-width: 768px)');
 
-  const venues = useLoad(() => api.discoverVenues());
   const saved = useLoad(() => api.listSavedVenues());
   // Game catalogue powers the preferred-games multi-select in the edit form.
   const games = useLoad(() => api.discoverGames());
-  const [ownerId, setOwnerId] = useState('');
+  // The player's single global profile (skill + games), operator-agnostic.
+  const profile = useLoad(() =>
+    user
+      ? api.getMyProfile()
+      : Promise.resolve({ skillLevel: SkillLevel.BEGINNER as string, games: [] as string[] }),
+  );
+
   const [skill, setSkill] = useState<SkillLevel>(SkillLevel.BEGINNER);
-  // Preferred games the player is editing — seeded from their current profile.
-  const [selectedGames, setSelectedGames] = useState<string[]>(() => {
-    const current = (user as { games?: { id: string }[] } | null)?.games;
-    return Array.isArray(current) ? current.map((g) => g.id) : [];
-  });
+  const [selectedGames, setSelectedGames] = useState<string[]>([]);
+  const [consent, setConsent] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
   const [code, setCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [offers, setOffers] = useState<{ title: string; sub: string; code: string | null }[]>([]);
-  const [consent, setConsent] = useState(true);
 
-  // Collapse the venue list into the distinct operators that issue referral codes.
-  const owners = useMemo(() => {
-    const uniq = Array.from(
-      new Map((venues.data ?? []).map((v) => [v.ownerId, v.name.split(' — ')[0]])),
-    );
-    return uniq.map(([id, name]) => ({ id, name }));
-  }, [venues.data]);
-
-  // Default to the first operator once they load; keep the choice valid if the
-  // list changes and never override an active selection that's still present.
+  // Seed the editable form from the saved profile (initial load + after save).
   useEffect(() => {
-    if (owners.length === 0) {
-      if (ownerId) setOwnerId('');
-      return;
+    if (profile.data) {
+      setSkill(profile.data.skillLevel as SkillLevel);
+      setSelectedGames(profile.data.games ?? []);
     }
-    if (!owners.some((o) => o.id === ownerId)) setOwnerId(owners[0].id);
-  }, [owners, ownerId]);
+  }, [profile.data]);
 
+  // Referral codes are per-operator → only fetch/show on an operator storefront.
   useEffect(() => {
     setCode(null);
     setCopied(false);
-    setOffers([]);
-    if (!ownerId) return;
-    api.referralCode(ownerId).then((r) => setCode(r.code)).catch(() => setCode(null));
-    api
-      .offersInbox(ownerId)
-      .then((list) =>
-        setOffers(
-          list.map((o) => ({
-            title: o.name,
-            sub: o.type === 'percent' ? `${o.value}% off` : `₹${o.value} off`,
-            code: o.code,
-          })),
-        ),
-      )
-      .catch(() => setOffers([]));
-  }, [ownerId]);
+    if (!scoped || !sfOwnerId) return;
+    api.referralCode(sfOwnerId).then((r) => setCode(r.code)).catch(() => setCode(null));
+  }, [scoped, sfOwnerId]);
 
   // Normalise the loosely-typed catalogue rows to { id, name }.
   const gameOptions = useMemo(
@@ -82,10 +85,21 @@ export function AccountPage() {
       prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id],
     );
 
-  const saveSkill = async () => {
+  const openEdit = () => {
+    // Reset the form to the saved values so a cancel discards in-progress edits.
+    if (profile.data) {
+      setSkill(profile.data.skillLevel as SkillLevel);
+      setSelectedGames(profile.data.games ?? []);
+    }
+    setEditOpen(true);
+  };
+
+  const saveProfile = async () => {
     try {
-      await api.updateProfile(ownerId, { skillLevel: skill, games: selectedGames });
-      flash('Skill level updated.');
+      await api.updateMyProfile({ skillLevel: skill, games: selectedGames });
+      flash('Profile updated.');
+      setEditOpen(false);
+      profile.reload();
     } catch (e) {
       flash((e as Error).message);
     }
@@ -121,7 +135,7 @@ export function AccountPage() {
     return (
       <div className="mx-auto w-full max-w-2xl px-1 py-2">
         <h1 className="fl-display text-3xl" style={{ color: 'var(--chalk)' }}>
-          Account
+          Profile
         </h1>
         <div
           className="mt-5 flex flex-col items-center px-6 py-9 text-center"
@@ -144,26 +158,14 @@ export function AccountPage() {
   }
 
   // ---- initial loading skeleton -----------------------------------------
-  // Mirror the account layout (header + profile card + the two-column section
-  // cards) while the operator/saved-venue/game data is still resolving.
-  if (venues.loading && !venues.data) {
+  if (profile.loading && !profile.data) {
     return (
       <div className="mx-auto w-full max-w-5xl px-1 py-2">
         <Skeleton className="h-9 w-40 rounded-lg" />
-
-        {/* profile card */}
         <Skeleton className="mt-4 h-[86px] w-full rounded-2xl" />
-
-        {/* two-column section cards */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-          <div className="flex flex-col gap-4">
-            <Skeleton className="h-[150px] w-full rounded-[14px]" />
-            <Skeleton className="h-72 w-full rounded-[14px]" />
-          </div>
-          <div className="flex flex-col gap-4">
-            <Skeleton className="h-[140px] w-full rounded-[14px]" />
-            <Skeleton className="h-24 w-full rounded-[12px]" />
-          </div>
+          <Skeleton className="h-[110px] w-full rounded-[14px]" />
+          <Skeleton className="h-[150px] w-full rounded-[14px]" />
         </div>
       </div>
     );
@@ -173,12 +175,78 @@ export function AccountPage() {
   const userInitial = userName.trim().charAt(0).toUpperCase() || 'P';
   const userMobile = user.mobile ?? user.email ?? '';
   const savedCount = saved.data?.length ?? 0;
-  const ownerName = owners.find((o) => o.id === ownerId)?.name;
+  const savedSkill = (profile.data?.skillLevel as SkillLevel) ?? skill;
+
+  // Shared edit-profile form — rendered inside a Dialog (desktop) or Sheet (mobile).
+  const editForm = (
+    <div className="flex flex-col gap-4">
+      <label className="block">
+        <span className="mb-1.5 block text-xs" style={{ color: 'var(--muted)' }}>
+          Skill level (powers open-match matching)
+        </span>
+        <Picker
+          value={skill}
+          onChange={(v) => setSkill(v as SkillLevel)}
+          options={Object.values(SkillLevel).map((s) => ({ value: s, label: label(s) }))}
+        />
+      </label>
+      <div className="block">
+        <span className="mb-1.5 block text-xs" style={{ color: 'var(--muted)' }}>
+          Preferred games
+        </span>
+        <div className="flex flex-wrap gap-2">
+          {gameOptions.length === 0 ? (
+            <span className="text-xs" style={{ color: 'var(--faint)' }}>
+              No games available.
+            </span>
+          ) : (
+            gameOptions.map((g) => {
+              const on = selectedGames.includes(g.id);
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => toggleGame(g.id)}
+                  aria-pressed={on}
+                  className="text-xs font-semibold"
+                  style={{
+                    background: on ? 'var(--brand)' : 'var(--bg-2)',
+                    color: on ? 'var(--on-brand)' : 'var(--chalk)',
+                    border: `1px solid ${on ? 'var(--brand)' : 'var(--line-strong)'}`,
+                    borderRadius: 999,
+                    padding: '7px 13px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {g.name}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+      <button
+        onClick={saveProfile}
+        className="fl-display mt-1 w-full"
+        style={{
+          background: 'var(--brand)',
+          color: 'var(--on-brand)',
+          border: 'none',
+          borderRadius: 11,
+          padding: '12px',
+          fontSize: 15,
+          cursor: 'pointer',
+        }}
+      >
+        Save changes
+      </button>
+    </div>
+  );
 
   return (
     <div className="mx-auto w-full max-w-5xl px-1 py-2">
       <h1 className="fl-display text-3xl" style={{ color: 'var(--chalk)' }}>
-        Account
+        Profile
       </h1>
 
       {/* profile card */}
@@ -209,98 +277,32 @@ export function AccountPage() {
             </div>
           )}
         </div>
+        {/* compact edit affordance — opens the responsive edit modal */}
+        <button
+          type="button"
+          onClick={openEdit}
+          aria-label="Edit profile"
+          title="Edit profile"
+          className="ml-auto grid h-9 w-9 flex-none place-items-center rounded-full"
+          style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--brand)' }}
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* desktop two-column reflow */}
+      {/* desktop two-column reflow: details | refer & earn (storefront only) */}
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-        <div className="flex flex-col gap-4">
-          {/* details card */}
-          <div
-            className="px-4"
-            style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14 }}
-          >
-            <Row label="Venue operator" value={ownerName ?? '—'} />
-            <Row label="Skill level" value={label(skill)} valueColor="var(--brand)" />
-            <Row label="Saved venues" value={`${savedCount} grounds`} last />
-          </div>
-
-          {/* skill editor — preserves updateProfile wiring */}
-          <div
-            className="p-4"
-            style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14 }}
-          >
-            <SectionLabel>Edit profile</SectionLabel>
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-xs" style={{ color: 'var(--muted)' }}>
-                Venue operator
-              </span>
-              <Picker value={ownerId} onChange={setOwnerId} options={owners.map((o) => ({ value: o.id, label: o.name }))} />
-            </label>
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-xs" style={{ color: 'var(--muted)' }}>
-                Skill level (powers open-match matching)
-              </span>
-              <Picker
-                value={skill}
-                onChange={(v) => setSkill(v as SkillLevel)}
-                options={Object.values(SkillLevel).map((s) => ({ value: s, label: s }))}
-              />
-            </label>
-            <div className="mt-3 block">
-              <span className="mb-1.5 block text-xs" style={{ color: 'var(--muted)' }}>
-                Preferred games
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {gameOptions.length === 0 ? (
-                  <span className="text-xs" style={{ color: 'var(--faint)' }}>
-                    No games available.
-                  </span>
-                ) : (
-                  gameOptions.map((g) => {
-                    const on = selectedGames.includes(g.id);
-                    return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => toggleGame(g.id)}
-                        aria-pressed={on}
-                        className="text-xs font-semibold"
-                        style={{
-                          background: on ? 'var(--brand)' : 'var(--bg-2)',
-                          color: on ? 'var(--on-brand)' : 'var(--chalk)',
-                          border: `1px solid ${on ? 'var(--brand)' : 'var(--line-strong)'}`,
-                          borderRadius: 999,
-                          padding: '7px 13px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {g.name}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-            <button
-              onClick={saveSkill}
-              className="fl-display mt-4 w-full"
-              style={{
-                background: 'var(--brand)',
-                color: 'var(--on-brand)',
-                border: 'none',
-                borderRadius: 11,
-                padding: '12px',
-                fontSize: 15,
-                cursor: 'pointer',
-              }}
-            >
-              Save skill
-            </button>
-          </div>
+        {/* details card */}
+        <div
+          className="px-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14 }}
+        >
+          <Row label="Skill level" value={label(savedSkill)} valueColor="var(--brand)" />
+          <Row label="Saved venues" value={`${savedCount} grounds`} last />
         </div>
 
-        <div className="flex flex-col gap-4">
-          {/* refer & earn — copyable code, preserves copyCode wiring */}
+        {/* refer & earn — per-operator program, so only on an operator storefront */}
+        {scoped && (
           <div
             className="p-4"
             style={{
@@ -314,7 +316,7 @@ export function AccountPage() {
               Refer &amp; earn ₹150
             </div>
             <p className="mt-1.5 text-xs leading-relaxed" style={{ color: 'var(--muted)' }}>
-              Credit drops after your friend&apos;s first paid booking.
+              {ownerName ? `Your code at ${ownerName}. ` : ''}Credit drops after your friend&apos;s first paid booking.
             </p>
             <button
               onClick={copyCode}
@@ -337,47 +339,7 @@ export function AccountPage() {
               </span>
             </button>
           </div>
-
-          {/* offers inbox */}
-          <div>
-            <div className="fl-mono mb-2.5 mt-1 text-xs uppercase" style={{ letterSpacing: '0.1em', color: 'var(--faint)' }}>
-              Offers for you
-            </div>
-            <div className="flex flex-col gap-2.5">
-              {offers.length === 0 ? (
-                <div
-                  className="px-4 py-3.5 text-sm"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, color: 'var(--faint)' }}
-                >
-                  No offers right now.
-                </div>
-              ) : (
-                offers.map((o, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-3 px-3.5 py-3"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12 }}
-                  >
-                    <span style={{ fontSize: 20 }}>🎟️</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate text-sm font-semibold" style={{ color: 'var(--chalk)' }}>
-                        {o.title}
-                      </div>
-                      <div className="text-xs" style={{ color: 'var(--faint)' }}>
-                        {o.sub}
-                      </div>
-                    </div>
-                    {o.code && (
-                      <span className="fl-mono text-xs font-semibold" style={{ color: 'var(--brand)' }}>
-                        {o.code}
-                      </span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* consent toggle — DPDP */}
@@ -434,6 +396,42 @@ export function AccountPage() {
       >
         Sign out
       </button>
+
+      {/* edit-profile modal: Dialog on desktop, bottom Sheet on mobile. Both are
+          portaled to <body>, so re-apply the `.floodlit` theme scope + mode here
+          (the design tokens only resolve inside it). */}
+      {isDesktop ? (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent
+            className="floodlit max-w-md"
+            data-fl-mode={mode}
+            style={{ background: 'var(--surface)', color: 'var(--chalk)', borderColor: 'var(--line)' }}
+          >
+            <DialogHeader>
+              <DialogTitle className="fl-display text-xl" style={{ color: 'var(--chalk)' }}>
+                Edit profile
+              </DialogTitle>
+            </DialogHeader>
+            {editForm}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Sheet open={editOpen} onOpenChange={setEditOpen}>
+          <SheetContent
+            side="bottom"
+            className="floodlit"
+            data-fl-mode={mode}
+            style={{ background: 'var(--surface)', color: 'var(--chalk)', borderColor: 'var(--line)' }}
+          >
+            <SheetHeader style={{ borderColor: 'var(--line)' }}>
+              <SheetTitle className="fl-display text-xl" style={{ color: 'var(--chalk)' }}>
+                Edit profile
+              </SheetTitle>
+            </SheetHeader>
+            <SheetBody>{editForm}</SheetBody>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -461,15 +459,6 @@ function Row({
       <span className="text-sm font-semibold" style={{ color: valueColor ?? 'var(--chalk)' }}>
         {value}
       </span>
-    </div>
-  );
-}
-
-/** Small uppercase section label in the Floodlit mono style. */
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="fl-mono text-xs uppercase" style={{ letterSpacing: '0.1em', color: 'var(--faint)' }}>
-      {children}
     </div>
   );
 }

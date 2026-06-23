@@ -34,7 +34,7 @@ const NAV = [
   { to: '/open-matches', label: 'Matches', icon: Users, match: ['/open-matches', '/tournaments'] },
   { to: '/wallet', label: 'Wallet', icon: Wallet, match: ['/wallet'] },
   { to: '/my-bookings', label: 'Bookings', icon: CalendarCheck, match: ['/my-bookings'] },
-  { to: '/account', label: 'Account', icon: User, match: ['/account', '/saved', '/offers'] },
+  { to: '/account', label: 'Profile', icon: User, match: ['/account', '/saved', '/offers'] },
 ];
 
 /** Floating brand-coloured toast, rendered above the bottom nav. */
@@ -201,16 +201,9 @@ export function ConsumerLayout() {
             >
               {mode === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            {isPlayer ? (
-              <Link
-                to="/account"
-                aria-label="Account"
-                className="fl-display grid h-9 w-9 place-items-center rounded-full text-sm"
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--line-strong)', fontWeight: 700 }}
-              >
-                {(user?.name || 'P').charAt(0).toUpperCase()}
-              </Link>
-            ) : (
+            {/* No player avatar here — the Profile tab in the nav already covers
+                account access. Guests still get a Sign-in affordance. */}
+            {!isPlayer && (
               <Link
                 to="/login"
                 className="inline-flex h-9 items-center rounded-[10px] px-3.5 text-[13px] font-semibold"

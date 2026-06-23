@@ -19,6 +19,11 @@ import {
 import { DateTime } from 'luxon';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
+import { StorageService } from '../storage/storage.service';
+import { validateImageUpload } from '../storage/image';
+
+/** Max venue photo upload size (also capped by the multer route limit). */
+const MAX_VENUE_PHOTO_BYTES = 5 * 1024 * 1024;
 import { Decimal, money, num } from '../../db/money';
 import {
   bookableUnits,
@@ -84,7 +89,10 @@ function pgErrorCode(err: unknown): string | undefined {
  */
 @Injectable()
 export class VenuesService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly storage: StorageService,
+  ) {}
 
   private ownerId(user: RequestUser): string {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
@@ -613,6 +621,76 @@ export class VenuesService {
       });
       return this.shapeVenue(updated);
     });
+  }
+
+  /**
+   * Upload a venue photo (PRD §4.1): validate the actual image bytes, store the
+   * object in S3/R2 (or local disk in dev) via StorageService, append its public
+   * URL to the venue's photos, and return the updated venue. Owner-scoped — a
+   * caller can only add photos to a venue they own.
+   */
+  async addPhoto(user: RequestUser, venueId: string, file?: Express.Multer.File) {
+    const ownerId = this.ownerId(user);
+    let img: { mime: string; ext: string };
+    try {
+      img = validateImageUpload(file, MAX_VENUE_PHOTO_BYTES);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+
+    const venue = await this.db.withTenant((tx) =>
+      tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      }),
+    );
+    if (!venue) throw new NotFoundException('Venue not found');
+
+    const { url } = await this.storage.upload(
+      `venues/${venueId}/${randomUUID()}.${img.ext}`,
+      file!.buffer,
+      img.mime,
+    );
+    const photos = [...(venue.photos ?? []), url];
+
+    return this.db.withTenant(async (tx) => {
+      await tx.update(venues).set({ photos }).where(eq(venues.id, venueId));
+      const updated = await tx.query.venues.findFirst({
+        where: eq(venues.id, venueId),
+        with: { venueGames: true, venueSettings: true, bookableUnits: true },
+      });
+      return this.shapeVenue(updated);
+    });
+  }
+
+  /**
+   * Remove a venue photo by its URL: drop it from the venue's photos and
+   * best-effort delete the stored object (only if it's one we stored).
+   */
+  async removePhoto(user: RequestUser, venueId: string, url: string) {
+    const ownerId = this.ownerId(user);
+    if (!url) throw new BadRequestException('Photo URL is required');
+
+    const venue = await this.db.withTenant((tx) =>
+      tx.query.venues.findFirst({
+        where: and(eq(venues.id, venueId), eq(venues.ownerId, ownerId)),
+      }),
+    );
+    if (!venue) throw new NotFoundException('Venue not found');
+
+    const photos = (venue.photos ?? []).filter((p) => p !== url);
+    const result = await this.db.withTenant(async (tx) => {
+      await tx.update(venues).set({ photos }).where(eq(venues.id, venueId));
+      const updated = await tx.query.venues.findFirst({
+        where: eq(venues.id, venueId),
+        with: { venueGames: true, venueSettings: true, bookableUnits: true },
+      });
+      return this.shapeVenue(updated);
+    });
+
+    // Best-effort cleanup of the stored object (no-op for external URLs).
+    const key = this.storage.keyFromUrl(url);
+    if (key) void this.storage.delete(key);
+    return result;
   }
 
   /**

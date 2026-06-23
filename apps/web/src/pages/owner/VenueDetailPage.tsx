@@ -5,7 +5,7 @@ import {
   TimeBand,
   UnitLabel,
 } from '@sportsbooking/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Building2,
@@ -16,8 +16,10 @@ import {
   Clock,
   Grid3x3,
   IndianRupee,
+  ImageUp,
   Layers,
   LayoutGrid,
+  Loader2,
   MapPin,
   MoreHorizontal,
   Pencil,
@@ -217,6 +219,7 @@ export function VenueDetailPage() {
             venue={v}
             overview={overview}
             onSave={(body) => wrap(() => api.updateVenue(v.id, body), 'Ground updated.')}
+            reload={reloadAll}
           />
         </TabsContent>
 
@@ -264,10 +267,12 @@ function OverviewTab({
   venue: v,
   overview,
   onSave,
+  reload,
 }: {
   venue: VenueDetail;
   overview: ReturnType<typeof useLoad<VenueOverview>>;
   onSave: (body: Record<string, unknown>) => void;
+  reload: () => void;
 }) {
   const [edit, setEdit] = useState(false);
   const o = overview.data;
@@ -363,6 +368,7 @@ function OverviewTab({
       <EditVenueDialog
         venue={edit ? v : null}
         onClose={() => setEdit(false)}
+        onPhotosChanged={reload}
         onSave={(body) => {
           onSave(body);
           setEdit(false);
@@ -376,6 +382,7 @@ function EditVenueDialog({
   venue,
   onClose,
   onSave,
+  onPhotosChanged,
 }: {
   venue: VenueDetail | null;
   onClose: () => void;
@@ -391,6 +398,9 @@ function EditVenueDialog({
     gameIds: string[];
     photos: string[];
   }) => void;
+  /** Called after a photo is uploaded/removed (they persist immediately) so the
+   *  parent overview can refresh its photo strip. */
+  onPhotosChanged?: () => void;
 }) {
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
@@ -402,7 +412,9 @@ function EditVenueDialog({
   const [geoLng, setGeoLng] = useState('');
   const [gameIds, setGameIds] = useState<string[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
-  const [photoDraft, setPhotoDraft] = useState('');
+  const [busyPhoto, setBusyPhoto] = useState(false);
+  const [photoErr, setPhotoErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [loaded, setLoaded] = useState<string | null>(null);
 
   // Game catalogue for the offered-games picker (id + name).
@@ -422,7 +434,7 @@ function EditVenueDialog({
     setGeoLng(venue.geoLng == null ? '' : String(venue.geoLng));
     setGameIds(venue.games.map((g) => g.gameId));
     setPhotos(venue.photos ?? []);
-    setPhotoDraft('');
+    setPhotoErr(null);
     setLoaded(venue.id);
   }
   if (!venue && loaded !== null) setLoaded(null);
@@ -430,11 +442,46 @@ function EditVenueDialog({
   const toggleGame = (id: string) =>
     setGameIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
-  const addPhoto = () => {
-    const url = photoDraft.trim();
-    if (!url || photos.includes(url)) return;
-    setPhotos((p) => [...p, url]);
-    setPhotoDraft('');
+  // Photos upload+persist immediately (server stores the object in S3/R2 or
+  // local dev disk and appends the URL), independent of the Save button.
+  const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+  const uploadPhoto = async (file: File) => {
+    if (!venue) return;
+    setPhotoErr(null);
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) {
+      setPhotoErr('Please choose a PNG, JPG, WebP or GIF image.');
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoErr('Image must be 5 MB or smaller.');
+      return;
+    }
+    setBusyPhoto(true);
+    try {
+      const updated = await api.uploadVenuePhoto(venue.id, file);
+      setPhotos(updated.photos ?? []);
+      onPhotosChanged?.();
+    } catch (e) {
+      setPhotoErr((e as Error).message);
+    } finally {
+      setBusyPhoto(false);
+    }
+  };
+
+  const removePhoto = async (url: string) => {
+    if (!venue) return;
+    setPhotoErr(null);
+    setBusyPhoto(true);
+    try {
+      const updated = await api.removeVenuePhoto(venue.id, url);
+      setPhotos(updated.photos ?? []);
+      onPhotosChanged?.();
+    } catch (e) {
+      setPhotoErr((e as Error).message);
+    } finally {
+      setBusyPhoto(false);
+    }
   };
 
   const save = () => {
@@ -525,7 +572,11 @@ function EditVenueDialog({
         </div>
 
         <div>
-          <SectionLabel className="mb-2">Photos</SectionLabel>
+          <SectionLabel className="mb-1">Photos</SectionLabel>
+          <p className="mb-3 text-xs text-muted-foreground">
+            The first photo is the cover shown on your storefront card. PNG, JPG, WebP
+            or GIF, up to 5 MB. Uploads save right away.
+          </p>
           {photos.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-3">
               {photos.map((src, i) => (
@@ -535,11 +586,17 @@ function EditVenueDialog({
                     alt={`Photo ${i + 1}`}
                     className="h-20 w-28 rounded-xl border border-border object-cover"
                   />
+                  {i === 0 && (
+                    <span className="absolute left-1.5 top-1.5 rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
+                      Cover
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setPhotos((p) => p.filter((x) => x !== src))}
+                    onClick={() => removePhoto(src)}
+                    disabled={busyPhoto}
                     aria-label={`Remove photo ${i + 1}`}
-                    className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-card hover:text-destructive"
+                    className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-card transition-colors hover:text-destructive disabled:opacity-50"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -547,28 +604,34 @@ function EditVenueDialog({
               ))}
             </div>
           )}
-          <div className="flex items-end gap-2">
-            <label className="block flex-1">
-              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                Photo URL
-              </span>
-              <input
-                value={photoDraft}
-                onChange={(e) => setPhotoDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addPhoto();
-                  }
-                }}
-                placeholder="https://…"
-                className="h-10 w-full rounded-xl border border-border bg-input-background px-3 text-sm outline-none focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-              />
-            </label>
-            <Button variant="outline" onClick={addPhoto} disabled={!photoDraft.trim()}>
-              <Plus className="h-4 w-4" /> Add
-            </Button>
-          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadPhoto(file);
+              e.target.value = '';
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileRef.current?.click()}
+            disabled={busyPhoto}
+          >
+            {busyPhoto ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Uploading…
+              </>
+            ) : (
+              <>
+                <ImageUp className="h-4 w-4" /> Upload image
+              </>
+            )}
+          </Button>
+          {photoErr && <p className="mt-2 text-xs text-destructive">{photoErr}</p>}
         </div>
 
         <DialogFooter>

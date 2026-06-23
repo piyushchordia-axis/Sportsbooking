@@ -460,6 +460,9 @@ async function seed(tx: DbTx) {
   const offerFirst100Id = randomUUID();
   await tx.insert(offers).values({ id: offerFirst100Id, ownerId, name: 'First Booking ₹100 Off', type: 'flat', value: money(dec(100)), code: 'FIRST100', autoApply: false });
   await tx.insert(offers).values({ id: randomUUID(), ownerId, name: 'Win-back 15%', type: 'percent', value: money(dec(15)), code: 'COMEBACK15', segment: 'lapsed', validFrom: daysAgo(10), validTo: new Date(Date.now() + 30 * DAY) });
+  // General coded offers any signed-in player can use (shown in the offers inbox).
+  await tx.insert(offers).values({ id: randomUUID(), ownerId, name: 'Rally Week — 10% off', type: 'percent', value: money(dec(10)), code: 'RALLY10', autoApply: false });
+  await tx.insert(offers).values({ id: randomUUID(), ownerId, name: '₹50 off your court', type: 'flat', value: money(dec(50)), code: 'SMASH50', autoApply: false });
 
   // ---- customers (global users) ----------------------------------------
   const mk = async (name: string, mobile: string) => {
@@ -696,6 +699,20 @@ async function seed(tx: DbTx) {
     { id: randomUUID(), ownerId: suspendedOwnerId, actorId: superAdminId, actorRole: 'super_admin', action: 'suspend', entity: 'Owner', entityId: suspendedOwnerId, metadata: { reason: 'non-payment of AMC' } },
     { id: randomUUID(), actorId: superAdminId, actorRole: 'super_admin', action: 'create', entity: 'GameCatalogue', entityId: boxCricketId, metadata: { name: 'Box Cricket' } },
   ]);
+
+  // Seed each customer's GLOBAL profile (users.skillLevel/games) from their most
+  // recent per-operator player_profile, matching the production model where a
+  // player edits one operator-agnostic profile (no "venue operator" to pick).
+  await tx.execute(sql`
+    UPDATE users u
+    SET "skillLevel" = pp."skillLevel", games = pp.games
+    FROM (
+      SELECT DISTINCT ON ("customerId") "customerId", "skillLevel", games
+      FROM player_profiles
+      ORDER BY "customerId", "createdAt" DESC
+    ) pp
+    WHERE u.id = pp."customerId" AND u.role = 'customer'
+  `);
 
   // eslint-disable-next-line no-console
   console.log(

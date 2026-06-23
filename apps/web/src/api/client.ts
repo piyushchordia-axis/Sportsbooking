@@ -22,6 +22,16 @@ import {
 
 const BASE = '/api';
 
+/** Live aggregate stats for the marketing landing page (GET /discover/stats). */
+export interface DiscoverStats {
+  grounds: number;
+  cities: number;
+  sports: number;
+  players: number;
+  bookingsThisWeek: number;
+  openMatches: number;
+}
+
 export interface DiscoverVenue {
   id: string;
   name: string;
@@ -992,6 +1002,9 @@ export const api = {
     return get<DiscoverVenue[]>(`/discover/venues${s ? `?${s}` : ''}`);
   },
   discoverGames: () => get<any[]>('/discover/games'),
+  /** Live marketing stats — owner-scoped when an ownerId is passed, else global. */
+  publicStats: (owner?: string) =>
+    get<DiscoverStats>(`/discover/stats${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
   availability: (unitId: string, date: string) =>
     get<CalendarResponse>(`/availability?unitId=${unitId}&date=${date}`),
   createBooking: (payload: CreateBookingRequest) =>
@@ -1029,6 +1042,11 @@ export const api = {
   referralCode: (ownerId: string) => get<{ code: string }>(`/referral/code/${ownerId}`),
   updateProfile: (ownerId: string, body: { skillLevel?: string; games?: string[] }) =>
     put(`/owners/${ownerId}/profile`, body),
+  /** The signed-in player's GLOBAL profile (skill + preferred games) — no
+   *  operator scope. Backs the consumer Profile page. */
+  getMyProfile: () => get<{ skillLevel: string; games: string[] }>('/me/profile'),
+  updateMyProfile: (body: { skillLevel?: string; games?: string[] }) =>
+    put<{ skillLevel: string; games: string[] }>('/me/profile', body),
 
   // ---- tournaments ----
   listTournaments: (venueId: string) => get<any[]>(`/tournaments/venue/${venueId}`),
@@ -1123,6 +1141,13 @@ export const api = {
   createVenue: (body: unknown) => post('/venues', body),
   updateVenue: (venueId: string, body: unknown) => patch(`/venues/${venueId}`, body),
   deleteVenue: (venueId: string) => del(`/venues/${venueId}`),
+  /** Upload a venue photo (multipart) — stored in S3/R2 (or local dev disk),
+   *  appended to the venue. Returns the updated venue. */
+  uploadVenuePhoto: (venueId: string, file: File) =>
+    uploadFile<VenueDetail>(`/venues/${venueId}/photos`, file),
+  /** Remove a venue photo by its URL. Returns the updated venue. */
+  removeVenuePhoto: (venueId: string, url: string) =>
+    del<VenueDetail>(`/venues/${venueId}/photos?url=${encodeURIComponent(url)}`),
   addUnit: (venueId: string, body: unknown) => post(`/venues/${venueId}/units`, body),
   updateUnit: (unitId: string, body: unknown) => patch(`/venues/units/${unitId}`, body),
   deleteUnit: (unitId: string) => del(`/venues/units/${unitId}`),

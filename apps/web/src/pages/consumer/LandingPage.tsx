@@ -6,9 +6,11 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link } from 'react-router-dom';
-import { type DiscoverVenue } from '../../api/client';
-import { ImageWithFallback, SportIcon } from '../../components/common';
+import { Link, useNavigate } from 'react-router-dom';
+import { type ResolvedSlot, SlotStatus } from '@sportsbooking/shared';
+import { api, type DiscoverVenue, type OpenMatch } from '../../api/client';
+import { ImageWithFallback, SportIcon, useLoad } from '../../components/common';
+import { DateRail, SlotCell, TierLegend } from '../../components/slot-ui';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { useStorefront } from '../../storefront/StorefrontProvider';
 import { flMoney } from '../../floodlit/toast';
@@ -44,6 +46,57 @@ function fromPrice(v: DiscoverVenue): string | null {
   return v.minPrice != null ? `₹${inr.format(Math.round(v.minPrice))}` : null;
 }
 
+/* Venues run on IST (Asia/Kolkata) — format open-match windows in that zone. */
+const matchTimeFmt = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: 'numeric',
+  hour12: true,
+});
+/** "8–9PM" style window for an open match. */
+function fmtMatchWindow(startIso: string, endIso: string): string {
+  try {
+    const s = matchTimeFmt.format(new Date(startIso)).replace(/\s/g, '');
+    const e = matchTimeFmt.format(new Date(endIso)).replace(/\s/g, '');
+    return `${s}–${e}`.toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+/** One real open match (GET /open-matches) rendered in the landing's trio. */
+function OpenMatchRow({ match }: { match: OpenMatch }) {
+  const when = match.time ? fmtMatchWindow(match.time.startsAt, match.time.endsAt) : null;
+  const per = Number(match.fee?.perPlayer ?? 0);
+  const place = match.venue?.city ?? match.venue?.name ?? null;
+  const left = match.spots?.remaining ?? 0;
+  return (
+    <div className="rounded-xl p-3.5" style={innerCardStyle}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[15px] font-semibold">{match.game?.name ?? 'Open game'}</span>
+        {when && (
+          <span className="fl-mono text-xs" style={{ color: 'var(--green)' }}>
+            {when}
+          </span>
+        )}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="fl-mono text-[13px]" style={{ color: 'var(--muted)' }}>
+          {left} {left === 1 ? 'spot' : 'spots'} left
+          {per ? ` · ${flMoney(per)}` : ''}
+          {place ? ` · ${place}` : ''}
+        </span>
+        <Link
+          to="/open-matches"
+          className="rounded-lg px-3 py-[7px] text-xs font-semibold no-underline"
+          style={{ background: 'var(--green)', color: 'var(--on-brand)' }}
+        >
+          Join
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────────────── count-up hook ───────────────────────────────
  * Tweens a number up to `target` once the element scrolls into view (or on
  * mount for above-the-fold figures). setInterval (not rAF) so the tween still
@@ -51,23 +104,27 @@ function fromPrice(v: DiscoverVenue): string | null {
 function useCountUp(target: number, dec = 0, durMs = 1500) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [val, setVal] = useState(0);
-  const started = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Scope the run-once guard + timer to THIS target, so async-loaded live
+    // figures animate in cleanly: when the value arrives the effect re-runs with
+    // a fresh guard, and cleanup clears any in-flight tween (no racing timers).
+    let started = false;
+    let iv: ReturnType<typeof setInterval> | null = null;
 
     const run = () => {
-      if (started.current) return;
-      started.current = true;
+      if (started) return;
+      started = true;
       const start = Date.now();
-      const iv = setInterval(() => {
+      iv = setInterval(() => {
         const t = Math.min(1, (Date.now() - start) / durMs);
         const eased = 1 - Math.pow(1 - t, 3);
         setVal(target * eased);
         if (t >= 1) {
           setVal(target);
-          clearInterval(iv);
+          if (iv) clearInterval(iv);
         }
       }, 33);
     };
@@ -96,6 +153,7 @@ function useCountUp(target: number, dec = 0, durMs = 1500) {
     window.addEventListener('scroll', check, { passive: true, capture: true });
     window.addEventListener('resize', check, { passive: true });
     return () => {
+      if (iv) clearInterval(iv);
       cancelAnimationFrame(raf);
       window.removeEventListener('scroll', check, { capture: true });
       window.removeEventListener('resize', check);
@@ -135,54 +193,50 @@ function CountUp({
   );
 }
 
-/* ─────────────────────── animated slot board (fills on scroll) ─────────── */
-const FILL_MAP = [
-  [1, 0, 1, 1, 0, 1, 1],
-  [1, 1, 1, 0, 1, 1, 1],
-  [1, 1, 0, 1, 1, 1, 1],
-  [0, 1, 1, 1, 0, 1, 1],
-];
-const SLOT_ROWS = ['18:00', '19:00', '20:00', '21:00'];
-const SLOT_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+/* ─────────── live slot teaser — the SAME picker UI as the ground page ─────── */
+function landingDays(): string[] {
+  const base = new Date();
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate(),
+    ).padStart(2, '0')}`;
+  });
+}
 
-function SlotBoard() {
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  const [filled, setFilled] = useState(false);
+/**
+ * Landing teaser of a real featured ground's availability — the SAME date rail +
+ * tiered slot grid the ground page uses, so the marketing preview and the actual
+ * booking screen feel identical. Tapping a slot deep-links into booking.
+ */
+function LandingSlotTeaser({ venue }: { venue: DiscoverVenue | null }) {
+  const navigate = useNavigate();
+  const unitId = venue?.units[0]?.id ?? '';
+  const days = useMemo(landingDays, []);
+  const [activeDate, setActiveDate] = useState(days[0]);
+  const [slots, setSlots] = useState<ResolvedSlot[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const el = gridRef.current;
-    if (!el) return;
-    let done = false;
-    const fire = () => {
-      if (done) return;
-      done = true;
-      setFilled(true);
-    };
-    const inView = () => {
-      const r = el.getBoundingClientRect();
-      const h = window.innerHeight || document.documentElement.clientHeight;
-      return r.top < h - 60 && r.bottom > 0;
-    };
-    const check = () => inView() && fire();
-    let io: IntersectionObserver | null = null;
-    try {
-      io = new IntersectionObserver(
-        (entries) => entries.forEach((e) => e.isIntersecting && fire()),
-        { threshold: 0.25 },
-      );
-      io.observe(el);
-    } catch {
-      /* fallback below */
-    }
-    check();
-    window.addEventListener('scroll', check, { passive: true, capture: true });
-    window.addEventListener('resize', check, { passive: true });
+    if (!unitId) return;
+    let alive = true;
+    setLoading(true);
+    api
+      .availability(unitId, activeDate)
+      .then((res) => alive && setSlots(res.slots))
+      .catch(() => alive && setSlots([]))
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
     return () => {
-      window.removeEventListener('scroll', check, { capture: true });
-      window.removeEventListener('resize', check);
-      io?.disconnect();
+      alive = false;
     };
-  }, []);
+  }, [unitId, activeDate]);
+
+  const openCount = slots.filter((s) => s.status === SlotStatus.OPEN).length;
+  const shortName = venue?.name?.split(' — ')[0] ?? 'a ground near you';
+  const book = () => venue && navigate(`/venue/${venue.id}?date=${activeDate}`);
 
   return (
     <div
@@ -191,80 +245,50 @@ function SlotBoard() {
     >
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="fl-display text-lg font-bold sm:text-xl" style={{ color: 'var(--chalk)' }}>
-          Tonight&apos;s slots · near you
+          Slots at {shortName}
         </div>
-        <div className="fl-mono text-[13px]" style={{ color: 'var(--faint)' }}>
-          filling fast ·{' '}
-          <CountUp to={87} suffix="%" style={{ color: 'var(--amber)', fontWeight: 600 }} /> gone
-        </div>
-      </div>
-
-      <div
-        ref={gridRef}
-        className="mt-4 grid gap-1.5"
-        style={{ gridTemplateColumns: 'auto repeat(7,1fr)' }}
-      >
-        <div />
-        {SLOT_DAYS.map((d, i) => (
-          <div
-            key={d}
-            className="fl-mono text-center text-[10px]"
-            style={{
-              color: i >= 5 ? 'var(--green)' : 'var(--faint)',
-              fontWeight: i >= 5 ? 600 : 400,
-            }}
+        {venue && (
+          <Link
+            to={`/venue/${venue.id}`}
+            className="fl-mono text-[13px] no-underline"
+            style={{ color: 'var(--green)' }}
           >
-            {d}
-          </div>
-        ))}
-        {SLOT_ROWS.map((label, r) => (
-          <Fragmentish key={label}>
-            <div
-              className="fl-mono flex items-center pr-1 text-[10px]"
-              style={{ color: 'var(--faint)' }}
-            >
-              {label}
-            </div>
-            {FILL_MAP[r].map((f, c) => {
-              const i = r * 7 + c;
-              const on = filled && f === 1;
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  className="h-[26px] rounded-md"
-                  style={{
-                    border: '1px solid var(--line-strong)',
-                    background: on ? 'var(--green)' : 'transparent',
-                    borderColor: on ? 'transparent' : 'var(--line-strong)',
-                    transition: 'background .4s ease, border-color .4s ease',
-                    transitionDelay: filled ? `${120 + i * 45}ms` : '0ms',
-                  }}
-                />
-              );
-            })}
-          </Fragmentish>
-        ))}
+            See all →
+          </Link>
+        )}
       </div>
 
-      <div
-        className="fl-mono mt-4 flex gap-5 text-[11px]"
-        style={{ color: 'var(--faint)' }}
-      >
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-[11px] w-[11px] rounded-[3px]"
-            style={{ background: 'var(--green)' }}
-          />
-          Taken
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-[11px] w-[11px] rounded-[3px]"
-            style={{ border: '1px solid var(--line-strong)' }}
-          />
-          Grab it
-        </span>
+      <div className="mt-4">
+        <DateRail days={days} active={activeDate} onSelect={setActiveDate} />
       </div>
+      <div className="mt-3">
+        <TierLegend slots={slots} />
+      </div>
+
+      {loading && slots.length === 0 ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-[58px] animate-pulse rounded-xl" style={{ background: 'var(--bg-2)' }} />
+          ))}
+        </div>
+      ) : openCount === 0 ? (
+        <div
+          className="mt-3 rounded-xl p-5 text-center text-sm"
+          style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}
+        >
+          No open slots that day — try another date.
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {slots.slice(0, 9).map((s) => (
+            <SlotCell key={s.start} slot={s} selected={false} onSelect={book} />
+          ))}
+        </div>
+      )}
+
+      <p className="fl-mono mt-4 text-[11px]" style={{ color: 'var(--faint)' }}>
+        Tap a slot to book at {shortName} →
+      </p>
     </div>
   );
 }
@@ -346,7 +370,13 @@ const innerCardStyle: CSSProperties = {
 };
 
 export function LandingPage() {
-  const { scoped, ownerName, ownerLogo, venues, loading } = useStorefront();
+  const { scoped, ownerId, ownerName, ownerLogo, venues, loading } = useStorefront();
+
+  // Live, real figures (no illustrative constants): owner-scoped on a
+  // white-label storefront, global across the marketplace. Plus a real
+  // open-matches feed for the "join a game" section.
+  const stats = useLoad(() => api.publicStats(ownerId ?? undefined), [ownerId]).data;
+  const openMatchFeed = useLoad(() => api.listOpenMatches(), []).data;
 
   // Distinct sports across the (scoped or marketplace) grounds — real data.
   const sports = useMemo(() => {
@@ -471,8 +501,7 @@ export function LandingPage() {
             >
               <div className="min-w-[140px] flex-1 px-[18px] py-4" style={{ borderRight: '1px solid var(--line)' }}>
                 <CountUp
-                  to={120}
-                  suffix="+"
+                  to={stats?.grounds ?? 0}
                   className="fl-mono block text-[clamp(26px,3vw,34px)] font-semibold"
                   style={{ color: 'var(--green)', letterSpacing: '-0.01em' }}
                 />
@@ -482,29 +511,31 @@ export function LandingPage() {
               </div>
               <div className="min-w-[140px] flex-1 px-[18px] py-4" style={{ borderRight: '1px solid var(--line)' }}>
                 <CountUp
-                  to={2400}
-                  suffix="+"
+                  to={stats?.players ?? 0}
                   className="fl-mono block text-[clamp(26px,3vw,34px)] font-semibold"
                   style={{ color: 'var(--amber)', letterSpacing: '-0.01em' }}
                 />
                 <div className="mt-1 text-xs" style={{ color: 'var(--faint)' }}>
-                  slots booked this week
+                  players on board
                 </div>
               </div>
               <div className="min-w-[110px] flex-1 px-[18px] py-4">
                 <CountUp
-                  to={30}
-                  suffix="s"
+                  to={stats?.sports ?? 0}
                   className="fl-mono block text-[clamp(26px,3vw,34px)] font-semibold"
                   style={{ color: 'var(--chalk)', letterSpacing: '-0.01em' }}
                 />
                 <div className="mt-1 text-xs" style={{ color: 'var(--faint)' }}>
-                  to lock a slot
+                  sports to play
                 </div>
               </div>
             </div>
-            <div className="fl-mono mt-2.5 text-[11px]" style={{ color: 'var(--faint)' }}>
-              * illustrative figures across the {brandName} network
+            <div className="fl-mono mt-2.5 flex items-center gap-2 text-[11px]" style={{ color: 'var(--faint)' }}>
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: 'var(--green)', boxShadow: '0 0 8px var(--green)' }}
+              />
+              Live numbers from the {brandName} network
             </div>
           </div>
 
@@ -558,12 +589,14 @@ export function LandingPage() {
                         <div className="fl-display truncate text-[15px] font-bold">
                           {heroGround?.name ?? 'Greenfield Turf'}
                         </div>
-                        <span className="fl-mono text-[11px]" style={{ color: 'var(--amber)' }}>
-                          ★ 4.8
-                        </span>
+                        {heroGround?.minPrice != null && (
+                          <span className="fl-mono shrink-0 text-[11px]" style={{ color: 'var(--amber)' }}>
+                            from {flMoney(heroGround.minPrice)}
+                          </span>
+                        )}
                       </div>
-                      <div className="fl-mono mt-1 text-[10px]" style={{ color: 'var(--faint)' }}>
-                        {heroGround?.games[0]?.name ?? '⚽ 🏏'} · 12 slots open tonight
+                      <div className="fl-mono mt-1 truncate text-[10px]" style={{ color: 'var(--faint)' }}>
+                        {heroGround ? heroGround.games.map((g) => g.name).join(' · ') : '⚽ 🏏'}
                       </div>
                     </div>
                     <div className="flex gap-1.5 px-[13px] py-[11px]">
@@ -733,7 +766,7 @@ export function LandingPage() {
           </div>
 
           <div className="mt-11 grid grid-cols-1 items-stretch gap-5 lg:grid-cols-[1.25fr_1fr] lg:gap-8">
-            <SlotBoard />
+            <LandingSlotTeaser venue={heroGround} />
 
             {/* price transparency */}
             <div className="rounded-[18px] p-5 sm:p-6" style={cardStyle}>
@@ -878,49 +911,23 @@ export function LandingPage() {
             {/* open matches */}
             <div className="flex flex-col gap-3.5 rounded-2xl p-6" style={cardStyle}>
               <div className="fl-display text-xl font-bold">Join an open match</div>
-              <div className="rounded-xl p-3.5" style={innerCardStyle}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[15px] font-semibold">Box cricket</span>
-                  <span className="fl-mono text-xs" style={{ color: 'var(--green)' }}>
-                    8–9 PM
-                  </span>
-                </div>
-                <div className="fl-mono mt-1.5 text-[13px]" style={{ color: 'var(--muted)' }}>
-                  2 spots left · {flMoney(150)} · 1.2 km
-                </div>
-                <div className="mt-3 flex items-center gap-1.5">
-                  {['var(--green-2)', 'var(--amber-2)', 'var(--surface-2)'].map((bg, i) => (
-                    <span key={i} className="h-[26px] w-[26px] rounded-full" style={{ background: bg, marginLeft: i ? -10 : 0 }} />
-                  ))}
-                  {[0, 1].map((i) => (
-                    <span
-                      key={i}
-                      className="grid h-[26px] w-[26px] place-items-center rounded-full text-[13px]"
-                      style={{ border: '1px dashed var(--line-strong)', color: 'var(--faint)', marginLeft: i ? -6 : -10 }}
-                    >
-                      +
-                    </span>
-                  ))}
-                  <Link
-                    to="/open-matches"
-                    className="ml-auto rounded-lg px-3 py-[7px] text-xs font-semibold no-underline"
-                    style={{ background: 'var(--green)', color: 'var(--on-brand)' }}
-                  >
-                    Join
+              {!openMatchFeed ? (
+                [0, 1].map((i) => (
+                  <div key={i} className="h-[68px] animate-pulse rounded-xl" style={innerCardStyle} />
+                ))
+              ) : openMatchFeed.length === 0 ? (
+                <div
+                  className="rounded-xl p-4 text-[13px]"
+                  style={{ ...innerCardStyle, color: 'var(--muted)', lineHeight: 1.5 }}
+                >
+                  No open games right now.{' '}
+                  <Link to="/open-matches" className="font-semibold no-underline" style={{ color: 'var(--green)' }}>
+                    Post yours →
                   </Link>
                 </div>
-              </div>
-              <div className="rounded-xl p-3.5" style={innerCardStyle}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[15px] font-semibold">5-a-side football</span>
-                  <span className="fl-mono text-xs" style={{ color: 'var(--green)' }}>
-                    9–10 PM
-                  </span>
-                </div>
-                <div className="fl-mono mt-1.5 text-[13px]" style={{ color: 'var(--muted)' }}>
-                  4 spots left · {flMoney(120)} · 3.0 km
-                </div>
-              </div>
+              ) : (
+                openMatchFeed.slice(0, 2).map((m) => <OpenMatchRow key={m.id} match={m} />)
+              )}
               <p className="text-[13px]" style={{ color: 'var(--faint)', lineHeight: 1.5 }}>
                 Skill level shown, so it&apos;s always a fair game.
               </p>
@@ -1086,9 +1093,29 @@ export function LandingPage() {
         <div className="mx-auto max-w-[1240px]">
           {/* numbers */}
           <div className="grid grid-cols-1 overflow-hidden rounded-2xl sm:grid-cols-3" style={{ border: '1px solid var(--line)' }}>
-            <ProofNum to={50000} suffix="+" dec={0} color="var(--green)" label={`players booking on ${brandName}`} border />
-            <ProofNum to={120} suffix="+" dec={0} color="var(--amber)" label="grounds you can book tonight" border />
-            <ProofNum to={4.8} suffix="★" dec={1} color="var(--chalk)" label="average player rating" />
+            <ProofNum
+              to={stats?.bookingsThisWeek ?? 0}
+              suffix=""
+              dec={0}
+              color="var(--green)"
+              label="slots booked this week"
+              border
+            />
+            <ProofNum
+              to={stats?.openMatches ?? 0}
+              suffix=""
+              dec={0}
+              color="var(--amber)"
+              label="open games to join right now"
+              border
+            />
+            <ProofNum
+              to={stats?.cities ?? 0}
+              suffix=""
+              dec={0}
+              color="var(--chalk)"
+              label={`${(stats?.cities ?? 0) === 1 ? 'city' : 'cities'} live · more on the way`}
+            />
           </div>
 
           {/* quote */}

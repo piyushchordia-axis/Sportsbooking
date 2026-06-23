@@ -13,6 +13,7 @@ import {
   CalendarDays,
   Check,
   Clock3,
+  Coins,
   Heart,
   KeyRound,
   MapPin,
@@ -20,9 +21,12 @@ import {
   Phone,
   Plus,
   Repeat,
+  Ticket,
+  Wallet,
 } from 'lucide-react';
 import { Addon, api, DiscoverVenue, OfferInboxItem } from '../../api/client';
 import { EmptyState, ImageWithFallback } from '../../components/common';
+import { DateRail, SlotCell, TierLegend } from '../../components/slot-ui';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { normalizeMobile } from '../../lib/mobile';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
@@ -362,6 +366,7 @@ export function VenueDetailPage() {
   const maxPoints = quote?.maxRedeemablePoints ?? 0;
   const pointsValue = points * redeemValue;
   const total = Math.max(subtotal - packDiscount - offerDiscount - pointsValue, 0);
+  const savings = packDiscount + offerDiscount + pointsValue;
 
   // Fetch the server price preview when the cart/extras change (logged-in only,
   // non-empty cart). Debounced so dragging the stepper doesn't spam the API.
@@ -808,40 +813,6 @@ export function VenueDetailPage() {
                   </span>
                 </div>
               ))}
-              {/* Discount lines come from the server quote so they always match
-                  the charge. Pack / promo / points each show when applicable. */}
-              {packDiscount > 0 && (
-                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
-                  <div className="text-sm font-medium">Pack</div>
-                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
-                    −{flMoney(packDiscount)}
-                  </span>
-                </div>
-              )}
-              {offerDiscount > 0 && (
-                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
-                  <div className="text-sm font-medium">
-                    Promo{appliedOffer ? ` · ${appliedOffer.toUpperCase()}` : ''}
-                  </div>
-                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
-                    −{flMoney(offerDiscount)}
-                  </span>
-                </div>
-              )}
-              {pointsValue > 0 && (
-                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
-                  <div className="text-sm font-medium">Points · {points}</div>
-                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
-                    −{flMoney(pointsValue)}
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center justify-between py-3.5">
-                <span className="fl-display text-lg font-bold">Total</span>
-                <span className="fl-mono text-2xl font-semibold" style={{ color: 'var(--brand)' }}>
-                  {flMoney(total)}
-                </span>
-              </div>
             </div>
 
             {/* recurring — pay-at-venue only */}
@@ -903,72 +874,164 @@ export function VenueDetailPage() {
               </div>
             )}
 
-            {/* signed-in extras */}
-            {user && (
+            {/* Member savings — packs & points the player owns (offers live in the
+                right-hand summary, next to the total + pay). */}
+            {user && (applicablePacks.length > 0 || maxPoints > 0 || ownedPacks.length > 0) && (
               <div
-                className="space-y-3 rounded-xl p-4"
+                className="overflow-hidden rounded-2xl"
                 style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}
               >
-                {/* Use pack — only packs the customer OWNS that apply here. */}
-                <div className="block">
-                  <span className="fl-mono mb-1.5 block text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-                    Use pack
+                <div
+                  className="flex items-center justify-between px-4 py-3.5"
+                  style={{ borderBottom: '1px solid var(--line)' }}
+                >
+                  <span className="fl-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: 'var(--faint)' }}>
+                    Member savings
                   </span>
+                  <span className="fl-mono text-[11px]" style={{ color: 'var(--faint)' }}>
+                    packs &amp; points
+                  </span>
+                </div>
+
+                {/* SESSION PACKS — selectable cards (not a dropdown) */}
+                <div className="px-4 py-4">
+                  <div className="mb-2.5 flex items-center gap-2">
+                    <Wallet className="h-3.5 w-3.5" style={{ color: 'var(--faint)' }} />
+                    <span className="fl-mono text-[11px] uppercase tracking-[0.12em]" style={{ color: 'var(--faint)' }}>
+                      Session packs
+                    </span>
+                  </div>
                   {applicablePacks.length === 0 ? (
-                    <div className="fl-mono text-[12px]" style={{ color: 'var(--faint)' }}>
-                      No packs available for this court.
+                    <div className="text-[12.5px]" style={{ color: 'var(--faint)' }}>
+                      No packs apply to this court.
                     </div>
                   ) : (
-                    <select
-                      value={packId}
-                      onChange={(e) => setPackId(e.target.value)}
-                      className="h-11 w-full rounded-xl px-3.5 text-sm outline-none"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
-                    >
-                      <option value="">None</option>
-                      {applicablePacks.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} · {p.balance} left
-                        </option>
-                      ))}
-                    </select>
+                    <div className="space-y-2">
+                      {applicablePacks.map((p) => {
+                        const on = packId === p.id;
+                        const mech =
+                          p.pricingMode === 'discount' && p.discountPct != null
+                            ? `${p.discountPct}% off this slot`
+                            : 'Covers this slot';
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => setPackId(on ? '' : p.id)}
+                            className="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors"
+                            style={{
+                              background: on
+                                ? 'color-mix(in oklab, var(--brand) 12%, var(--surface))'
+                                : 'var(--bg-2)',
+                              border: `1px solid ${on ? 'var(--brand)' : 'var(--line)'}`,
+                            }}
+                          >
+                            <span
+                              className="grid h-5 w-5 shrink-0 place-items-center rounded-full"
+                              style={{
+                                border: `1.5px solid ${on ? 'var(--brand)' : 'var(--line-strong)'}`,
+                                background: on ? 'var(--brand)' : 'transparent',
+                                color: 'var(--on-brand)',
+                              }}
+                            >
+                              {on && <Check className="h-3 w-3" strokeWidth={3} />}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold">{p.name}</div>
+                              <div className="fl-mono text-[11px]" style={{ color: 'var(--faint)' }}>
+                                {p.balance} session{p.balance === 1 ? '' : 's'} left · {mech}
+                              </div>
+                            </div>
+                            {on && packDiscount > 0 && (
+                              <span
+                                className="fl-mono text-sm font-bold tabular-nums"
+                                style={{ color: 'var(--brand)' }}
+                              >
+                                −{flMoney(packDiscount)}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
 
-                {/* Redeem points — a slider capped at the server's max (no free
-                    typing). Value shown live; the booking re-computes. */}
-                <div className="block">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="fl-mono text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-                      Redeem points
-                    </span>
-                    <span className="fl-mono text-[11px]" style={{ color: 'var(--faint)' }}>
-                      {quote ? `${quote.pointsBalance} available` : '—'}
-                    </span>
+                {/* LOYALTY POINTS — custom track slider (no free typing) */}
+                <div className="px-4 py-4" style={{ borderTop: '1px solid var(--line)' }}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Coins className="h-3.5 w-3.5" style={{ color: 'var(--faint)' }} />
+                      <span className="fl-mono text-[11px] uppercase tracking-[0.12em]" style={{ color: 'var(--faint)' }}>
+                        Loyalty points
+                      </span>
+                    </div>
+                    {quote && (
+                      <span
+                        className="fl-mono rounded-full px-2 py-0.5 text-[10.5px] font-semibold tabular-nums"
+                        style={{ background: 'var(--bg-2)', border: '1px solid var(--line)', color: 'var(--muted)' }}
+                      >
+                        {quote.pointsBalance} available
+                      </span>
+                    )}
                   </div>
                   {maxPoints > 0 ? (
                     <>
-                      <input
-                        type="range"
-                        min={0}
-                        max={maxPoints}
-                        step={1}
-                        value={points}
-                        onChange={(e) => setPoints(Number(e.target.value))}
-                        className="w-full"
-                        style={{ accentColor: 'var(--brand)' }}
-                      />
-                      <div className="mt-1 flex items-center justify-between text-[12px]">
-                        <span className="fl-mono" style={{ color: 'var(--muted)' }}>
-                          {points} / {maxPoints} pts
+                      <div className="relative h-6 select-none">
+                        <div
+                          className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full"
+                          style={{ background: 'var(--bg-2)', border: '1px solid var(--line)' }}
+                        />
+                        <div
+                          className="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full"
+                          style={{ width: `${(points / maxPoints) * 100}%`, background: 'var(--brand)' }}
+                        />
+                        <div
+                          className="absolute top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                          style={{
+                            left: `${(points / maxPoints) * 100}%`,
+                            background: 'var(--chalk)',
+                            boxShadow: '0 0 0 4px color-mix(in oklab, var(--brand) 30%, transparent)',
+                          }}
+                        />
+                        <input
+                          type="range"
+                          min={0}
+                          max={maxPoints}
+                          step={1}
+                          value={points}
+                          onChange={(e) => setPoints(Number(e.target.value))}
+                          aria-label="Redeem points"
+                          className="absolute inset-0 m-0 h-full w-full cursor-pointer opacity-0"
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <span className="fl-mono text-[12px] tabular-nums" style={{ color: 'var(--muted)' }}>
+                          {points} of {maxPoints} pts
                         </span>
-                        <span className="fl-mono font-semibold" style={{ color: 'var(--brand)' }}>
-                          −{flMoney(pointsValue)}
-                        </span>
+                        <div className="flex items-center gap-2.5">
+                          {pointsValue > 0 && (
+                            <span
+                              className="fl-mono text-sm font-bold tabular-nums"
+                              style={{ color: 'var(--brand)' }}
+                            >
+                              −{flMoney(pointsValue)}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPoints(points >= maxPoints ? 0 : maxPoints)}
+                            className="fl-mono rounded-md px-2 py-1 text-[10.5px] font-bold uppercase tracking-wide"
+                            style={{ border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
+                          >
+                            {points >= maxPoints ? 'Clear' : 'Max'}
+                          </button>
+                        </div>
                       </div>
                     </>
                   ) : (
-                    <div className="fl-mono text-[12px]" style={{ color: 'var(--faint)' }}>
+                    <div className="text-[12.5px]" style={{ color: 'var(--faint)' }}>
                       {cart.length === 0
                         ? 'Pick a slot to redeem points.'
                         : quote && quote.pointsBalance > 0
@@ -978,81 +1041,6 @@ export function VenueDetailPage() {
                   )}
                 </div>
 
-                {/* Promo code — tap an available offer or type a code, then Apply
-                    to preview the discount before booking. */}
-                <div className="block">
-                  <span className="fl-mono mb-1.5 block text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-                    Promo code
-                  </span>
-                  {offers.filter((o) => o.code).length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {offers
-                        .filter((o) => o.code)
-                        .map((o) => (
-                          <button
-                            key={o.id}
-                            type="button"
-                            onClick={() => {
-                              setOffer(o.code!);
-                              setAppliedOffer(o.code!);
-                            }}
-                            className="fl-mono rounded-full px-2.5 py-1 text-[11px]"
-                            style={{
-                              border: `1px solid ${appliedOffer === o.code ? 'var(--brand)' : 'var(--line-strong)'}`,
-                              color: appliedOffer === o.code ? 'var(--brand)' : 'var(--chalk)',
-                              background:
-                                appliedOffer === o.code
-                                  ? 'color-mix(in oklab, var(--brand) 12%, var(--surface))'
-                                  : 'transparent',
-                            }}
-                          >
-                            {o.code} · {o.type === 'percent' ? `${o.value}% off` : `${flMoney(o.value)} off`}
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <input
-                      value={offer}
-                      onChange={(e) => setOffer(e.target.value.toUpperCase())}
-                      placeholder="Enter code"
-                      className="fl-mono h-11 flex-1 rounded-xl px-3.5 text-sm outline-none"
-                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setAppliedOffer(offer.trim())}
-                      disabled={!offer.trim()}
-                      className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
-                      style={{ background: 'var(--brand)', color: 'var(--on-brand)' }}
-                    >
-                      Apply
-                    </button>
-                  </div>
-                  {appliedOffer &&
-                    (offerDiscount > 0 ? (
-                      <div className="mt-1.5 flex items-center gap-2 text-[12px]">
-                        <span className="fl-mono" style={{ color: 'var(--brand)' }}>
-                          Applied {appliedOffer.toUpperCase()} · −{flMoney(offerDiscount)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAppliedOffer('');
-                            setOffer('');
-                          }}
-                          className="underline"
-                          style={{ color: 'var(--faint)' }}
-                        >
-                          remove
-                        </button>
-                      </div>
-                    ) : quote ? (
-                      <div className="mt-1.5 fl-mono text-[12px]" style={{ color: 'var(--bad, #e5484d)' }}>
-                        “{appliedOffer.toUpperCase()}” isn’t valid for this booking.
-                      </div>
-                    ) : null)}
-                </div>
               </div>
             )}
           </div>
@@ -1060,47 +1048,205 @@ export function VenueDetailPage() {
           {/* RIGHT: payment + confirm */}
           <div className="space-y-4 lg:col-span-2 lg:sticky lg:top-20">
             <div
-              className="rounded-2xl p-4"
+              className="overflow-hidden rounded-2xl"
               style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}
             >
-              <div className="fl-mono mb-2.5 text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-                Payment
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => !repeatWeekly && checkout(PayMode.PREPAY)}
-                  disabled={!selected.size || repeatWeekly}
-                  title={repeatWeekly ? 'Weekly bookings are pay-at-venue only' : undefined}
-                  className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
-                >
-                  <div className="text-sm font-semibold">Prepay</div>
-                  <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
-                    Razorpay · slot locked
+              {/* COUPON — code entry + available offers, kept directly above the
+                  total + pay so it reads like a standard checkout. Logged-in only. */}
+              {user && (
+                <div className="px-4 py-4" style={{ borderBottom: '1px solid var(--line)' }}>
+                  <div className="mb-2.5 flex items-center gap-2">
+                    <Ticket className="h-3.5 w-3.5" style={{ color: 'var(--faint)' }} />
+                    <span className="fl-mono text-[11px] uppercase tracking-[0.12em]" style={{ color: 'var(--faint)' }}>
+                      Coupon
+                    </span>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => checkout(PayMode.AT_VENUE)}
-                  disabled={!selected.size}
-                  className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
-                >
-                  <div className="text-sm font-semibold">Pay at venue</div>
-                  <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
-                    Settle on arrival
+                  <div className="flex gap-2">
+                    <input
+                      value={offer}
+                      onChange={(e) => setOffer(e.target.value.toUpperCase())}
+                      placeholder="Coupon code"
+                      className="fl-mono h-10 flex-1 rounded-lg px-3 text-sm tracking-wide outline-none"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAppliedOffer(offer.trim())}
+                      disabled={!offer.trim()}
+                      className="h-10 shrink-0 rounded-lg px-4 text-sm font-bold disabled:opacity-40"
+                      style={{ background: 'var(--brand)', color: 'var(--on-brand)' }}
+                    >
+                      Apply
+                    </button>
                   </div>
-                </button>
+                  {appliedOffer && offerDiscount === 0 && quote && (
+                    <div className="fl-mono mt-2 text-[11.5px]" style={{ color: 'var(--bad, #e5484d)' }}>
+                      “{appliedOffer.toUpperCase()}” isn’t valid for this booking.
+                    </div>
+                  )}
+                  {offers.filter((o) => o.code).length > 0 && (
+                    <div className="mt-2.5 space-y-1.5">
+                      {offers
+                        .filter((o) => o.code)
+                        .map((o) => {
+                          const claimed = appliedOffer === o.code && offerDiscount > 0;
+                          return (
+                            <button
+                              key={o.id}
+                              type="button"
+                              aria-pressed={claimed}
+                              onClick={() => {
+                                if (claimed) {
+                                  setAppliedOffer('');
+                                  setOffer('');
+                                } else {
+                                  setOffer(o.code!);
+                                  setAppliedOffer(o.code!);
+                                }
+                              }}
+                              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left"
+                              style={{
+                                border: `1px solid ${claimed ? 'var(--brand)' : 'var(--line)'}`,
+                                background: claimed
+                                  ? 'color-mix(in oklab, var(--brand) 10%, var(--surface))'
+                                  : 'var(--bg-2)',
+                              }}
+                            >
+                              <span
+                                className="grid h-7 w-7 shrink-0 place-items-center rounded-md"
+                                style={{
+                                  background: claimed
+                                    ? 'var(--brand)'
+                                    : 'color-mix(in oklab, var(--amber) 16%, transparent)',
+                                  color: claimed ? 'var(--on-brand)' : 'var(--amber)',
+                                }}
+                              >
+                                {claimed ? (
+                                  <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                                ) : (
+                                  <Ticket className="h-3.5 w-3.5" />
+                                )}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div
+                                  className="fl-mono text-[12.5px] font-bold tracking-[0.04em]"
+                                  style={{ color: claimed ? 'var(--brand)' : 'var(--chalk)' }}
+                                >
+                                  {o.code}
+                                </div>
+                                <div className="truncate text-[10.5px]" style={{ color: 'var(--faint)' }}>
+                                  {claimed ? 'Applied · tap to remove' : o.name}
+                                </div>
+                              </div>
+                              <span
+                                className="fl-mono shrink-0 text-[12px] font-bold"
+                                style={{ color: claimed ? 'var(--brand)' : 'var(--amber)' }}
+                              >
+                                {o.type === 'percent' ? `${o.value}% off` : `${flMoney(o.value)} off`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PRICE SUMMARY */}
+              <div className="px-4 py-4" style={{ borderBottom: '1px solid var(--line)' }}>
+                {savings > 0 && (
+                  <div className="mb-3 space-y-2">
+                    <div className="flex items-center justify-between text-[13px]">
+                      <span style={{ color: 'var(--muted)' }}>Subtotal</span>
+                      <span className="fl-mono tabular-nums" style={{ color: 'var(--muted)' }}>
+                        {flMoney(subtotal)}
+                      </span>
+                    </div>
+                    {packDiscount > 0 && (
+                      <div className="flex items-center justify-between text-[13px]">
+                        <span style={{ color: 'var(--chalk)' }}>Pack</span>
+                        <span className="fl-mono tabular-nums" style={{ color: 'var(--brand)' }}>
+                          −{flMoney(packDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    {offerDiscount > 0 && (
+                      <div className="flex items-center justify-between text-[13px]">
+                        <span style={{ color: 'var(--chalk)' }}>
+                          Promo{appliedOffer ? ` · ${appliedOffer.toUpperCase()}` : ''}
+                        </span>
+                        <span className="fl-mono tabular-nums" style={{ color: 'var(--brand)' }}>
+                          −{flMoney(offerDiscount)}
+                        </span>
+                      </div>
+                    )}
+                    {pointsValue > 0 && (
+                      <div className="flex items-center justify-between text-[13px]">
+                        <span style={{ color: 'var(--chalk)' }}>Points · {points}</span>
+                        <span className="fl-mono tabular-nums" style={{ color: 'var(--brand)' }}>
+                          −{flMoney(pointsValue)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-end justify-between">
+                  <div>
+                    <div className="fl-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: 'var(--faint)' }}>
+                      Total
+                    </div>
+                    {savings > 0 && (
+                      <div className="fl-mono mt-1 text-[11px] font-semibold" style={{ color: 'var(--brand)' }}>
+                        You save {flMoney(savings)}
+                      </div>
+                    )}
+                  </div>
+                  <span
+                    className="fl-display text-[30px] font-extrabold leading-none tabular-nums"
+                    style={{ color: 'var(--chalk)' }}
+                  >
+                    {flMoney(total)}
+                  </span>
+                </div>
               </div>
 
-              {!otpOpen && (
-                <p className="fl-mono mt-3 text-center text-[11px]" style={{ color: 'var(--faint)' }}>
-                  {user
-                    ? 'Pick a payment method to confirm.'
-                    : "Browse freely — we'll ask for a quick OTP only to confirm."}
-                </p>
-              )}
+              {/* PAY */}
+              <div className="px-4 py-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => !repeatWeekly && checkout(PayMode.PREPAY)}
+                    disabled={!selected.size || repeatWeekly}
+                    title={repeatWeekly ? 'Weekly bookings are pay-at-venue only' : undefined}
+                    className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
+                  >
+                    <div className="text-sm font-semibold">Prepay</div>
+                    <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
+                      Razorpay · slot locked
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => checkout(PayMode.AT_VENUE)}
+                    disabled={!selected.size}
+                    className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
+                  >
+                    <div className="text-sm font-semibold">Pay at venue</div>
+                    <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
+                      Settle on arrival
+                    </div>
+                  </button>
+                </div>
+                {!otpOpen && (
+                  <p className="fl-mono mt-3 text-center text-[11px]" style={{ color: 'var(--faint)' }}>
+                    {user
+                      ? 'Pick a payment method to confirm.'
+                      : "Browse freely — we'll ask for a quick OTP only to confirm."}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* inline OTP (guest commit) */}
@@ -1284,38 +1430,7 @@ export function VenueDetailPage() {
         <div className="fl-mono mb-2.5 mt-6 text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
           2 · Pick a date
         </div>
-        <div className="fl-scroll flex gap-2 overflow-x-auto">
-          {dateStrip.map((d) => {
-            const active = date === d.iso;
-            return (
-              <button
-                key={d.iso}
-                type="button"
-                onClick={() => setDate(d.iso)}
-                aria-pressed={active}
-                className="flex-none rounded-xl py-2.5 text-center"
-                style={{
-                  width: 56,
-                  background: active ? 'var(--brand)' : 'var(--surface)',
-                  border: `1px solid ${active ? 'var(--brand)' : 'var(--line)'}`,
-                }}
-              >
-                <div
-                  className="fl-mono text-[10px]"
-                  style={{ color: active ? 'var(--on-brand)' : 'var(--faint)' }}
-                >
-                  {d.dow}
-                </div>
-                <div
-                  className="fl-display text-xl font-bold leading-tight"
-                  style={{ color: active ? 'var(--on-brand)' : 'var(--chalk)' }}
-                >
-                  {d.d}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <DateRail days={dateStrip.map((d) => d.iso)} active={date} onSelect={setDate} />
 
         {/* explicit reload — design auto-loads on court/date, but keep a manual refresh */}
         <button
@@ -1329,23 +1444,11 @@ export function VenueDetailPage() {
         </button>
 
         {/* 3 · Pick slot(s) */}
-        <div className="mb-2.5 mt-6 flex items-center justify-between">
+        <div className="mb-2.5 mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="fl-mono text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
             3 · Pick slot(s)
           </div>
-          <div className="fl-mono flex gap-3 text-[10px]" style={{ color: 'var(--faint)' }}>
-            <span className="flex items-center gap-1.5">
-              <span
-                className="h-2.5 w-2.5 rounded-[3px]"
-                style={{ border: '1px solid var(--line-strong)' }}
-              />
-              Open
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: 'var(--surface-2)' }} />
-              Taken
-            </span>
-          </div>
+          <TierLegend slots={slots} />
         </div>
 
         {slots.length === 0 ? (
@@ -1353,55 +1456,13 @@ export function VenueDetailPage() {
             className="rounded-xl p-6 text-center text-sm"
             style={{ background: 'var(--surface)', border: '1px solid var(--line)', color: 'var(--muted)' }}
           >
-            No availability loaded yet. Pick a court and date above.
+            No slots for this court on this day. Try another date or court.
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-            {slots.map((s) => {
-              const isOpen = s.status === SlotStatus.OPEN;
-              const isSel = selected.has(s.start);
-              const time = new Date(s.start).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-                timeZone: 'Asia/Kolkata',
-              });
-              return (
-                <button
-                  key={s.start}
-                  type="button"
-                  onClick={() => toggle(s)}
-                  disabled={!isOpen}
-                  aria-pressed={isSel}
-                  className="rounded-xl p-3 text-left"
-                  style={{
-                    background: isSel
-                      ? 'color-mix(in oklab, var(--brand) 16%, var(--surface))'
-                      : isOpen
-                        ? 'var(--surface)'
-                        : 'var(--surface-2)',
-                    border: `1px solid ${isSel ? 'var(--brand)' : isOpen ? 'var(--line)' : 'transparent'}`,
-                    opacity: isOpen ? 1 : 0.5,
-                    cursor: isOpen ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className="fl-mono text-[13px] font-semibold"
-                      style={{ color: isSel ? 'var(--brand)' : 'var(--chalk)' }}
-                    >
-                      {time}
-                    </span>
-                    {isSel && <Check className="h-3.5 w-3.5" style={{ color: 'var(--brand)' }} />}
-                  </div>
-                  <div
-                    className="fl-mono mt-1.5 text-[13px] font-semibold"
-                    style={{ color: isSel ? 'var(--brand)' : isOpen ? 'var(--chalk)' : 'var(--faint)' }}
-                  >
-                    {isOpen ? flMoney(s.price) : 'Taken'}
-                  </div>
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
+            {slots.map((s) => (
+              <SlotCell key={s.start} slot={s} selected={selected.has(s.start)} onSelect={toggle} />
+            ))}
           </div>
         )}
 
@@ -1505,9 +1566,16 @@ export function VenueDetailPage() {
         )}
       </div>
 
-      {/* sticky cart bar → advance to review */}
+      {/* sticky cart bar → advance to review. Viewport-fixed (the page wrapper no
+          longer creates a transform containing block — see .fl-page-enter), so it
+          stays glued to the bottom once a slot is chosen, no scrolling needed. On
+          mobile/tablet it sits above the bottom nav; on desktop (no nav) it floats
+          just off the bottom edge. */}
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-30 px-4 pb-4 sm:px-0" style={{ pointerEvents: 'none' }}>
+        <div
+          className="fixed inset-x-0 bottom-0 z-50 px-4 pb-[calc(76px_+_env(safe-area-inset-bottom))] sm:px-0 md:pb-6"
+          style={{ pointerEvents: 'none' }}
+        >
           <div
             className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-2xl px-4 py-3 shadow-2xl"
             style={{

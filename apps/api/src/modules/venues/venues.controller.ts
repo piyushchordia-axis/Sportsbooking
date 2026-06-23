@@ -9,8 +9,11 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@sportsbooking/shared';
 import {
   CurrentUser,
@@ -109,6 +112,32 @@ export class VenuesController {
     @Body() dto: UpdateVenueDto,
   ) {
     return this.venues.updateVenue(user, venueId, dto);
+  }
+
+  /** Upload a venue photo (multipart 'file') — stored in S3/R2 (or local dev
+   *  disk) and appended to the venue's photos. Returns the updated venue. */
+  @Post(':id/photos')
+  @Roles(UserRole.OWNER)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  addPhoto(
+    @CurrentUser() user: RequestUser,
+    @Param('id') venueId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.venues.addPhoto(user, venueId, file);
+  }
+
+  /** Remove a venue photo by its URL. */
+  @Delete(':id/photos')
+  @Roles(UserRole.OWNER)
+  removePhoto(
+    @CurrentUser() user: RequestUser,
+    @Param('id') venueId: string,
+    @Query('url') url: string,
+  ) {
+    return this.venues.removePhoto(user, venueId, url);
   }
 
   @Delete(':id')

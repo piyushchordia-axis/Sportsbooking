@@ -99,6 +99,12 @@ export const users = pgTable("users", {
 	mobile: text(),
 	passwordHash: text(),
 	assignedVenueIds: text().array().default(sql`'{}'::text[]`),
+	// Global player identity profile (customer-facing, operator-agnostic): skill
+	// level + preferred games live here so a player edits ONE profile, with no
+	// "venue operator" to pick. The per-owner player_profiles table stays as each
+	// operator's CRM annotation. Null/empty for non-customer roles.
+	skillLevel: skillLevel(),
+	games: text().array().default(sql`'{}'::text[]`),
 	active: boolean().default(true).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [

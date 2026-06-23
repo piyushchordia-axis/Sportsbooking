@@ -33,14 +33,20 @@ const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean;
+    /** Edge the sheet enters from. Defaults to the right-side slide-over; pass
+     *  "bottom" for a mobile bottom sheet. */
+    side?: 'right' | 'bottom';
   }
->(({ className, children, showCloseButton = true, ...props }, ref) => (
+>(({ className, children, showCloseButton = true, side = 'right', ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'bg-card text-card-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-xl flex-col gap-0 border-l border-border shadow-2xl duration-300 outline-none',
+        'bg-card text-card-foreground data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-0 border-border shadow-2xl duration-300 outline-none',
+        side === 'bottom'
+          ? 'inset-x-0 bottom-0 max-h-[90vh] w-full rounded-t-2xl border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom'
+          : 'inset-y-0 right-0 h-full w-full max-w-xl border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
         className,
       )}
       {...props}

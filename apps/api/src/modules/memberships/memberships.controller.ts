@@ -77,6 +77,18 @@ export class MembershipsController {
     return this.memberships.listPacksForOwner(ownerId);
   }
 
+  /** Packs the signed-in customer OWNS with this owner (positive, non-expired
+   *  balance) — powers the "use pack" picker so only redeemable packs show. */
+  @Get('owners/:ownerId/packs/owned')
+  @Roles(UserRole.CUSTOMER)
+  @RequireFlag(FeatureFlag.MEMBERSHIPS)
+  listOwned(
+    @CurrentUser() user: RequestUser,
+    @Param('ownerId') ownerId: string,
+  ) {
+    return this.memberships.listOwnedPacks(ownerId, user.id);
+  }
+
   /** Buy a pack offered by a given owner. */
   @Post('owners/:ownerId/packs/:packId/purchase')
   @Roles(UserRole.CUSTOMER)

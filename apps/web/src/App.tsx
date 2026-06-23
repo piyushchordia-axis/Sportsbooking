@@ -155,7 +155,9 @@ export function App() {
           <Route path="/browse" element={<BrowsePage />} />
           <Route path="/venue/:venueId" element={<VenueDetailPage />} />
           <Route path="/tournaments" element={<TournamentsPage />} />
-          <Route path="/open-matches" element={customer(<OpenMatchesPage />)} />
+          {/* Public: guests can browse open matches; joining/creating prompts
+              login inside the page (see OpenMatchesPage). */}
+          <Route path="/open-matches" element={<OpenMatchesPage />} />
           <Route path="/my-bookings" element={customer(<MyBookingsPage />)} />
           <Route path="/saved" element={customer(<SavedVenuesPage />)} />
           <Route path="/offers" element={customer(<OffersInboxPage />)} />

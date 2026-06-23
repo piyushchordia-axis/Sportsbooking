@@ -23,6 +23,7 @@ import {
   ConfirmPaymentDto,
   CreateBookingDto,
   ListBookingsQueryDto,
+  QuoteBookingDto,
   RescheduleBookingDto,
   UpdateBookingCustomerDto,
   UpdateBookingStatusDto,
@@ -55,6 +56,20 @@ export class BookingsController {
     @CurrentUser() user: RequestUser | undefined,
   ) {
     return this.bookings.create(dto, user);
+  }
+
+  /**
+   * Price preview for the consumer booking flow (no mutation). Returns the full
+   * discount breakdown — pack/offer/points — so the UI can show the running
+   * total, the applied promo, and the redeem-points slider's max BEFORE the
+   * booking is created. Auth: a logged-in customer (packs, points and offers are
+   * per-customer inputs); guests compute slot+add-on totals client-side.
+   */
+  @Post('bookings/quote')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  quote(@Body() dto: QuoteBookingDto, @CurrentUser() user: RequestUser) {
+    return this.bookings.quote(dto, user);
   }
 
   /**

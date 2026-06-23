@@ -1,20 +1,29 @@
 import {
   IsBoolean,
   IsEmail,
-  IsMobilePhone,
   IsOptional,
   IsString,
   Length,
+  Matches,
   MinLength,
 } from 'class-validator';
 
+/**
+ * Canonical Indian mobile: "+91" then a 10-digit number starting 6–9
+ * (single-region launch). Enforced identically on the client (normalizeMobile)
+ * so the OTP key is consistent no matter which login path is used — a bare
+ * 10-digit and a +91-prefixed number must never resolve to two accounts.
+ */
+const IN_MOBILE = /^\+91[6-9]\d{9}$/;
+const IN_MOBILE_MSG = 'Enter a valid 10-digit Indian mobile number.';
+
 export class RequestOtpDto {
-  @IsMobilePhone('en-IN')
+  @Matches(IN_MOBILE, { message: IN_MOBILE_MSG })
   mobile!: string;
 }
 
 export class VerifyOtpDto {
-  @IsMobilePhone('en-IN')
+  @Matches(IN_MOBILE, { message: IN_MOBILE_MSG })
   mobile!: string;
 
   @IsString()

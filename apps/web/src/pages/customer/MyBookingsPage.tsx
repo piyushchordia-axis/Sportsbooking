@@ -103,13 +103,20 @@ function whenLabel(b: CustomerBooking): { date: string; time: string } {
   }
   const start = new Date(b.slots[0].start);
   const end = new Date(b.slots[b.slots.length - 1].end);
+  // Venues run on IST — pin the zone so times/dates don't shift on a
+  // non-IST browser (a 12:30 AM IST slot must not render as the prior day).
   const fmtTime = (d: Date) =>
-    d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    d.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
+    });
   return {
     date: start.toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
+      timeZone: 'Asia/Kolkata',
     }),
     time: `${fmtTime(start)} – ${fmtTime(end)}`,
   };

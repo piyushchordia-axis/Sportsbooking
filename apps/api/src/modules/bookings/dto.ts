@@ -26,6 +26,16 @@ export class CartSlotDto {
   end!: string;
 }
 
+/** A chosen add-on with its quantity (consumer flow). */
+export class AddonSelectionDto {
+  @IsUUID()
+  addonId!: string;
+
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+}
+
 export class CustomerCaptureDto {
   @IsString()
   name!: string;
@@ -67,6 +77,13 @@ export class CreateBookingDto {
   @IsUUID('all', { each: true })
   addonIds?: string[];
 
+  /** quantity-aware add-on selection (preferred over addonIds). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddonSelectionDto)
+  addons?: AddonSelectionDto[];
+
   @IsEnum(PayMode)
   payMode!: PayMode;
 
@@ -102,6 +119,47 @@ export class CreateBookingDto {
   @ValidateNested()
   @Type(() => RecurrenceDto)
   recurrence?: RecurrenceDto;
+}
+
+/**
+ * Inputs for a price preview (POST /bookings/quote) — the booking fields that
+ * affect price, without pay mode / recurrence / customer capture / idempotency.
+ * Returns the full discount breakdown so the UI can preview totals, show the
+ * applied promo, and drive the redeem-points slider before the booking is made.
+ */
+export class QuoteBookingDto {
+  @IsUUID()
+  venueId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CartSlotDto)
+  slots!: CartSlotDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('all', { each: true })
+  addonIds?: string[];
+
+  /** quantity-aware add-on selection (preferred over addonIds). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddonSelectionDto)
+  addons?: AddonSelectionDto[];
+
+  @IsOptional()
+  @IsUUID()
+  packId?: string;
+
+  @IsOptional()
+  @IsString()
+  offerCode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  pointsToRedeem?: number;
 }
 
 export class ConfirmPaymentDto {

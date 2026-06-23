@@ -1,4 +1,11 @@
-import { PayMode, ResolvedSlot, SlotStatus, UserRole } from '@sportsbooking/shared';
+import {
+  BookingQuoteResponse,
+  OwnedPack,
+  PayMode,
+  ResolvedSlot,
+  SlotStatus,
+  UserRole,
+} from '@sportsbooking/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
@@ -14,9 +21,10 @@ import {
   Plus,
   Repeat,
 } from 'lucide-react';
-import { Addon, api, DiscoverVenue, Pack } from '../../api/client';
+import { Addon, api, DiscoverVenue, OfferInboxItem } from '../../api/client';
 import { EmptyState, ImageWithFallback } from '../../components/common';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
+import { normalizeMobile } from '../../lib/mobile';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 import { useAuth } from '../../auth/AuthContext';
 import { useFloodlitToast, flMoney } from '../../floodlit/toast';
@@ -72,19 +80,6 @@ type Step = 'select' | 'review';
  * login-at-checkout. A guest browses freely; authentication (OTP) only happens
  * inline when they commit to confirming a booking — the hotel-site pattern.
  */
-/**
- * FE-11) Accept a 10-digit Indian mobile (optionally +91 / 91 prefixed) or a
- * generic E.164 number. Returns the digits-only national number when valid, else
- * null — keeps the OTP request from firing on obviously bad input.
- */
-function normalizeMobile(raw: string): string | null {
-  const trimmed = raw.trim();
-  // Generic E.164: a leading + then 8–15 digits.
-  if (/^\+\d{8,15}$/.test(trimmed)) return trimmed.replace('+', '');
-  // Indian mobile: 10 digits starting 6–9, with an optional 91 / +91 prefix.
-  const digits = trimmed.replace(/[\s-]/g, '').replace(/^(\+?91)/, '');
-  return /^[6-9]\d{9}$/.test(digits) ? digits : null;
-}
 
 /** Local YYYY-MM-DD for today, used as the booking-date default when no deep-link. */
 function todayISO(): string {
@@ -123,18 +118,25 @@ export function VenueDetailPage() {
   // In-page step: "select" (pick court/date/slots) → "review" (confirm & pay).
   const [step, setStep] = useState<Step>('select');
 
-  // Logged-in extras (skipped for guests pre-login).
-  const [packs, setPacks] = useState<Pack[]>([]);
+  // Logged-in extras (skipped for guests pre-login). Packs are now the packs the
+  // customer actually OWNS (positive balance) — not the whole sale catalogue.
+  const [ownedPacks, setOwnedPacks] = useState<OwnedPack[]>([]);
   const [packId, setPackId] = useState('');
-  const [points, setPoints] = useState('0');
-  const [offer, setOffer] = useState('');
+  const [points, setPoints] = useState(0); // redeem-slider value (whole points)
+  const [offer, setOffer] = useState(''); // promo-code input text
+  const [appliedOffer, setAppliedOffer] = useState(''); // code currently applied
+  const [offers, setOffers] = useState<OfferInboxItem[]>([]); // available promos
+  // Server price preview (pack/offer/points discounts + redeem max). Refetched
+  // when the cart/extras change; the booking re-computes authoritatively.
+  const [quote, setQuote] = useState<BookingQuoteResponse | null>(null);
 
   // Add-ons (PRD-5): venue extras a guest can attach at checkout. Loaded for
   // everyone — they're part of the order summary, not a logged-in-only input.
+  // Quantity-aware: addonQty maps an add-on id → chosen quantity (>=1).
   const [addons, setAddons] = useState<Addon[]>([]);
   const [addonsLoading, setAddonsLoading] = useState(false);
   const [addonsError, setAddonsError] = useState<string | null>(null);
-  const [addonIds, setAddonIds] = useState<Set<string>>(new Set());
+  const [addonQty, setAddonQty] = useState<Map<string, number>>(new Map());
 
   // Inline login-at-checkout state.
   const [otpOpen, setOtpOpen] = useState(false);
@@ -209,13 +211,26 @@ export function VenueDetailPage() {
   // White-label theming for /venue/:id is handled centrally by StorefrontProvider
   // (the single source of branding) — this page must not call setBranding itself.
 
-  // 6) Pack list only when logged in (offers/points are logged-in-only inputs).
+  // 6) Owned packs + available promos, only when logged in (packs/offers/points
+  // are logged-in-only inputs). Packs are the ones the customer actually holds a
+  // balance on; offers are their eligible promo inbox.
   useEffect(() => {
     if (venue && user) {
-      api.listOwnerPacks(venue.ownerId).then(setPacks).catch(() => setPacks([]));
+      api
+        .listOwnedPacks(venue.ownerId)
+        .then(setOwnedPacks)
+        .catch(() => setOwnedPacks([]));
+      api
+        .offersInbox(venue.ownerId)
+        .then(setOffers)
+        .catch(() => setOffers([]));
     } else {
-      setPacks([]);
+      setOwnedPacks([]);
       setPackId('');
+      setOffers([]);
+      setAppliedOffer('');
+      setOffer('');
+      setPoints(0);
     }
   }, [venue, user]);
 
@@ -226,7 +241,7 @@ export function VenueDetailPage() {
     let alive = true;
     setAddonsLoading(true);
     setAddonsError(null);
-    setAddonIds(new Set());
+    setAddonQty(new Map());
     api
       .listAddons(venue.id)
       .then((list) => alive && setAddons(list.filter((a) => a.active)))
@@ -254,7 +269,7 @@ export function VenueDetailPage() {
     // successful booking — that path keeps the confirmation, see createBooking).
     setConfirmation(null);
     setSelected(new Set());
-    setAddonIds(new Set());
+    setAddonQty(new Map());
     await refreshSlots();
   };
 
@@ -290,18 +305,102 @@ export function VenueDetailPage() {
     [slots, selected],
   );
 
-  // PRD-5) Selected add-ons + their running subtotal, folded into the order total.
-  const toggleAddon = (id: string) => {
-    const next = new Set(addonIds);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setAddonIds(next);
+  // PRD-5) Add-ons are quantity-aware: a stepper sets each add-on's quantity
+  // (0 removes it). Subtotal folds quantity × price into the order total.
+  const setAddonQuantity = (id: string, qty: number) => {
+    const next = new Map(addonQty);
+    if (qty <= 0) next.delete(id);
+    else next.set(id, qty);
+    setAddonQty(next);
   };
   const chosenAddons = useMemo(
-    () => addons.filter((a) => addonIds.has(a.id)),
-    [addons, addonIds],
+    () =>
+      addons
+        .filter((a) => addonQty.has(a.id))
+        .map((a) => ({ ...a, qty: addonQty.get(a.id) ?? 1 })),
+    [addons, addonQty],
   );
-  const addonsTotal = chosenAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
-  const total = slotsTotal + addonsTotal;
+  const addonsTotal = chosenAddons.reduce(
+    (sum, a) => sum + (Number(a.price) || 0) * a.qty,
+    0,
+  );
+
+  // The cart (selected slots), reused by the price quote and the booking call.
+  const cart = useMemo(
+    () =>
+      slots
+        .filter((s) => selected.has(s.start))
+        .map((s) => ({ unitId: s.unitId, start: s.start, end: s.end })),
+    [slots, selected],
+  );
+  // Add-ons in API shape ({ addonId, quantity }).
+  const addonItems = useMemo(
+    () => chosenAddons.map((a) => ({ addonId: a.id, quantity: a.qty })),
+    [chosenAddons],
+  );
+
+  // Only packs the customer OWNS that also apply to this venue + selected court
+  // (empty scope arrays = applies everywhere). The "use pack" picker shows just
+  // these, so a customer never sees a pack they can't actually redeem here.
+  const applicablePacks = useMemo(
+    () =>
+      ownedPacks.filter(
+        (p) =>
+          (!p.venueIds.length || (!!venue && p.venueIds.includes(venue.id))) &&
+          (!p.unitIds.length || (!!unitId && p.unitIds.includes(unitId))),
+      ),
+    [ownedPacks, venue, unitId],
+  );
+
+  // Discounts come from the server quote. Points apply client-side off the
+  // quote's redeemValue so the slider is instant; the booking re-computes
+  // authoritatively. Subtotal stays client-side for immediate feedback.
+  const subtotal = slotsTotal + addonsTotal;
+  const packDiscount = quote?.packDiscount ?? 0;
+  const offerDiscount = quote?.offerDiscount ?? 0;
+  const redeemValue = quote?.redeemValue ?? 0;
+  const maxPoints = quote?.maxRedeemablePoints ?? 0;
+  const pointsValue = points * redeemValue;
+  const total = Math.max(subtotal - packDiscount - offerDiscount - pointsValue, 0);
+
+  // Fetch the server price preview when the cart/extras change (logged-in only,
+  // non-empty cart). Debounced so dragging the stepper doesn't spam the API.
+  // pointsToRedeem is sent as 0 — the slider applies points locally; the booking
+  // sends the real amount and the server re-computes.
+  useEffect(() => {
+    if (!venue || !user || cart.length === 0) {
+      setQuote(null);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      api
+        .quoteBooking({
+          venueId: venue.id,
+          slots: cart,
+          addons: addonItems.length ? addonItems : undefined,
+          packId: packId || undefined,
+          offerCode: appliedOffer || undefined,
+          pointsToRedeem: 0,
+        })
+        .then((q) => alive && setQuote(q))
+        .catch(() => alive && setQuote(null));
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [venue, user, cart, addonItems, packId, appliedOffer]);
+
+  // Keep the redeem slider within the current max (cart/extras can shrink it).
+  useEffect(() => {
+    setPoints((p) => Math.min(p, maxPoints));
+  }, [maxPoints]);
+
+  // Drop a selected pack that no longer applies (court/venue changed).
+  useEffect(() => {
+    if (packId && !applicablePacks.some((p) => p.id === packId)) setPackId('');
+  }, [applicablePacks, packId]);
 
   const selectedUnit = venue?.units.find((u) => u.id === unitId);
   const selectedSport = venue?.games.find((g) => g.id === selectedUnit?.gameId)?.name;
@@ -340,9 +439,6 @@ export function VenueDetailPage() {
   const createBooking = async (payMode: PayMode) => {
     if (!venue) return;
     setMsg(null);
-    const cart = slots
-      .filter((s) => selected.has(s.start))
-      .map((s) => ({ unitId: s.unitId, start: s.start, end: s.end }));
     // PRD §5.2) Weekly recurrence is only valid for AT_VENUE; never attach it
     // to a prepay order (the backend rejects that combination).
     const recurrence =
@@ -354,12 +450,12 @@ export function VenueDetailPage() {
         venueId: venue.id,
         slots: cart,
         payMode,
-        // PRD-5) Chosen extras travel with every booking (guests included).
-        addonIds: chosenAddons.length ? chosenAddons.map((a) => a.id) : undefined,
+        // PRD-5) Chosen extras (with quantity) travel with every booking.
+        addons: addonItems.length ? addonItems : undefined,
         // Logged-in-only extras — guests just verified send none.
         packId: packId || undefined,
-        offerCode: offer || undefined,
-        pointsToRedeem: Number(points) || undefined,
+        offerCode: appliedOffer || undefined,
+        pointsToRedeem: points || undefined,
         recurrence,
       });
 
@@ -674,6 +770,7 @@ export function VenueDetailPage() {
                 const time = new Date(s.start).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
+                  timeZone: 'Asia/Kolkata',
                 });
                 return (
                   <div
@@ -698,14 +795,47 @@ export function VenueDetailPage() {
                   style={{ borderBottom: '1px solid var(--line)' }}
                 >
                   <div>
-                    <div className="text-sm font-medium">{a.name}</div>
+                    <div className="text-sm font-medium">
+                      {a.name}
+                      {a.qty > 1 ? ` × ${a.qty}` : ''}
+                    </div>
                     <div className="fl-mono mt-0.5 text-[11px] capitalize" style={{ color: 'var(--faint)' }}>
                       add-on · {a.type}
                     </div>
                   </div>
-                  <span className="fl-mono text-sm font-semibold">{flMoney(Number(a.price) || 0)}</span>
+                  <span className="fl-mono text-sm font-semibold">
+                    {flMoney((Number(a.price) || 0) * a.qty)}
+                  </span>
                 </div>
               ))}
+              {/* Discount lines come from the server quote so they always match
+                  the charge. Pack / promo / points each show when applicable. */}
+              {packDiscount > 0 && (
+                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
+                  <div className="text-sm font-medium">Pack</div>
+                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
+                    −{flMoney(packDiscount)}
+                  </span>
+                </div>
+              )}
+              {offerDiscount > 0 && (
+                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
+                  <div className="text-sm font-medium">
+                    Promo{appliedOffer ? ` · ${appliedOffer.toUpperCase()}` : ''}
+                  </div>
+                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
+                    −{flMoney(offerDiscount)}
+                  </span>
+                </div>
+              )}
+              {pointsValue > 0 && (
+                <div className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid var(--line)' }}>
+                  <div className="text-sm font-medium">Points · {points}</div>
+                  <span className="fl-mono text-sm font-semibold" style={{ color: 'var(--brand)' }}>
+                    −{flMoney(pointsValue)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between py-3.5">
                 <span className="fl-display text-lg font-bold">Total</span>
                 <span className="fl-mono text-2xl font-semibold" style={{ color: 'var(--brand)' }}>
@@ -779,48 +909,150 @@ export function VenueDetailPage() {
                 className="space-y-3 rounded-xl p-4"
                 style={{ background: 'var(--surface)', border: '1px solid var(--line)' }}
               >
-                <label className="block">
+                {/* Use pack — only packs the customer OWNS that apply here. */}
+                <div className="block">
                   <span className="fl-mono mb-1.5 block text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
                     Use pack
                   </span>
-                  <select
-                    value={packId}
-                    onChange={(e) => setPackId(e.target.value)}
-                    className="h-11 w-full rounded-xl px-3.5 text-sm outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
-                  >
-                    <option value="">None</option>
-                    {packs.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="fl-mono mb-1.5 block text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-                    Redeem points
-                  </span>
-                  <input
-                    value={points}
-                    onChange={(e) => setPoints(e.target.value)}
-                    inputMode="numeric"
-                    className="fl-mono h-11 w-full rounded-xl px-3.5 text-sm outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
-                  />
-                </label>
-                <label className="block">
+                  {applicablePacks.length === 0 ? (
+                    <div className="fl-mono text-[12px]" style={{ color: 'var(--faint)' }}>
+                      No packs available for this court.
+                    </div>
+                  ) : (
+                    <select
+                      value={packId}
+                      onChange={(e) => setPackId(e.target.value)}
+                      className="h-11 w-full rounded-xl px-3.5 text-sm outline-none"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
+                    >
+                      <option value="">None</option>
+                      {applicablePacks.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} · {p.balance} left
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Redeem points — a slider capped at the server's max (no free
+                    typing). Value shown live; the booking re-computes. */}
+                <div className="block">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="fl-mono text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
+                      Redeem points
+                    </span>
+                    <span className="fl-mono text-[11px]" style={{ color: 'var(--faint)' }}>
+                      {quote ? `${quote.pointsBalance} available` : '—'}
+                    </span>
+                  </div>
+                  {maxPoints > 0 ? (
+                    <>
+                      <input
+                        type="range"
+                        min={0}
+                        max={maxPoints}
+                        step={1}
+                        value={points}
+                        onChange={(e) => setPoints(Number(e.target.value))}
+                        className="w-full"
+                        style={{ accentColor: 'var(--brand)' }}
+                      />
+                      <div className="mt-1 flex items-center justify-between text-[12px]">
+                        <span className="fl-mono" style={{ color: 'var(--muted)' }}>
+                          {points} / {maxPoints} pts
+                        </span>
+                        <span className="fl-mono font-semibold" style={{ color: 'var(--brand)' }}>
+                          −{flMoney(pointsValue)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="fl-mono text-[12px]" style={{ color: 'var(--faint)' }}>
+                      {cart.length === 0
+                        ? 'Pick a slot to redeem points.'
+                        : quote && quote.pointsBalance > 0
+                          ? 'Points can’t be applied to this booking.'
+                          : 'No points to redeem yet.'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Promo code — tap an available offer or type a code, then Apply
+                    to preview the discount before booking. */}
+                <div className="block">
                   <span className="fl-mono mb-1.5 block text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
                     Promo code
                   </span>
-                  <input
-                    value={offer}
-                    onChange={(e) => setOffer(e.target.value)}
-                    placeholder="Promo code"
-                    className="fl-mono h-11 w-full rounded-xl px-3.5 text-sm outline-none"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
-                  />
-                </label>
+                  {offers.filter((o) => o.code).length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {offers
+                        .filter((o) => o.code)
+                        .map((o) => (
+                          <button
+                            key={o.id}
+                            type="button"
+                            onClick={() => {
+                              setOffer(o.code!);
+                              setAppliedOffer(o.code!);
+                            }}
+                            className="fl-mono rounded-full px-2.5 py-1 text-[11px]"
+                            style={{
+                              border: `1px solid ${appliedOffer === o.code ? 'var(--brand)' : 'var(--line-strong)'}`,
+                              color: appliedOffer === o.code ? 'var(--brand)' : 'var(--chalk)',
+                              background:
+                                appliedOffer === o.code
+                                  ? 'color-mix(in oklab, var(--brand) 12%, var(--surface))'
+                                  : 'transparent',
+                            }}
+                          >
+                            {o.code} · {o.type === 'percent' ? `${o.value}% off` : `${flMoney(o.value)} off`}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      value={offer}
+                      onChange={(e) => setOffer(e.target.value.toUpperCase())}
+                      placeholder="Enter code"
+                      className="fl-mono h-11 flex-1 rounded-xl px-3.5 text-sm outline-none"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)', color: 'var(--chalk)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAppliedOffer(offer.trim())}
+                      disabled={!offer.trim()}
+                      className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
+                      style={{ background: 'var(--brand)', color: 'var(--on-brand)' }}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                  {appliedOffer &&
+                    (offerDiscount > 0 ? (
+                      <div className="mt-1.5 flex items-center gap-2 text-[12px]">
+                        <span className="fl-mono" style={{ color: 'var(--brand)' }}>
+                          Applied {appliedOffer.toUpperCase()} · −{flMoney(offerDiscount)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppliedOffer('');
+                            setOffer('');
+                          }}
+                          className="underline"
+                          style={{ color: 'var(--faint)' }}
+                        >
+                          remove
+                        </button>
+                      </div>
+                    ) : quote ? (
+                      <div className="mt-1.5 fl-mono text-[12px]" style={{ color: 'var(--bad, #e5484d)' }}>
+                        “{appliedOffer.toUpperCase()}” isn’t valid for this booking.
+                      </div>
+                    ) : null)}
+                </div>
               </div>
             )}
           </div>
@@ -1003,7 +1235,7 @@ export function VenueDetailPage() {
         )}
       </div>
 
-      <div className="px-4 pb-28 sm:px-6">
+      <div className="pb-28 sm:px-6">
         {/* name / games / city / hours */}
         <h1 className="fl-display mt-4 text-3xl font-extrabold leading-none sm:text-4xl">{venue.name}</h1>
         <div className="mt-1.5 text-sm" style={{ color: 'var(--muted)' }}>
@@ -1131,6 +1363,7 @@ export function VenueDetailPage() {
               const time = new Date(s.start).toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit',
+                timeZone: 'Asia/Kolkata',
               });
               return (
                 <button
@@ -1192,33 +1425,19 @@ export function VenueDetailPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {addons.map((a) => {
-              const on = addonIds.has(a.id);
+              const qty = addonQty.get(a.id) ?? 0;
               const soldOut = a.stock !== null && a.stock <= 0;
+              const on = qty > 0;
               return (
-                <button
+                <div
                   key={a.id}
-                  type="button"
-                  onClick={() => !soldOut && toggleAddon(a.id)}
-                  disabled={soldOut}
-                  aria-pressed={on}
                   className="flex items-center gap-3 rounded-xl p-3.5 text-left"
                   style={{
                     background: on ? 'color-mix(in oklab, var(--brand) 10%, var(--surface))' : 'var(--surface)',
                     border: `1px solid ${on ? 'var(--brand)' : 'var(--line)'}`,
                     opacity: soldOut ? 0.5 : 1,
-                    cursor: soldOut ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  <span
-                    className="grid h-5 w-5 shrink-0 place-items-center rounded-md"
-                    style={{
-                      background: on ? 'var(--brand)' : 'transparent',
-                      border: `1px solid ${on ? 'var(--brand)' : 'var(--line-strong)'}`,
-                      color: 'var(--on-brand)',
-                    }}
-                  >
-                    {on && <Check className="h-3.5 w-3.5" />}
-                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold">{a.name}</div>
                     <div className="fl-mono text-[11px] capitalize" style={{ color: 'var(--faint)' }}>
@@ -1227,7 +1446,53 @@ export function VenueDetailPage() {
                     </div>
                   </div>
                   <span className="fl-mono text-[13px] font-semibold">{flMoney(Number(a.price) || 0)}</span>
-                </button>
+                  {on ? (
+                    <div
+                      className="flex items-center"
+                      style={{
+                        background: 'var(--bg-2)',
+                        border: '1px solid var(--line-strong)',
+                        borderRadius: 10,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Fewer ${a.name}`}
+                        onClick={() => setAddonQuantity(a.id, qty - 1)}
+                        className="grid h-9 w-9 place-items-center"
+                        style={{ color: 'var(--chalk)' }}
+                      >
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <span className="fl-mono w-6 text-center text-sm font-semibold tabular-nums">
+                        {qty}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`More ${a.name}`}
+                        onClick={() => setAddonQuantity(a.id, qty + 1)}
+                        className="grid h-9 w-9 place-items-center"
+                        style={{ color: 'var(--chalk)' }}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={soldOut}
+                      onClick={() => setAddonQuantity(a.id, 1)}
+                      className="h-9 shrink-0 rounded-lg px-4 text-sm font-semibold disabled:opacity-50"
+                      style={{
+                        border: '1px solid var(--line-strong)',
+                        color: 'var(--chalk)',
+                        cursor: soldOut ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

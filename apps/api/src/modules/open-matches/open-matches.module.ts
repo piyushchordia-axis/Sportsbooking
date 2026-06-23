@@ -29,6 +29,7 @@ import {
   CurrentUser,
   RequestUser,
 } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
@@ -592,6 +593,12 @@ export class OpenMatchesService {
 export class OpenMatchesController {
   constructor(private readonly matches: OpenMatchesService) {}
 
+  // Public discovery: guests can browse open matches without logging in
+  // (joining/creating still require auth). @Public skips the global JWT guard;
+  // the empty @Roles() overrides the controller-level CUSTOMER requirement so
+  // RolesGuard lets anonymous callers through. browse() needs no user context.
+  @Public()
+  @Roles()
   @Get()
   browse(@Query('venueId') venueId?: string) {
     return this.matches.browse(venueId);

@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   LedgerTxnType,
+  type OwnedPack,
   PackExpiryMode,
   PackPricingMode,
 } from '@sportsbooking/shared';
@@ -210,6 +211,58 @@ export class MembershipsService {
         where: eq(membershipPacks.active, true),
       }),
     );
+  }
+
+  /**
+   * Customer-facing: the packs THIS customer actually OWNS with an owner — the
+   * active packs they still hold a positive, non-expired session balance on,
+   * with the scope metadata the booking UI needs. Drives the "Use pack" picker
+   * so customers only ever see packs they can actually redeem (the previous UI
+   * listed the whole sale catalogue). Lazily forfeits expired FORFEIT packs —
+   * same read-path model as evaluatePack — so a pack past its window never
+   * shows as usable.
+   */
+  async listOwnedPacks(
+    ownerId: string,
+    customerId: string,
+  ): Promise<OwnedPack[]> {
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const packs = await tx.query.membershipPacks.findMany({
+        where: and(
+          eq(membershipPacks.ownerId, ownerId),
+          eq(membershipPacks.active, true),
+        ),
+      });
+      const owned: OwnedPack[] = [];
+      for (const pack of packs) {
+        // Realise expiry before reading the spendable balance so forfeited
+        // sessions don't surface as owned.
+        const expired = await this.resolvePackExpiry(
+          tx,
+          ownerId,
+          customerId,
+          pack,
+        );
+        if (expired) continue;
+        const balance = await this.ledger.balance(
+          tx,
+          customerId,
+          packLane(pack.id),
+        );
+        if (!balance.greaterThan(0)) continue;
+        owned.push({
+          id: pack.id,
+          name: pack.name,
+          sessions: pack.sessions,
+          balance: balance.toNumber(),
+          pricingMode: pack.pricingMode,
+          discountPct: pack.discountPct != null ? Number(pack.discountPct) : null,
+          venueIds: pack.venueIds ?? [],
+          unitIds: pack.unitIds ?? [],
+        });
+      }
+      return owned;
+    });
   }
 
   /**

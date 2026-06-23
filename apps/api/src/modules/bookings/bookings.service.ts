@@ -21,6 +21,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  BookingQuoteResponse,
   BookingResponse,
   BookingStatus,
   LedgerTxnType,
@@ -61,6 +62,7 @@ import {
   CartSlotDto,
   CreateBookingDto,
   ListBookingsQueryDto,
+  QuoteBookingDto,
   findIntraRequestOverlap,
   parseClockToMinutes,
   validateSlotOnGrid,
@@ -119,6 +121,45 @@ export interface CustomerBooking {
     end: string; // ISO
   }[];
   createdAt: string; // ISO
+}
+
+/**
+ * Single-region launch: every venue runs on India Standard Time. Venue
+ * openTime/closeTime are IST wall-clock, so grid validation (hour-of-day) and
+ * recurrence expansion must interpret slot ISO strings in this zone, never the
+ * server's. Mirrors AvailabilityService's VENUE_TZ — keep the two in sync.
+ */
+const VENUE_TZ = 'Asia/Kolkata';
+
+/**
+ * The full price breakdown for a cart — the SINGLE source of truth shared by
+ * the booking-create path (createOccurrence) and the dry-run preview endpoint
+ * (POST /bookings/quote). Computing it in one place guarantees the discount the
+ * customer previews is exactly the discount they are charged. All money fields
+ * are Decimal (callers convert to plain numbers only at the response boundary).
+ */
+interface PriceBreakdown {
+  /** parsed slot rows ready for insertion (reused by the booking path). */
+  slotRows: { unitId: string; startsAt: Date; endsAt: Date }[];
+  /** validated, in-scope add-on rows with their requested quantity (reused for
+   *  persistence, stock decrement and per-line revenue). */
+  addons: { row: typeof addonsTable.$inferSelect; quantity: number }[];
+  slotSubtotal: Decimal;
+  addonSubtotal: Decimal;
+  packDiscount: Decimal;
+  packSessions: number;
+  offerId?: string;
+  offerDiscount: Decimal;
+  /** customer's current points balance (for the redeem slider). */
+  pointsBalance: number;
+  /** rupee value of one point for this owner/venue. */
+  redeemValue: number;
+  /** most points the cart can absorb = min(balance, remaining cash / value). */
+  maxRedeemablePoints: number;
+  /** points actually applied = min(requested, maxRedeemablePoints). */
+  pointsRedeemed: number;
+  pointsValue: Decimal;
+  total: Decimal;
 }
 
 @Injectable()
@@ -246,6 +287,220 @@ export class BookingsService {
   }
 
   /**
+   * Dry-run pricing for the consumer booking flow: the full discount breakdown
+   * (pack / offer / points) for a cart WITHOUT creating anything. Lets the UI
+   * preview the total, show the applied promo, and drive the redeem-points
+   * slider with the real max-redeemable. Auth: a logged-in customer (packs,
+   * points and offers are per-customer inputs). Mirrors create()'s venue
+   * resolution but runs read-only with grid-only slot validation.
+   */
+  async quote(
+    dto: QuoteBookingDto,
+    user: RequestUser,
+  ): Promise<BookingQuoteResponse> {
+    const venue = await this.db.withTenantBypass((tx) =>
+      tx.query.venues.findFirst({ where: eq(venues.id, dto.venueId) }),
+    );
+    if (!venue) throw new NotFoundException('Venue not found');
+    const ownerId = venue.ownerId;
+
+    return this.db.withTenantId(ownerId, async (tx) => {
+      // Grid-only validation: price what was selected without 409-ing if a slot
+      // was taken meanwhile (the booking call runs the full overlap check).
+      await this.validateRequestedSlots(tx, dto.slots, { checkExisting: false });
+      const q = await this.priceQuote(tx, {
+        venue,
+        ownerId,
+        customerId: user.id,
+        slotInputs: dto.slots,
+        addons: dto.addons,
+        addonIds: dto.addonIds,
+        packId: dto.packId,
+        offerCode: dto.offerCode,
+        pointsToRedeem: dto.pointsToRedeem,
+      });
+      return {
+        slotSubtotal: q.slotSubtotal.toNumber(),
+        addonSubtotal: q.addonSubtotal.toNumber(),
+        packDiscount: q.packDiscount.toNumber(),
+        offerId: q.offerId,
+        offerApplied: Boolean(q.offerId),
+        offerDiscount: q.offerDiscount.toNumber(),
+        pointsBalance: q.pointsBalance,
+        redeemValue: q.redeemValue,
+        maxRedeemablePoints: q.maxRedeemablePoints,
+        pointsRedeemed: q.pointsRedeemed,
+        pointsValue: q.pointsValue.toNumber(),
+        total: q.total.toNumber(),
+      };
+    });
+  }
+
+  /**
+   * Price a cart WITHOUT mutating anything — the read-only core shared by the
+   * booking-create path and the /bookings/quote preview. Assumes the slots have
+   * already been validated by the caller (createOccurrence does the full
+   * grid+overlap check; quote does grid-only). Mirrors the original inline
+   * steps 1–5 exactly so the preview and the charge can never diverge.
+   */
+  private async priceQuote(
+    tx: DbTx,
+    args: {
+      venue: { id: string; ownerId: string };
+      ownerId: string;
+      customerId: string;
+      slotInputs: { unitId: string; start: string; end: string }[];
+      /** new quantity-aware add-on selection (preferred). */
+      addons?: { addonId: string; quantity: number }[];
+      /** legacy add-on ids (owner offline-booking flow) — each implies qty 1. */
+      addonIds?: string[];
+      packId?: string;
+      offerCode?: string;
+      pointsToRedeem?: number;
+    },
+  ): Promise<PriceBreakdown> {
+    const { venue, ownerId, customerId, slotInputs } = args;
+
+    // 1. Price each slot (resolved per-court dynamic price).
+    let slotSubtotal = dec(0);
+    const slotRows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
+    const unitIds = new Set<string>();
+    for (const s of slotInputs) {
+      const start = DateTime.fromISO(s.start).toJSDate();
+      const end = DateTime.fromISO(s.end).toJSDate();
+      const durationMin = Math.round((end.getTime() - start.getTime()) / 60000);
+      const resolved = await this.pricing.resolve(s.unitId, start, durationMin, tx);
+      slotSubtotal = slotSubtotal.add(resolved.price);
+      slotRows.push({ unitId: s.unitId, startsAt: start, endsAt: end });
+      unitIds.add(s.unitId);
+    }
+
+    // 2. Add-ons (quantity-aware). Normalise the two input shapes to one
+    // {addonId, quantity} list: the new `addons` field (consumer flow, real
+    // quantities) or the legacy `addonIds` (owner flow, one each). Scope the
+    // lookup to this venue's owner + venue and active add-ons only
+    // (defense-in-depth): the dev DB connects as a superuser that BYPASSES RLS,
+    // so an unscoped findMany would let a customer reference another venue's
+    // add-ons. Reject if any requested id is missing/out-of-scope. Stock is NOT
+    // enforced here — that happens at booking time (createOccurrence), so a
+    // preview never hard-fails on inventory.
+    const addonItems = args.addons?.length
+      ? args.addons
+      : (args.addonIds ?? []).map((addonId) => ({ addonId, quantity: 1 }));
+    const requestedIds = [...new Set(addonItems.map((i) => i.addonId))];
+    const addonRows = requestedIds.length
+      ? await tx.query.addons.findMany({
+          where: and(
+            inArray(addonsTable.id, requestedIds),
+            eq(addonsTable.ownerId, venue.ownerId),
+            eq(addonsTable.venueId, venue.id),
+            eq(addonsTable.active, true),
+          ),
+        })
+      : [];
+    if (requestedIds.length && addonRows.length !== requestedIds.length) {
+      throw new BadRequestException('Invalid add-on for this venue');
+    }
+    const qtyById = new Map(addonItems.map((i) => [i.addonId, i.quantity]));
+    const addons = addonRows.map((row) => ({
+      row,
+      quantity: qtyById.get(row.id) ?? 1,
+    }));
+    const addonSubtotal = addons.reduce(
+      (acc, a) => acc.add(dec(a.row.price).mul(a.quantity)),
+      dec(0),
+    );
+
+    // 3. Pack (evaluate only; the booking path debits after the lock).
+    let packDiscount = dec(0);
+    let packSessions = 0;
+    if (args.packId) {
+      const app = await this.memberships.evaluatePack(
+        venue.ownerId,
+        customerId,
+        args.packId,
+        tx,
+        venue.id,
+        [...unitIds],
+        slotInputs.length,
+        slotSubtotal,
+      );
+      packDiscount = app.discount;
+      packSessions = app.sessions;
+    }
+
+    // 4. Offer (applied to the post-pack slot + addon amount). Explicit code →
+    // match by code; otherwise auto-apply the best valid offer. Both honour the
+    // offer's validity window, venue scope, game scope and segment targeting.
+    const offerBase = slotSubtotal.sub(packDiscount).add(addonSubtotal);
+    const bookedGameIds = await this.gameIdsForUnits(tx, [...unitIds]);
+    const customerSegments = await this.segmentsForCustomer(
+      tx,
+      ownerId,
+      customerId,
+    );
+    const offerApp = await this.resolveOffer(tx, {
+      ownerId,
+      venueId: venue.id,
+      offerCode: args.offerCode,
+      base: offerBase,
+      bookedGameIds,
+      customerSegments,
+    });
+    const offerId = offerApp?.offerId;
+    const offerDiscount = offerApp?.discount ?? dec(0);
+
+    // 5. Loyalty points. Always resolve the balance + redeem value + max so the
+    // preview can drive the slider even when nothing is being redeemed yet.
+    const redeemValue = await this.loyalty.redeemValueFor(tx, ownerId, venue.id);
+    const pointsBalance = Number(
+      await this.loyalty.pointsBalance(tx, ownerId, customerId),
+    );
+    // Cap to what the remaining cash can absorb. Keep the computation in Decimal
+    // (BUG-13) so we never lose precision through float division before flooring.
+    const remaining = slotSubtotal
+      .sub(packDiscount)
+      .add(addonSubtotal)
+      .sub(offerDiscount);
+    const maxByCash =
+      redeemValue > 0 ? remaining.div(redeemValue).floor().toNumber() : 0;
+    const maxRedeemablePoints = Math.max(
+      0,
+      Math.min(pointsBalance, maxByCash),
+    );
+    const requested =
+      args.pointsToRedeem && args.pointsToRedeem > 0 ? args.pointsToRedeem : 0;
+    const pointsRedeemed = Math.min(requested, maxRedeemablePoints);
+    const pointsValue = dec(pointsRedeemed).mul(redeemValue);
+
+    const total = Decimal.max(
+      slotSubtotal
+        .sub(packDiscount)
+        .add(addonSubtotal)
+        .sub(offerDiscount)
+        .sub(pointsValue),
+      dec(0),
+    );
+
+    return {
+      slotRows,
+      addons,
+      slotSubtotal,
+      addonSubtotal,
+      packDiscount,
+      packSessions,
+      offerId,
+      offerDiscount,
+      pointsBalance,
+      redeemValue,
+      maxRedeemablePoints,
+      pointsRedeemed,
+      pointsValue,
+      total,
+    };
+  }
+
+  /**
    * Create a single booking occurrence (the original create() body, factored
    * out so the recurring path reuses the exact same pricing/offer/addon/slot/
    * ledger/payment logic). Runs inside the caller's transaction.
@@ -273,120 +528,33 @@ export class BookingsService {
       // on the same court would both succeed.
       await this.validateRequestedSlots(tx, slotInputs);
 
-      // 1. Price each slot (resolved per-court dynamic price).
-      let slotSubtotal = dec(0);
-      const slotRows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
-      const unitIds = new Set<string>();
-      for (const s of slotInputs) {
-        const start = DateTime.fromISO(s.start).toJSDate();
-        const end = DateTime.fromISO(s.end).toJSDate();
-        const durationMin = Math.round((end.getTime() - start.getTime()) / 60000);
-        const resolved = await this.pricing.resolve(s.unitId, start, durationMin, tx);
-        slotSubtotal = slotSubtotal.add(resolved.price);
-        slotRows.push({ unitId: s.unitId, startsAt: start, endsAt: end });
-        unitIds.add(s.unitId);
-      }
-
-      // 2. Add-ons. Scope the lookup to this venue's owner + venue and active
-      // add-ons only (defense-in-depth): the dev DB connects as a superuser that
-      // BYPASSES RLS, so an unscoped findMany would let a customer reference
-      // another venue's add-ons. Reject if any requested id is missing/out-of-scope.
-      const addons = dto.addonIds?.length
-        ? await tx.query.addons.findMany({
-            where: and(
-              inArray(addonsTable.id, dto.addonIds),
-              eq(addonsTable.ownerId, venue.ownerId),
-              eq(addonsTable.venueId, dto.venueId),
-              eq(addonsTable.active, true),
-            ),
-          })
-        : [];
-      if (dto.addonIds?.length && addons.length !== dto.addonIds.length) {
-        throw new BadRequestException('Invalid add-on for this venue');
-      }
-      const addonSubtotal = addons.reduce(
-        (acc, a) => acc.add(dec(a.price)),
-        dec(0),
-      );
-
-      // 3. Pack (evaluate only; debit after the lock).
-      let packDiscount = dec(0);
-      let packSessions = 0;
-      if (dto.packId) {
-        const app = await this.memberships.evaluatePack(
-          venue.ownerId,
-          customerId,
-          dto.packId,
-          tx,
-          dto.venueId,
-          [...unitIds],
-          slotInputs.length,
-          slotSubtotal,
-        );
-        packDiscount = app.discount;
-        packSessions = app.sessions;
-      }
-
-      // 4. Offer (applied to the post-pack slot + addon amount). When an
-      // explicit code is supplied we match by code; otherwise we auto-apply the
-      // best valid auto-apply offer. In BOTH paths we honour the offer's
-      // validity window, venue scope, game scope and segment targeting.
-      const offerBase = slotSubtotal.sub(packDiscount).add(addonSubtotal);
-      const bookedGameIds = await this.gameIdsForUnits(tx, [...unitIds]);
-      const customerSegments = await this.segmentsForCustomer(
-        tx,
+      // 1–5. Price the cart via the shared, read-only core (the same code the
+      // /bookings/quote preview runs, so the charge always matches the preview).
+      // The full slot validation already ran above; priceQuote only computes
+      // money + returns the slot/addon rows the lock + persistence below reuse.
+      const {
+        slotRows,
+        addons,
+        slotSubtotal,
+        addonSubtotal,
+        packDiscount,
+        packSessions,
+        offerId,
+        offerDiscount,
+        pointsRedeemed,
+        pointsValue,
+        total,
+      } = await this.priceQuote(tx, {
+        venue,
         ownerId,
         customerId,
-      );
-      const offerApp = await this.resolveOffer(tx, {
-        ownerId,
-        venueId: dto.venueId,
+        slotInputs,
+        addons: dto.addons,
+        addonIds: dto.addonIds,
+        packId: dto.packId,
         offerCode: dto.offerCode,
-        base: offerBase,
-        bookedGameIds,
-        customerSegments,
+        pointsToRedeem: dto.pointsToRedeem,
       });
-      const offerId = offerApp?.offerId;
-      const offerDiscount = offerApp?.discount ?? dec(0);
-
-      // 5. Loyalty points redemption (capped to remaining + balance).
-      let pointsRedeemed = 0;
-      let pointsValue = dec(0);
-      if (dto.pointsToRedeem && dto.pointsToRedeem > 0) {
-        const redeemValue = await this.loyalty.redeemValueFor(
-          tx,
-          ownerId,
-          dto.venueId,
-        );
-        const balance = Number(
-          await this.loyalty.pointsBalance(tx, ownerId, customerId),
-        );
-        // Cap the points to what the remaining cash can absorb. Keep the
-        // computation in Decimal (BUG-13) so we never lose precision through
-        // float division before flooring to whole points.
-        const remaining = slotSubtotal
-          .sub(packDiscount)
-          .add(addonSubtotal)
-          .sub(offerDiscount);
-        const maxByCash =
-          redeemValue > 0
-            ? remaining
-                .div(redeemValue)
-                .floor()
-                .toNumber()
-            : 0;
-        pointsRedeemed = Math.min(dto.pointsToRedeem, balance, maxByCash);
-        pointsValue = dec(pointsRedeemed).mul(redeemValue);
-      }
-
-      const total = Decimal.max(
-        slotSubtotal
-          .sub(packDiscount)
-          .add(addonSubtotal)
-          .sub(offerDiscount)
-          .sub(pointsValue),
-        dec(0),
-      );
 
       // 6. Create booking + occupying slot rows (the lock).
       const booking = (
@@ -460,23 +628,31 @@ export class BookingsService {
       // 8. Player capture into owner CRM (PRD §4.9).
       await this.capturePlayer(tx, ownerId, customerId);
 
-      // 9. Persist the selected add-ons (BUG-5) and decrement tracked stock.
-      // Without the BookingAddon rows add-on revenue reports are always zero,
-      // even though the price is charged and stock is decremented. We record one
-      // row per add-on capturing the price charged at booking time (unitPrice)
-      // so reports stay correct even if the catalogue price later changes.
-      for (const a of addons) {
+      // 9. Persist the selected add-ons (BUG-5) and decrement tracked stock by
+      // the requested quantity. Without the BookingAddon rows add-on revenue
+      // reports are always zero, even though the price is charged and stock is
+      // decremented. We record one row per add-on capturing the price charged at
+      // booking time (unitPrice) and the quantity, so reports stay correct even
+      // if the catalogue price later changes. Stock is enforced HERE (not in the
+      // preview): reject if a tracked add-on can't cover the requested quantity —
+      // the whole booking transaction rolls back, so nothing is half-applied.
+      for (const { row: a, quantity } of addons) {
+        if (a.stock != null && a.stock < quantity) {
+          throw new BadRequestException(
+            `Only ${a.stock} of "${a.name}" left — reduce the quantity.`,
+          );
+        }
         await tx.insert(bookingAddons).values({
           id: randomUUID(),
           bookingId: booking.id,
           addonId: a.id,
           unitPrice: money(dec(a.price)),
-          quantity: 1,
+          quantity,
         });
         if (a.stock != null) {
           await tx
             .update(addonsTable)
-            .set({ stock: a.stock - 1 })
+            .set({ stock: a.stock - quantity })
             .where(eq(addonsTable.id, a.id));
         }
       }
@@ -543,7 +719,10 @@ export class BookingsService {
 
       const lineItems = [
         { label: `${slotInputs.length} slot(s)`, amount: Number(slotSubtotal) },
-        ...addons.map((a) => ({ label: a.name, amount: Number(a.price) })),
+        ...addons.map(({ row, quantity }) => ({
+          label: quantity > 1 ? `${row.name} ×${quantity}` : row.name,
+          amount: Number(row.price) * quantity,
+        })),
       ];
       if (packDiscount.greaterThan(0))
         lineItems.push({ label: 'Pack', amount: -Number(packDiscount) });
@@ -578,7 +757,12 @@ export class BookingsService {
   private async validateRequestedSlots(
     tx: DbTx,
     slotInputs: { unitId: string; start: string; end: string }[],
+    // The booking path needs the full lock guarantee (existing-slot overlap).
+    // The /bookings/quote preview only needs grid alignment — it must price what
+    // the customer selected without 409-ing if a slot was taken meanwhile.
+    opts: { checkExisting?: boolean } = {},
   ): Promise<void> {
+    const checkExisting = opts.checkExisting ?? true;
     if (slotInputs.length === 0) {
       throw new BadRequestException('Pick at least one slot.');
     }
@@ -598,8 +782,11 @@ export class BookingsService {
       const unit = unitById.get(s.unitId);
       if (!unit) throw new BadRequestException('Unknown court selected.');
 
-      const start = DateTime.fromISO(s.start);
-      const end = DateTime.fromISO(s.end);
+      // Interpret in IST so hour-of-day lines up with the venue's IST
+      // openTime/closeTime even when the API runs in UTC (the string already
+      // carries an offset; { zone } only governs how hour/minute are read back).
+      const start = DateTime.fromISO(s.start, { zone: VENUE_TZ });
+      const end = DateTime.fromISO(s.end, { zone: VENUE_TZ });
       if (!start.isValid || !end.isValid) {
         throw new BadRequestException('Slot has an invalid start or end time.');
       }
@@ -636,6 +823,8 @@ export class BookingsService {
     // exists if some slot row on that unit satisfies startsAt < newEnd AND
     // endsAt > newStart. This catches partial overlaps the UNIQUE(unitId,
     // startsAt) key misses (e.g. 10:00-11:00 vs an existing 10:30-11:30).
+    // Skipped for price previews (checkExisting=false).
+    if (!checkExisting) return;
     for (const iv of intervals) {
       const clash = await tx.query.slots.findFirst({
         where: and(
@@ -669,8 +858,15 @@ export class BookingsService {
       occurrences.push(
         slots.map((s) => ({
           unitId: s.unitId,
-          start: DateTime.fromISO(s.start).plus({ weeks: week }).toISO()!,
-          end: DateTime.fromISO(s.end).plus({ weeks: week }).toISO()!,
+          // Shift in IST so each weekly occurrence keeps the same wall-clock
+          // time (the comment above promises DST-safety; IST has none today,
+          // but pinning the zone keeps it correct if that ever changes).
+          start: DateTime.fromISO(s.start, { zone: VENUE_TZ })
+            .plus({ weeks: week })
+            .toISO()!,
+          end: DateTime.fromISO(s.end, { zone: VENUE_TZ })
+            .plus({ weeks: week })
+            .toISO()!,
         })),
       );
     }

@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { Msg } from '../../components/common';
+import { normalizeMobile } from '../../lib/mobile';
 import { useStorefront } from '../../storefront/StorefrontProvider';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -34,14 +35,17 @@ export function PlayerAuthPage() {
   if (user?.role === UserRole.CUSTOMER) return <Navigate to="/browse" replace />;
 
   const sendOtp = async () => {
-    if (mobile.replace(/\D/g, '').length < 10) {
-      setMsg('Enter a valid mobile number to get your code.');
+    // Canonicalise to +91XXXXXXXXXX (matches the API) so a returning player
+    // always resolves to the same account, whatever shape they type.
+    const normalized = normalizeMobile(mobile);
+    if (!normalized) {
+      setMsg('Enter a valid 10-digit mobile number.');
       return;
     }
     setMsg(null);
     setBusy(true);
     try {
-      await api.requestOtp(mobile.trim());
+      await api.requestOtp(normalized);
       setSent(true);
       setMsg(import.meta.env.DEV ? 'Code sent. In dev, use 123456.' : 'Code sent to your phone.');
     } catch (e) {
@@ -52,10 +56,15 @@ export function PlayerAuthPage() {
   };
 
   const verify = async () => {
+    const normalized = normalizeMobile(mobile);
+    if (!normalized) {
+      setMsg('Enter a valid 10-digit mobile number.');
+      return;
+    }
     setMsg(null);
     setBusy(true);
     try {
-      const res = await api.verifyOtp(mobile.trim(), code.trim(), name.trim() || undefined);
+      const res = await api.verifyOtp(normalized, code.trim(), name.trim() || undefined);
       setSession(res);
       nav('/browse');
     } catch (e) {

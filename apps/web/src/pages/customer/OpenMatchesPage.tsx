@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Check, MapPin, Swords, User, Users, X } from 'lucide-react';
 import { api, JoinRequest, OpenMatch } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
@@ -18,9 +19,14 @@ function formatWindow(time: OpenMatch['time']): string {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
+    timeZone: 'Asia/Kolkata',
   });
   const t = (d: Date) =>
-    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    d.toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
+    });
   return `${day} · ${t(start)}–${t(end)}`;
 }
 
@@ -98,9 +104,14 @@ export function OpenMatchesPage() {
   const [requested, setRequested] = useState<Set<string>>(new Set());
   const { flash } = useFloodlitToast();
   const { user } = useAuth();
+  const nav = useNavigate();
 
   const browse = useLoad(() => api.listOpenMatches(), []);
-  const mine = useLoad(() => api.myOpenMatches(), []);
+  // Guests get public browse only — skip the authed "mine" call for them.
+  const mine = useLoad(
+    () => (user ? api.myOpenMatches() : Promise.resolve({ hosting: [], joined: [] })),
+    [user],
+  );
 
   // Matches the current user has already requested to join: optimistic local
   // state merged with anything the server already reports under "joined".
@@ -113,6 +124,11 @@ export function OpenMatchesPage() {
   };
 
   const join = async (id: string) => {
+    if (!user) {
+      // Guests can browse open matches but must sign in to request a spot.
+      nav('/login');
+      return;
+    }
     setMsg(null);
     try {
       await api.joinOpenMatch(id);
@@ -185,7 +201,8 @@ export function OpenMatchesPage() {
         >
           {([
             { id: 'browse', label: 'Browse', icon: Swords },
-            { id: 'mine', label: 'My matches', icon: Users },
+            // "My matches" is authed-only — hidden for guests.
+            ...(user ? [{ id: 'mine', label: 'My matches', icon: Users }] : []),
           ] as { id: TabId; label: string; icon: typeof Swords }[]).map((t) => {
             const active = tab === t.id;
             const Icon = t.icon;

@@ -1,6 +1,7 @@
 import {
   AuthTokens,
   BookingFilters,
+  BookingQuoteResponse,
   BookingResponse,
   BookingStatus,
   Branding,
@@ -9,10 +10,12 @@ import {
   CreateCustomerRequest,
   LoginResponse,
   OpenMatchRepaymentMode,
+  OwnedPack,
   OwnerBooking,
   PayMode,
   PaymentStatus,
   PlayerSummary,
+  QuoteBookingRequest,
   RegistrationType,
   TournamentFormat,
 } from '@sportsbooking/shared';
@@ -993,6 +996,10 @@ export const api = {
     get<CalendarResponse>(`/availability?unitId=${unitId}&date=${date}`),
   createBooking: (payload: CreateBookingRequest) =>
     post<BookingResponse>('/bookings', payload),
+  /** Dry-run price preview (pack/offer/points) for the booking flow — never
+   *  mutates. Drives the running total, promo preview and points slider. */
+  quoteBooking: (payload: QuoteBookingRequest) =>
+    post<BookingQuoteResponse>('/bookings/quote', payload),
   cancelBooking: (id: string) => post<{ cancelled: true }>(`/bookings/${id}/cancel`),
   myBookings: () => get<CustomerBooking[]>('/bookings/mine'),
 
@@ -1010,6 +1017,10 @@ export const api = {
 
   // ---- memberships / wallet / referral (customer) ----
   listOwnerPacks: (ownerId: string) => get<Pack[]>(`/owners/${ownerId}/packs`),
+  /** Packs the signed-in customer OWNS with this owner (positive balance) —
+   *  for the "use pack" picker (only redeemable packs). */
+  listOwnedPacks: (ownerId: string) =>
+    get<OwnedPack[]>(`/owners/${ownerId}/packs/owned`),
   purchasePack: (ownerId: string, packId: string) =>
     post<{ packId: string; sessionsAdded: number; balance: number }>(
       `/owners/${ownerId}/packs/${packId}/purchase`,

@@ -800,6 +800,11 @@ export interface OfferInput {
   venueIds?: string[];
   gameIds?: string[];
   segment?: string;
+  /** Guardrails (null clears the limit, undefined leaves it unchanged). */
+  minOrderValue?: number | null;
+  maxDiscount?: number | null;
+  usageLimit?: number | null;
+  perUserLimit?: number | null;
 }
 
 function authHeaders(): Record<string, string> {

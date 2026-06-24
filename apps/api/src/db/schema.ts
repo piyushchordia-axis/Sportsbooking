@@ -599,6 +599,12 @@ export const offers = pgTable("offers", {
 	venueIds: text().array().default(sql`'{}'::text[]`),
 	gameIds: text().array().default(sql`'{}'::text[]`),
 	segment: text(),
+	// Guardrails (all nullable = no limit): min order to qualify, max discount
+	// cap (esp. for percent offers), total redemption cap, and per-customer cap.
+	minOrderValue: numeric({ precision: 10, scale:  2 }),
+	maxDiscount: numeric({ precision: 10, scale:  2 }),
+	usageLimit: integer(),
+	perUserLimit: integer(),
 	active: boolean().default(true).notNull(),
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
@@ -608,6 +614,38 @@ export const offers = pgTable("offers", {
 			columns: [table.ownerId],
 			foreignColumns: [owners.id],
 			name: "offers_ownerId_fkey"
+		}).onUpdate("cascade").onDelete("restrict"),
+	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
+]);
+
+// One row per booking that redeemed an offer — the source of truth for usage
+// caps (total + per-customer). Released (deleted) when the booking is cancelled.
+export const offerRedemptions = pgTable("offer_redemptions", {
+	id: text().primaryKey().notNull(),
+	ownerId: text().notNull(),
+	offerId: text().notNull(),
+	customerId: text().notNull(),
+	bookingId: text().notNull(),
+	amount: numeric({ precision: 12, scale:  2 }).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	uniqueIndex("offer_redemptions_bookingId_key").using("btree", table.bookingId.asc().nullsLast()),
+	index("offer_redemptions_offerId_idx").using("btree", table.offerId.asc().nullsLast()),
+	index("offer_redemptions_offer_customer_idx").using("btree", table.offerId.asc().nullsLast(), table.customerId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.offerId],
+			foreignColumns: [offers.id],
+			name: "offer_redemptions_offerId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.bookingId],
+			foreignColumns: [bookings.id],
+			name: "offer_redemptions_bookingId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.ownerId],
+			foreignColumns: [owners.id],
+			name: "offer_redemptions_ownerId_fkey"
 		}).onUpdate("cascade").onDelete("restrict"),
 	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
 ]);

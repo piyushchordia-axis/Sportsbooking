@@ -11,6 +11,7 @@ import {
   Plus,
   Power,
   Search,
+  ShieldCheck,
   Tag,
   Target,
   Ticket,
@@ -74,6 +75,10 @@ interface Offer {
   venueIds?: string[] | null;
   gameIds?: string[] | null;
   segment?: string | null;
+  minOrderValue?: string | number | null;
+  maxDiscount?: string | number | null;
+  usageLimit?: number | null;
+  perUserLimit?: number | null;
 }
 
 interface NamedRef {
@@ -86,8 +91,8 @@ const SEGMENT_OPTIONS = [
   { value: '', label: 'Everyone' },
   { value: 'new', label: 'New players' },
   { value: 'lapsed', label: 'Lapsed players' },
-  { value: 'weekend_regulars', label: 'Weekend regulars' },
-  { value: 'members', label: 'Members' },
+  { value: 'regulars', label: 'Regulars (5+ bookings)' },
+  { value: 'members', label: 'Members (pack holders)' },
 ];
 
 function segmentLabel(value?: string | null): string {
@@ -295,6 +300,10 @@ export function OffersPage() {
   const [venueIds, setVenueIds] = useState<string[]>([]);
   const [gameIds, setGameIds] = useState<string[]>([]);
   const [segment, setSegment] = useState('');
+  const [minOrder, setMinOrder] = useState('');
+  const [maxDisc, setMaxDisc] = useState('');
+  const [totalLimit, setTotalLimit] = useState('');
+  const [userLimit, setUserLimit] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -309,6 +318,10 @@ export function OffersPage() {
   const [eVenueIds, setEVenueIds] = useState<string[]>([]);
   const [eGameIds, setEGameIds] = useState<string[]>([]);
   const [eSegment, setESegment] = useState('');
+  const [eMinOrder, setEMinOrder] = useState('');
+  const [eMaxDisc, setEMaxDisc] = useState('');
+  const [eTotalLimit, setETotalLimit] = useState('');
+  const [eUserLimit, setEUserLimit] = useState('');
   const [editMsg, setEditMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -346,6 +359,30 @@ export function OffersPage() {
     return { ok: true, value: clamped };
   };
 
+  // Optional guardrail fields: '' → null (no limit), else a valid value.
+  const moneyOrNull = (s: string): number | null => {
+    const n = Number(s.trim());
+    return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const limitOrNull = (s: string): number | null => {
+    const n = Math.floor(Number(s.trim()));
+    return s.trim() !== '' && Number.isFinite(n) && n >= 1 ? n : null;
+  };
+  // The guardrail slice of the create/update payload. maxDiscount only applies
+  // to percentage offers (a flat amount is already its own cap).
+  const guardrails = (
+    t: OfferType,
+    minO: string,
+    maxD: string,
+    total: string,
+    perUser: string,
+  ) => ({
+    minOrderValue: moneyOrNull(minO),
+    maxDiscount: t === OfferType.PERCENT ? moneyOrNull(maxD) : null,
+    usageLimit: limitOrNull(total),
+    perUserLimit: limitOrNull(perUser),
+  });
+
   // Return the create form to its defaults after a successful create.
   const resetCreate = () => {
     setName('Weekend 10% off');
@@ -357,6 +394,10 @@ export function OffersPage() {
     setVenueIds([]);
     setGameIds([]);
     setSegment('');
+    setMinOrder('');
+    setMaxDisc('');
+    setTotalLimit('');
+    setUserLimit('');
     setMsg(null);
   };
 
@@ -385,6 +426,7 @@ export function OffersPage() {
         venueIds: venueIds.length ? venueIds : undefined,
         gameIds: gameIds.length ? gameIds : undefined,
         segment: segment || undefined,
+        ...guardrails(type, minOrder, maxDisc, totalLimit, userLimit),
       });
       setCreateOpen(false);
       resetCreate();
@@ -407,6 +449,10 @@ export function OffersPage() {
     setEVenueIds(o.venueIds ?? []);
     setEGameIds(o.gameIds ?? []);
     setESegment(o.segment ?? '');
+    setEMinOrder(o.minOrderValue != null ? String(o.minOrderValue) : '');
+    setEMaxDisc(o.maxDiscount != null ? String(o.maxDiscount) : '');
+    setETotalLimit(o.usageLimit != null ? String(o.usageLimit) : '');
+    setEUserLimit(o.perUserLimit != null ? String(o.perUserLimit) : '');
     setEditMsg(null);
   };
 
@@ -431,6 +477,7 @@ export function OffersPage() {
         venueIds: eVenueIds,
         gameIds: eGameIds,
         segment: eSegment || undefined,
+        ...guardrails(eType, eMinOrder, eMaxDisc, eTotalLimit, eUserLimit),
       });
       setEditing(null);
       offers.reload();
@@ -613,6 +660,45 @@ export function OffersPage() {
             onChange={setSegment}
             options={SEGMENT_OPTIONS}
           />
+
+          <Separator className="my-4" />
+
+          {/* Section 4 — guardrails. Blank = no limit. */}
+          <SectionLabel icon={ShieldCheck} className="mb-3">
+            Limits
+          </SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+            <Field
+              label="Min order ₹"
+              type="number"
+              value={minOrder}
+              onChange={setMinOrder}
+              placeholder="No minimum"
+            />
+            {type === OfferType.PERCENT && (
+              <Field
+                label="Max discount ₹"
+                type="number"
+                value={maxDisc}
+                onChange={setMaxDisc}
+                placeholder="No cap"
+              />
+            )}
+            <Field
+              label="Total uses"
+              type="number"
+              value={totalLimit}
+              onChange={setTotalLimit}
+              placeholder="Unlimited"
+            />
+            <Field
+              label="Per player"
+              type="number"
+              value={userLimit}
+              onChange={setUserLimit}
+              placeholder="Unlimited · 1 = one-time"
+            />
+          </div>
 
           <Msg text={msg} />
           <DialogFooter>
@@ -824,6 +910,44 @@ export function OffersPage() {
             onChange={setESegment}
             options={SEGMENT_OPTIONS}
           />
+
+          <Separator className="my-4" />
+
+          <SectionLabel icon={ShieldCheck} className="mb-3">
+            Limits
+          </SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+            <Field
+              label="Min order ₹"
+              type="number"
+              value={eMinOrder}
+              onChange={setEMinOrder}
+              placeholder="No minimum"
+            />
+            {eType === OfferType.PERCENT && (
+              <Field
+                label="Max discount ₹"
+                type="number"
+                value={eMaxDisc}
+                onChange={setEMaxDisc}
+                placeholder="No cap"
+              />
+            )}
+            <Field
+              label="Total uses"
+              type="number"
+              value={eTotalLimit}
+              onChange={setETotalLimit}
+              placeholder="Unlimited"
+            />
+            <Field
+              label="Per player"
+              type="number"
+              value={eUserLimit}
+              onChange={setEUserLimit}
+              placeholder="Unlimited · 1 = one-time"
+            />
+          </div>
 
           <Msg text={editMsg} />
           <DialogFooter>

@@ -20,11 +20,13 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsInt,
   IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
 } from 'class-validator';
 import {
   CurrentUser,
@@ -33,7 +35,8 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { DbService } from '../../db/db.service';
-import { bookings, offers, ownerCustomers } from '../../db/schema';
+import { bookings, offers } from '../../db/schema';
+import { customerSegments } from '../../db/segments';
 import { dec, money } from '../../db/money';
 
 /** Customer-facing offers-inbox row (PRD §5.4). */
@@ -59,6 +62,11 @@ class CreateOfferDto {
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) venueIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) gameIds?: string[];
   @IsOptional() @IsString() segment?: string;
+  // Guardrails (omit/null = no limit).
+  @IsOptional() @IsNumber() @Min(0) minOrderValue?: number;
+  @IsOptional() @IsNumber() @Min(0) maxDiscount?: number;
+  @IsOptional() @IsInt() @Min(1) usageLimit?: number;
+  @IsOptional() @IsInt() @Min(1) perUserLimit?: number;
 }
 
 class UpdateOfferDto {
@@ -73,17 +81,36 @@ class UpdateOfferDto {
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) venueIds?: string[];
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) gameIds?: string[];
   @IsOptional() @IsString() segment?: string;
+  // Guardrails (null clears the limit).
+  @IsOptional() @IsNumber() @Min(0) minOrderValue?: number | null;
+  @IsOptional() @IsNumber() @Min(0) maxDiscount?: number | null;
+  @IsOptional() @IsInt() @Min(1) usageLimit?: number | null;
+  @IsOptional() @IsInt() @Min(1) perUserLimit?: number | null;
+}
+
+/** Defense-in-depth value bounds (the admin form clamps too): percent must be
+ *  1–100, a flat amount must be greater than zero. */
+function assertOfferValue(type: OfferType, value: number): void {
+  if (type === OfferType.PERCENT) {
+    if (!(value >= 1 && value <= 100)) {
+      throw new BadRequestException('Percent discount must be between 1 and 100.');
+    }
+  } else if (!(value > 0)) {
+    throw new BadRequestException('Flat discount must be greater than zero.');
+  }
 }
 
 /**
  * Offers & promotions (PRD §4.8): % or flat discounts via promo code or
- * auto-apply, with a validity window and venue/game/segment scoping.
+ * auto-apply, with a validity window, venue/game/segment scoping, and usage
+ * guardrails (min order, max discount cap, total + per-customer caps).
  */
 @Injectable()
 export class OffersService {
   constructor(private readonly db: DbService) {}
 
   create(user: RequestUser, dto: CreateOfferDto) {
+    assertOfferValue(dto.type, dto.value);
     return this.db.withTenant(async (tx) => {
       return (
         await tx
@@ -101,6 +128,12 @@ export class OffersService {
             venueIds: dto.venueIds ?? [],
             gameIds: dto.gameIds ?? [],
             segment: dto.segment,
+            minOrderValue:
+              dto.minOrderValue != null ? money(dec(dto.minOrderValue)) : null,
+            maxDiscount:
+              dto.maxDiscount != null ? money(dec(dto.maxDiscount)) : null,
+            usageLimit: dto.usageLimit ?? null,
+            perUserLimit: dto.perUserLimit ?? null,
           })
           .returning()
       )[0];
@@ -124,19 +157,9 @@ export class OffersService {
     return this.db.withTenantBypass(async (tx) => {
       const now = new Date();
 
-      // Customer's segments for this owner (mirrors bookings.service).
-      const link = await tx.query.ownerCustomers.findFirst({
-        where: and(
-          eq(ownerCustomers.ownerId, ownerId),
-          eq(ownerCustomers.customerId, customerId),
-        ),
-      });
-      const segments: string[] = [];
-      if (link) {
-        const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
-        if (link.lastVisitAt < cutoff) segments.push('lapsed');
-        if (link.bookingCount >= 5) segments.push('regulars');
-      }
+      // Customer's segments — shared with offer scoping (bookings.service) so the
+      // inbox advertises exactly what resolveOffer will honour.
+      const segments = await customerSegments(tx, ownerId, customerId);
 
       const rows = await tx.query.offers.findMany({
         where: and(eq(offers.ownerId, ownerId), eq(offers.active, true)),
@@ -173,6 +196,11 @@ export class OffersService {
       });
       if (!existing) throw new NotFoundException('Offer not found');
 
+      // Validate the discount value against the resolved type (new or existing).
+      if (dto.value !== undefined) {
+        assertOfferValue((dto.type ?? existing.type) as OfferType, dto.value);
+      }
+
       const data: Partial<typeof offers.$inferInsert> = {};
       if (dto.name !== undefined) data.name = dto.name;
       if (dto.type !== undefined) data.type = dto.type;
@@ -189,6 +217,16 @@ export class OffersService {
       if (dto.venueIds !== undefined) data.venueIds = dto.venueIds;
       if (dto.gameIds !== undefined) data.gameIds = dto.gameIds;
       if (dto.segment !== undefined) data.segment = dto.segment;
+      if (dto.minOrderValue !== undefined) {
+        data.minOrderValue =
+          dto.minOrderValue != null ? money(dec(dto.minOrderValue)) : null;
+      }
+      if (dto.maxDiscount !== undefined) {
+        data.maxDiscount =
+          dto.maxDiscount != null ? money(dec(dto.maxDiscount)) : null;
+      }
+      if (dto.usageLimit !== undefined) data.usageLimit = dto.usageLimit;
+      if (dto.perUserLimit !== undefined) data.perUserLimit = dto.perUserLimit;
 
       return (
         await tx

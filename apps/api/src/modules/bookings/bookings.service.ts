@@ -9,6 +9,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import {
   and,
+  count,
   desc,
   eq,
   gt,
@@ -33,6 +34,7 @@ import {
 import { DateTime } from 'luxon';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
+import { customerSegments } from '../../db/segments';
 import { Decimal, dec, money } from '../../db/money';
 import {
   addons as addonsTable,
@@ -40,6 +42,7 @@ import {
   bookingAddons,
   bookings,
   ledgerTxns,
+  offerRedemptions,
   offers,
   ownerCustomers,
   playerProfiles,
@@ -441,6 +444,7 @@ export class BookingsService {
     );
     const offerApp = await this.resolveOffer(tx, {
       ownerId,
+      customerId,
       venueId: venue.id,
       offerCode: args.offerCode,
       base: offerBase,
@@ -581,6 +585,22 @@ export class BookingsService {
           })
           .returning()
       )[0];
+
+      // Record the offer redemption — the source of truth for usage caps.
+      // Idempotent on bookingId; released (deleted) if the booking is cancelled.
+      if (offerId) {
+        await tx
+          .insert(offerRedemptions)
+          .values({
+            id: randomUUID(),
+            ownerId,
+            offerId,
+            customerId,
+            bookingId: booking.id,
+            amount: money(offerDiscount),
+          })
+          .onConflictDoNothing({ target: offerRedemptions.bookingId });
+      }
 
       try {
         for (const r of slotRows) {
@@ -1174,6 +1194,12 @@ export class BookingsService {
             : {}),
         })
         .where(eq(bookings.id, bookingId));
+
+      // Release the offer redemption so the use returns to the cap (a cancelled
+      // booking shouldn't burn a one-time / limited code).
+      await tx
+        .delete(offerRedemptions)
+        .where(eq(offerRedemptions.bookingId, bookingId));
 
       if (fresh.packId) {
         await this.memberships.refundSessions(
@@ -1903,27 +1929,16 @@ export class BookingsService {
   }
 
   /**
-   * The marketing segments a customer falls into for this owner. Mirrors the
-   * CRM segmentation (PRD §4.9): "lapsed" (no visit in 60 days) and "regulars"
-   * (5+ bookings). Returns an empty list if there's no CRM link yet.
+   * The marketing segments a customer falls into for this owner — delegates to
+   * the shared helper so offer scoping and the customer offers inbox use ONE
+   * definition (new / lapsed / regulars / members). See ../../db/segments.
    */
-  private async segmentsForCustomer(
+  private segmentsForCustomer(
     tx: DbTx,
     ownerId: string,
     customerId: string,
   ): Promise<string[]> {
-    const link = await tx.query.ownerCustomers.findFirst({
-      where: and(
-        eq(ownerCustomers.ownerId, ownerId),
-        eq(ownerCustomers.customerId, customerId),
-      ),
-    });
-    if (!link) return [];
-    const segments: string[] = [];
-    const cutoff = new Date(Date.now() - 60 * 24 * 3600 * 1000);
-    if (link.lastVisitAt < cutoff) segments.push('lapsed');
-    if (link.bookingCount >= 5) segments.push('regulars');
-    return segments;
+    return customerSegments(tx, ownerId, customerId);
   }
 
   /** True if an offer's scope matches the current booking context. */
@@ -1963,6 +1978,7 @@ export class BookingsService {
     tx: DbTx,
     args: {
       ownerId: string;
+      customerId: string;
       venueId: string;
       offerCode?: string;
       base: Decimal;
@@ -1984,23 +2000,74 @@ export class BookingsService {
       bookedGameIds: args.bookedGameIds,
       customerSegments: args.customerSegments,
     };
-    const discountFor = (offer: {
-      type: string;
-      value: string;
-    }): Decimal =>
+    const discountFor = (offer: { type: string; value: string }): Decimal =>
       offer.type === 'percent'
-        ? // BUG-11: round the percent discount to 2dp HALF_UP so the discount is
-          // a clean currency amount and the derived total stays consistent.
+        ? // round the percent discount to 2dp HALF_UP so the discount is a clean
+          // currency amount and the derived total stays consistent.
           args.base
             .mul(dec(offer.value))
             .div(100)
             .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
         : Decimal.min(dec(offer.value), args.base);
 
+    // Full eligibility for ONE offer: venue/game/segment scope, minimum order
+    // value, total + per-customer usage caps, and the maxDiscount-capped amount.
+    // Returns the discount to apply, or null if it doesn't qualify. Authoritative
+    // — the quote AND the booking both run this, so a client cannot bypass a cap.
+    type OfferRow = {
+      id: string;
+      type: string;
+      value: string;
+      venueIds: string[] | null;
+      gameIds: string[] | null;
+      segment: string | null;
+      minOrderValue: string | null;
+      maxDiscount: string | null;
+      usageLimit: number | null;
+      perUserLimit: number | null;
+    };
+    const applicable = async (offer: OfferRow): Promise<Decimal | null> => {
+      if (!this.offerInScope(offer, scopeCtx)) return null;
+      // Minimum order value, measured on the post-pack discountable base.
+      if (
+        offer.minOrderValue != null &&
+        args.base.lessThan(dec(offer.minOrderValue))
+      ) {
+        return null;
+      }
+      // Total redemption cap.
+      if (offer.usageLimit != null) {
+        const [tot] = await tx
+          .select({ c: count() })
+          .from(offerRedemptions)
+          .where(eq(offerRedemptions.offerId, offer.id));
+        if (Number(tot?.c ?? 0) >= offer.usageLimit) return null;
+      }
+      // Per-customer cap (perUserLimit = 1 ⇒ a one-time-per-player code).
+      if (offer.perUserLimit != null) {
+        const [mine] = await tx
+          .select({ c: count() })
+          .from(offerRedemptions)
+          .where(
+            and(
+              eq(offerRedemptions.offerId, offer.id),
+              eq(offerRedemptions.customerId, args.customerId),
+            ),
+          );
+        if (Number(mine?.c ?? 0) >= offer.perUserLimit) return null;
+      }
+      let discount = discountFor(offer);
+      // Max-discount cap (chiefly for percent offers — "20% off, up to ₹200").
+      if (offer.maxDiscount != null) {
+        discount = Decimal.min(discount, dec(offer.maxDiscount));
+      }
+      return discount.greaterThan(0) ? discount : null;
+    };
+
     // Owner-scope every offer lookup (defense-in-depth): the dev DB connects as
     // a superuser that BYPASSES RLS, so without an explicit ownerId filter a
-    // customer could redeem another owner's promo code or auto-apply another
-    // owner's offer. Offers carry a denormalised ownerId.
+    // customer could redeem another owner's promo code. Offers carry a
+    // denormalised ownerId.
     if (args.offerCode) {
       const offer = await tx.query.offers.findFirst({
         where: and(
@@ -2009,12 +2076,13 @@ export class BookingsService {
           validWindow,
         ),
       });
-      if (!offer || !this.offerInScope(offer, scopeCtx)) return null;
-      return { offerId: offer.id, discount: discountFor(offer) };
+      if (!offer) return null;
+      const discount = await applicable(offer);
+      return discount ? { offerId: offer.id, discount } : null;
     }
 
-    // Auto-apply: pick whichever valid, in-scope auto-apply offer gives the
-    // largest discount for this booking.
+    // Auto-apply: pick whichever valid, in-scope, in-budget auto-apply offer
+    // gives the largest discount for this booking.
     const candidates = await tx.query.offers.findMany({
       where: and(
         eq(offers.autoApply, true),
@@ -2024,9 +2092,8 @@ export class BookingsService {
     });
     let best: { offerId: string; discount: Decimal } | null = null;
     for (const offer of candidates) {
-      if (!this.offerInScope(offer, scopeCtx)) continue;
-      const discount = discountFor(offer);
-      if (!discount.greaterThan(0)) continue;
+      const discount = await applicable(offer);
+      if (!discount) continue;
       if (!best || discount.greaterThan(best.discount)) {
         best = { offerId: offer.id, discount };
       }

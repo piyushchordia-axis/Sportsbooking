@@ -36,6 +36,10 @@ ALTER TABLE "membership_packs" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "membership_packs";
 CREATE POLICY "tenant_isolation" ON "membership_packs" AS PERMISSIVE FOR ALL TO public USING ((app_bypass_rls() OR ("ownerId" = app_current_owner_id()))) WITH CHECK ((app_bypass_rls() OR ("ownerId" = app_current_owner_id())));
 
+ALTER TABLE "offer_redemptions" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "tenant_isolation" ON "offer_redemptions";
+CREATE POLICY "tenant_isolation" ON "offer_redemptions" AS PERMISSIVE FOR ALL TO public USING ((app_bypass_rls() OR ("ownerId" = app_current_owner_id()))) WITH CHECK ((app_bypass_rls() OR ("ownerId" = app_current_owner_id())));
+
 ALTER TABLE "offers" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "offers";
 CREATE POLICY "tenant_isolation" ON "offers" AS PERMISSIVE FOR ALL TO public USING ((app_bypass_rls() OR ("ownerId" = app_current_owner_id()))) WITH CHECK ((app_bypass_rls() OR ("ownerId" = app_current_owner_id())));

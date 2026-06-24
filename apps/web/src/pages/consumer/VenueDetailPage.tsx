@@ -10,7 +10,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  CalendarDays,
   Check,
   Clock3,
   Coins,
@@ -20,6 +19,7 @@ import {
   Minus,
   Phone,
   Plus,
+  RefreshCw,
   Repeat,
   Ticket,
   Wallet,
@@ -118,6 +118,7 @@ export function VenueDetailPage() {
   const [date, setDate] = useState(() => searchParams.get('date') || todayISO());
   const [slots, setSlots] = useState<ResolvedSlot[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing] = useState(false);
 
   // In-page step: "select" (pick court/date/slots) → "review" (confirm & pay).
   const [step, setStep] = useState<Step>('select');
@@ -267,20 +268,22 @@ export function VenueDetailPage() {
     }
   };
 
-  const load = async () => {
-    setMsg(null);
-    // A fresh search clears any prior confirmation/selection (NOT used after a
-    // successful booking — that path keeps the confirmation, see createBooking).
-    setConfirmation(null);
-    setSelected(new Set());
-    setAddonQty(new Map());
-    await refreshSlots();
+  /** Manual refresh of the slot grid — re-fetch availability for the current
+   *  court/date, keeping the user's current selection. */
+  const handleRefresh = async () => {
+    if (!unitId || refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshSlots();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // The design loads availability the moment a court+date is chosen. Auto-fetch
-  // whenever the selection changes (the explicit "Load availability" button
-  // remains for an obvious manual refresh). Skip while a confirmation is shown
-  // so the post-booking confirmation isn't wiped by an effect.
+  // whenever the selection changes (a small refresh button re-fetches on demand).
+  // Skip while a confirmation is shown so the post-booking confirmation isn't
+  // wiped by an effect.
   useEffect(() => {
     if (!unitId || !venue || confirmation) return;
     let alive = true;
@@ -1432,21 +1435,23 @@ export function VenueDetailPage() {
         </div>
         <DateRail days={dateStrip.map((d) => d.iso)} active={date} onSelect={setDate} />
 
-        {/* explicit reload — design auto-loads on court/date, but keep a manual refresh */}
-        <button
-          type="button"
-          onClick={load}
-          disabled={!unitId}
-          className="fl-mono mt-3 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] disabled:opacity-50"
-          style={{ border: '1px solid var(--line-strong)', color: 'var(--muted)' }}
-        >
-          <CalendarDays className="h-3.5 w-3.5" /> Load availability
-        </button>
-
-        {/* 3 · Pick slot(s) */}
+        {/* 3 · Pick slot(s) — with a compact refresh that re-fetches availability */}
         <div className="mb-2.5 mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div className="fl-mono text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
-            3 · Pick slot(s)
+          <div className="flex items-center gap-2">
+            <div className="fl-mono text-[11px] uppercase tracking-[0.1em]" style={{ color: 'var(--faint)' }}>
+              3 · Pick slot(s)
+            </div>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={!unitId || refreshing}
+              aria-label="Refresh availability"
+              title="Refresh availability"
+              className="grid h-7 w-7 place-items-center rounded-lg disabled:opacity-40"
+              style={{ background: 'transparent', border: '1px solid var(--line)', color: 'var(--muted)' }}
+            >
+              <RefreshCw className={`h-3.5 w-3.5${refreshing ? ' animate-spin' : ''}`} />
+            </button>
           </div>
           <TierLegend slots={slots} />
         </div>

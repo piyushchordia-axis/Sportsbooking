@@ -74,8 +74,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sportsbooking/shared build
-      # Drizzle (not Prisma): db:push applies the schema, the RLS GUC functions +
-      # policies, and the restricted runtime role in one step.
+      # Drizzle (not Prisma): db:push applies the schema, the RLS GUC functions,
+      # and the policy bodies in one step.
       - run: pnpm --filter @sportsbooking/api db:push
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium

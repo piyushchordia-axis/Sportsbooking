@@ -47,8 +47,6 @@ if [ "${MIGRATE:-0}" = "1" ]; then
   # column/table rename isn't silently dropped.
   echo "==> Applying schema + RLS (db:push)"
   ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate"
-  echo "==> Rotating runtime DB role password to match DATABASE_URL"
-  ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate pnpm db:set-app-password"
 fi
 
 if [ "${SEED:-0}" = "1" ]; then

@@ -8,9 +8,10 @@
 #   api (nest)   -> 127.0.0.1:3001  /api, connects to host Postgres @127.0.0.1:5432
 #   migrate      -> one-off: applies schema + RLS (db:push) and seeds (profile)
 #
-# Host networking is what lets the restricted `sportsbooking_app` role connect at
-# all (the socket peer-maps only the admin role), so RLS stays enforced. Both
-# services bind 127.0.0.1 only — nothing is exposed to the internet directly.
+# Host networking lets the containers reach host Postgres over 127.0.0.1:5432
+# (password auth). The API connects as the admin/owner role; RLS is enabled but
+# not forced, so the owner bypasses it and tenant isolation is enforced in app
+# code. Both services bind 127.0.0.1 only — nothing is exposed to the internet.
 # Redis is intentionally absent — the app doesn't use it (Throttler is in-memory).
 #
 # Usage:
@@ -60,10 +61,9 @@ services:
       - api
 
   # One-off schema/RLS apply + optional seed. Reuses the api image; runs as the
-  # ADMIN role (DATABASE_ADMIN_URL) which db:push needs for DDL + role creation.
-  #   db:push             -> GUC funcs + schema + RLS policies + restricted role
-  #   db:set-app-password -> rotate the runtime role pw to match DATABASE_URL
-  #   db:seed             -> demo data (override the command)
+  # ADMIN role (DATABASE_ADMIN_URL) which db:push needs for DDL.
+  #   db:push -> GUC funcs + schema + RLS enablement + policy bodies
+  #   db:seed -> demo data (override the command)
   migrate:
     image: sportsbooking-api:latest
     build:

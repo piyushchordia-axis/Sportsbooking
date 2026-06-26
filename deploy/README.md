@@ -18,9 +18,9 @@ Nginx — the same pattern as the other apps on this host.
 
 - **No Redis** — the app doesn't use it.
 - **Host networking** — both containers run on the host net and bind `127.0.0.1`
-  only (nothing public). This lets the restricted `sportsbooking_app` role reach
-  Postgres on `127.0.0.1:5432` with password auth, so **RLS stays enforced** (the
-  socket route peer-maps only the admin role).
+  only (nothing public). This lets the API reach Postgres on `127.0.0.1:5432` with
+  password auth as the admin/owner role. RLS is enabled but not forced, so the
+  owner bypasses it; tenant isolation is enforced in app code by ownerId.
 - **TLS + the subdomain** are owned by the host Nginx (Certbot), not the containers.
 
 ## Files
@@ -35,20 +35,21 @@ Nginx — the same pattern as the other apps on this host.
 
 ## One-time setup (on the server)
 
-1. **Database + roles.** As a Postgres admin, create the app database and the
-   admin/owner role (the restricted `sportsbooking_app` runtime role is created
-   automatically by `db:push`):
+1. **Database + role.** As a Postgres admin, create the app database and the
+   admin/owner role the API runs as (`db:push` applies the schema, RLS functions
+   and policy bodies — it does not create a separate runtime role):
    ```sql
    CREATE ROLE sportline_admin LOGIN PASSWORD '<admin-pw>' CREATEROLE;
    CREATE DATABASE sportsbooking OWNER sportline_admin;
    ```
-   The runtime role password must match `DATABASE_URL` in `.env`
-   (default name `sportsbooking_app`, set in `apps/api/src/db/role-setup.sql`).
+   Both `DATABASE_URL` and `DATABASE_ADMIN_URL` in `.env` point at this owner role.
+   RLS is enabled but not forced, so the owner bypasses it and tenant isolation is
+   enforced in app code by ownerId/customerId.
 
 2. **`.env`.** On the server, in the app dir:
    ```bash
    cp .env.production.example .env
-   # fill DATABASE_URL (sportsbooking_app), DATABASE_ADMIN_URL (sportline_admin),
+   # fill DATABASE_URL + DATABASE_ADMIN_URL (both = sportline_admin),
    # JWT_SECRET (openssl rand -base64 48), WEB_ORIGIN, WEB_PORT,
    # STORAGE_LOCAL_BASE_URL (https://SUBDOMAIN/uploads),
    # and SMS: NOTIFICATION_DRIVER=live + SMS_API_URL (+ SMS_API_KEY)
@@ -57,10 +58,6 @@ Nginx — the same pattern as the other apps on this host.
    with the default `log` driver (the OTP would silently never arrive). To bring
    the console up first without SMS, set `ALLOW_NO_SMS=true` (player OTP login
    stays disabled until you configure a gateway).
-
-   The restricted runtime role's password is rotated to match `DATABASE_URL`
-   automatically by `db:set-app-password` (run after `db:push` in `deploy.sh`),
-   so the weak bootstrap default from `role-setup.sql` is never the live secret.
 
 3. **DNS.** Point `SUBDOMAIN.enaacreations.com` (A record) at the server.
 

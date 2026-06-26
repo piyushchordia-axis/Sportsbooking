@@ -11,8 +11,8 @@ export default defineConfig({
   schema: './src/db/schema.ts',
   out: './drizzle',
   dbCredentials: {
-    // Schema changes (push/generate/studio) are DDL — use the ADMIN role, not
-    // the restricted runtime role. Falls back to DATABASE_URL if admin is unset.
+    // Schema changes (push/generate/studio) are DDL — use the ADMIN role.
+    // Falls back to DATABASE_URL if DATABASE_ADMIN_URL is unset.
     url: process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL ?? '',
   },
   // Manage RLS policies declared in the schema (pgPolicy/enableRLS).

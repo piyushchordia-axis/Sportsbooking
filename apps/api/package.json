@@ -14,7 +14,6 @@
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
     "db:push": "ts-node scripts/db-push.ts",
-    "db:set-app-password": "ts-node scripts/set-app-role-password.ts",
     "db:seed": "ts-node src/db/seed.ts"
   },
   "dependencies": {

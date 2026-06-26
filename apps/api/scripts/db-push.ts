@@ -5,10 +5,11 @@
  * functions app_current_owner_id() / app_bypass_rls(). On a fresh database
  * those functions do not exist yet, so `drizzle-kit push` would fail. We first
  * run src/db/rls-setup.sql to create the functions, then spawn drizzle-kit push
- * so the schema, RLS enablement, and policies all apply together. Finally we run
- * src/db/role-setup.sql to (idempotently) create the restricted runtime role and
- * grant it on the freshly-created tables — so one command sets up a fresh DB:
- * GUC functions -> schema + RLS -> app role + grants.
+ * so the schema, RLS enablement, and policies all apply together. Finally we
+ * re-apply src/db/rls-policies.sql so the policy bodies match — one command sets
+ * up a fresh DB: GUC functions -> schema + RLS -> policy bodies. The app connects
+ * as the admin/owner role, which bypasses non-forced RLS; tenant isolation is
+ * enforced in app code by ownerId/customerId, so no runtime role is created.
  */
 import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
@@ -57,33 +58,19 @@ async function main(): Promise<void> {
 
   // drizzle-kit push creates each pgPolicy as a SHELL but drops the sql-template
   // USING/WITH CHECK body, so RLS-enabled tables would default-deny. Re-apply the
-  // real policy predicates from rls-policies.sql, then create the restricted
-  // runtime role + grants (idempotent) so the app (DATABASE_URL) works under RLS.
+  // real policy predicates from rls-policies.sql. The app connects as the
+  // admin/owner role, which bypasses (non-forced) RLS — tenant isolation rests on
+  // the app-code ownerId/customerId filtering, so no dedicated runtime role is
+  // created here.
   const rlsPoliciesSql = readFileSync(
     join(__dirname, '..', 'src', 'db', 'rls-policies.sql'),
     'utf8',
   );
-  // SKIP_APP_ROLE=true runs the app as the admin/owner role (RLS bypassed for
-  // the table owner) instead of the restricted runtime role — used when the
-  // admin role lacks CREATEROLE. Tenant isolation then rests on the app-code
-  // ownerId/customerId filtering. Skips creating sportsbooking_app + its grants.
-  const skipAppRole = process.env.SKIP_APP_ROLE === 'true';
-  const roleSetupSql = skipAppRole
-    ? ''
-    : readFileSync(join(__dirname, '..', 'src', 'db', 'role-setup.sql'), 'utf8');
   const adminClient = new Client({ connectionString: databaseUrl });
   await adminClient.connect();
   try {
     console.log('Applying RLS policy bodies (src/db/rls-policies.sql)...');
     await adminClient.query(rlsPoliciesSql);
-    if (skipAppRole) {
-      console.log(
-        'SKIP_APP_ROLE=true — skipping the restricted runtime role; the app runs as the admin/owner role (RLS bypassed for the owner).',
-      );
-    } else {
-      console.log('Applying runtime role + grants (src/db/role-setup.sql)...');
-      await adminClient.query(roleSetupSql);
-    }
   } finally {
     await adminClient.end();
   }

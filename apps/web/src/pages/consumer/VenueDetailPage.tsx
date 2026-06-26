@@ -6,7 +6,7 @@ import {
   SlotStatus,
   UserRole,
 } from '@sportsbooking/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -33,6 +33,7 @@ import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
 import { useAuth } from '../../auth/AuthContext';
 import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 import { label } from '../../lib/labels';
+import { logClientError, logClientEvent } from '../../lib/telemetry';
 
 /**
  * Confirm a prepay booking's Razorpay payment server-side. The `api` client has
@@ -63,11 +64,46 @@ async function confirmPayment(
   }
 }
 
+/**
+ * Confirm a paid Razorpay order with a short retry-with-backoff. The payment has
+ * already been captured by the gateway, so a dropped/flaky confirm POST must not
+ * silently lose the booking — we retry a few times before surfacing the failure
+ * (BOOK-4 mitigation). Rethrows the last error if every attempt fails.
+ */
+async function confirmPaymentWithRetry(
+  bookingId: string,
+  body: {
+    razorpayOrderId: string;
+    razorpayPaymentId: string;
+    razorpaySignature: string;
+  },
+  attempts = 3,
+): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await confirmPayment(bookingId, body);
+      return;
+    } catch (e) {
+      lastErr = e;
+      // Backoff before the next attempt (skip the wait after the final try).
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** Booking confirmation surfaced once an order is created/paid. */
 interface Confirmation {
   id: string;
   total: number;
   status: string;
+  /** Money collected online (deposit or full); the rest is due at the venue. */
+  amountPaidOnline?: number;
+  /** Balance still owed at the venue for a deposit booking (0 otherwise). */
+  amountDueAtVenue?: number;
   /** Present only when a weekly series was created (PRD §5.2). */
   series?: { created: number; skipped: number };
 }
@@ -150,8 +186,21 @@ export function VenueDetailPage() {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  /** Pay mode the guest committed to before logging in, replayed post-verify. */
-  const [pendingPay, setPendingPay] = useState<PayMode | null>(null);
+  // MOB-1) In-flight guard for the booking/checkout handler, separate from the
+  // OTP-only `busy` flag, so a mobile double-tap on Prepay / Pay-at-venue can't
+  // fire two POST /bookings.
+  const [submitting, setSubmitting] = useState(false);
+  // BOOK-1) Idempotency key for the CURRENT checkout attempt. Generated once per
+  // attempt and held stable across retries (so the server dedupes a retried
+  // booking), then cleared on success/abandon so the next attempt gets a fresh
+  // key.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  /** Pay mode + plan the guest committed to before logging in, replayed
+   *  post-verify so a deposit checkout resumes correctly after OTP. */
+  const [pendingPay, setPendingPay] = useState<{
+    payMode: PayMode;
+    paymentPlan: 'full' | 'deposit';
+  } | null>(null);
 
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -371,6 +420,15 @@ export function VenueDetailPage() {
   const total = Math.max(subtotal - packDiscount - offerDiscount - pointsValue, 0);
   const savings = packDiscount + offerDiscount + pointsValue;
 
+  // Deposit split — the quote populates depositAmount/balanceDueAtVenue whenever
+  // the venue's depositPct>0 (independent of plan). A positive deposit that's
+  // genuinely a split (balance due > 0) unlocks the "Pay deposit now" option.
+  const depositAmount =
+    quote?.depositAmount != null ? Number(quote.depositAmount) : 0;
+  const balanceDueAtVenue =
+    quote?.balanceDueAtVenue != null ? Number(quote.balanceDueAtVenue) : 0;
+  const depositAvailable = depositAmount > 0 && balanceDueAtVenue > 0;
+
   // Fetch the server price preview when the cart/extras change (logged-in only,
   // non-empty cart). Debounced so dragging the stepper doesn't spam the API.
   // pointsToRedeem is sent as 0 — the slider applies points locally; the booking
@@ -443,10 +501,25 @@ export function VenueDetailPage() {
     [slots, selected],
   );
 
-  /** Create the booking + run prepay/Razorpay or pay-at-venue. Assumes auth. */
-  const createBooking = async (payMode: PayMode) => {
+  /**
+   * Create the booking + run prepay/Razorpay or pay-at-venue. Assumes auth.
+   * `paymentPlan='deposit'` (PREPAY only) charges just the venue's deposit % now
+   * and leaves the balance due at the venue.
+   */
+  const createBooking = async (
+    payMode: PayMode,
+    paymentPlan: 'full' | 'deposit' = 'full',
+  ) => {
     if (!venue) return;
+    // MOB-1) Guard against a double-tap firing a second POST /bookings.
+    if (submitting) return;
+    setSubmitting(true);
     setMsg(null);
+    // BOOK-1) One idempotency key per checkout attempt, stable across retries.
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+    const idempotencyKey = idempotencyKeyRef.current;
     // PRD §5.2) Weekly recurrence is only valid for AT_VENUE; never attach it
     // to a prepay order (the backend rejects that combination).
     const recurrence =
@@ -458,6 +531,8 @@ export function VenueDetailPage() {
         venueId: venue.id,
         slots: cart,
         payMode,
+        // Deposit split (PREPAY only) — 'full' leaves prepay behaviour unchanged.
+        paymentPlan: payMode === PayMode.PREPAY ? paymentPlan : undefined,
         // PRD-5) Chosen extras (with quantity) travel with every booking.
         addons: addonItems.length ? addonItems : undefined,
         // Logged-in-only extras — guests just verified send none.
@@ -465,16 +540,28 @@ export function VenueDetailPage() {
         offerCode: appliedOffer || undefined,
         pointsToRedeem: points || undefined,
         recurrence,
+        idempotencyKey,
       });
 
       // Production prepay: a live Razorpay key + server-issued order id opens the
       // hosted checkout and confirms server-side. In dev (no key) razorpayEnabled
       // is false, so we fall through to the mock-payment behaviour unchanged.
       if (payMode === PayMode.PREPAY && razorpayEnabled && res.razorpayOrderId) {
+        // The gateway must charge only the money collected online — the deposit
+        // for a deposit booking, the full total otherwise. amountPaidOnline is
+        // serialized as a string; fall back to total for legacy/full prepay.
+        const onlinePaise =
+          res.amountPaidOnline != null
+            ? Math.round(Number(res.amountPaidOnline) * 100)
+            : Math.round(res.total * 100);
+        const dueAtVenue =
+          res.amountDueAtVenue != null ? Number(res.amountDueAtVenue) : 0;
+        const paidOnline =
+          res.amountPaidOnline != null ? Number(res.amountPaidOnline) : res.total;
         setMsg('Opening secure payment…');
         await openCheckout({
           orderId: res.razorpayOrderId,
-          amount: Math.round(res.total * 100),
+          amount: onlinePaise,
           name: venue.name,
           prefill: { contact: mobile || user?.mobile, name: name || user?.name },
           onSuccess: async ({
@@ -483,21 +570,60 @@ export function VenueDetailPage() {
             razorpay_signature,
           }) => {
             try {
-              await confirmPayment(res.id, {
+              // BOOK-4) The gateway has already captured the payment — retry the
+              // confirm so a flaky network call doesn't drop a paid booking.
+              await confirmPaymentWithRetry(res.id, {
                 razorpayOrderId: razorpay_order_id,
                 razorpayPaymentId: razorpay_payment_id,
                 razorpaySignature: razorpay_signature,
               });
               setMsg(null);
-              setConfirmation({ id: res.id, total: res.total, status: 'paid' });
+              setConfirmation({
+                id: res.id,
+                total: res.total,
+                status: dueAtVenue > 0 ? 'awaiting_venue_settlement' : 'paid',
+                amountPaidOnline: paidOnline,
+                amountDueAtVenue: dueAtVenue,
+              });
               setSelected(new Set());
+              // Successful attempt — start the next one with a fresh key.
+              idempotencyKeyRef.current = null;
               flash('Booking confirmed');
+              logClientEvent('booking_prepay_confirmed', { bookingId: res.id });
               await refreshSlots();
             } catch (e) {
-              setMsg((e as Error).message);
+              // Payment captured but the confirm never landed — make the money
+              // visible to the user and capture it for follow-up rather than
+              // failing silently.
+              setMsg(
+                'Payment received — we’re finalizing your booking. If it doesn’t appear in My bookings shortly, contact support with your payment id.',
+              );
+              logClientError(e, {
+                stage: 'confirm_payment',
+                bookingId: res.id,
+                razorpayPaymentId: razorpay_payment_id,
+              });
+            } finally {
+              setSubmitting(false);
             }
           },
+          onDismiss: () => {
+            // The user closed checkout without paying — clear the "opening…"
+            // message and let them retry. Keep the same idempotency key so a
+            // retry of this attempt still dedupes server-side.
+            setMsg('Payment cancelled. You can try again.');
+            logClientEvent('booking_prepay_dismissed', { bookingId: res.id });
+            setSubmitting(false);
+          },
+          onFailure: (error) => {
+            setMsg(
+              `Payment failed${error.description ? ` — ${error.description}` : ''}. Please try again.`,
+            );
+            logClientError(error, { stage: 'razorpay_failed', bookingId: res.id });
+            setSubmitting(false);
+          },
         });
+        // The submitting flag is cleared by the checkout callbacks above.
         return;
       }
 
@@ -506,15 +632,24 @@ export function VenueDetailPage() {
         id: res.id,
         total: res.total,
         status: res.paymentStatus,
+        amountPaidOnline:
+          res.amountPaidOnline != null ? Number(res.amountPaidOnline) : undefined,
+        amountDueAtVenue:
+          res.amountDueAtVenue != null ? Number(res.amountDueAtVenue) : undefined,
         series: res.series
           ? { created: res.series.created, skipped: res.series.skipped.length }
           : undefined,
       });
       setSelected(new Set());
+      // Successful attempt — start the next one with a fresh key.
+      idempotencyKeyRef.current = null;
       flash('Booking confirmed');
       await refreshSlots();
+      setSubmitting(false);
     } catch (e) {
       setMsg((e as Error).message);
+      logClientError(e, { stage: 'create_booking', venueId: venue.id });
+      setSubmitting(false);
     }
   };
 
@@ -523,13 +658,16 @@ export function VenueDetailPage() {
    * otherwise open the inline OTP step and remember the chosen pay mode so we
    * can resume the booking the moment they verify.
    */
-  const checkout = (payMode: PayMode) => {
+  const checkout = (
+    payMode: PayMode,
+    paymentPlan: 'full' | 'deposit' = 'full',
+  ) => {
     if (!selected.size) return;
     if (user) {
-      void createBooking(payMode);
+      void createBooking(payMode, paymentPlan);
       return;
     }
-    setPendingPay(payMode);
+    setPendingPay({ payMode, paymentPlan });
     setOtpOpen(true);
     setMsg(null);
   };
@@ -578,9 +716,9 @@ export function VenueDetailPage() {
       // Resume the booking the guest committed to before logging in. The session
       // token is now set, so createBooking() authenticates correctly.
       if (pendingPay) {
-        const mode = pendingPay;
+        const { payMode, paymentPlan } = pendingPay;
         setPendingPay(null);
-        await createBooking(mode);
+        await createBooking(payMode, paymentPlan);
       }
     } catch (e) {
       setMsg((e as Error).message);
@@ -697,6 +835,24 @@ export function VenueDetailPage() {
               {flMoney(confirmation.total)}
             </span>
           </div>
+
+          {/* Deposit split — show what was paid online vs what's owed at venue. */}
+          {confirmation.amountDueAtVenue != null && confirmation.amountDueAtVenue > 0 && (
+            <div className="px-4 py-4" style={{ borderTop: '1px solid var(--line)' }}>
+              <div className="flex items-center justify-between text-[13px]">
+                <span style={{ color: 'var(--muted)' }}>Paid online</span>
+                <span className="fl-mono font-semibold tabular-nums" style={{ color: 'var(--brand)' }}>
+                  {flMoney(confirmation.amountPaidOnline ?? 0)}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[13px]">
+                <span style={{ color: 'var(--muted)' }}>Due at venue</span>
+                <span className="fl-mono font-semibold tabular-nums" style={{ color: 'var(--chalk)' }}>
+                  {flMoney(confirmation.amountDueAtVenue)}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {confirmation.series && (
@@ -1219,12 +1375,12 @@ export function VenueDetailPage() {
                   <button
                     type="button"
                     onClick={() => !repeatWeekly && checkout(PayMode.PREPAY)}
-                    disabled={!selected.size || repeatWeekly}
+                    disabled={!selected.size || repeatWeekly || submitting}
                     title={repeatWeekly ? 'Weekly bookings are pay-at-venue only' : undefined}
                     className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
                     style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
                   >
-                    <div className="text-sm font-semibold">Prepay</div>
+                    <div className="text-sm font-semibold">{submitting ? 'Booking…' : 'Prepay'}</div>
                     <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
                       Razorpay · slot locked
                     </div>
@@ -1232,16 +1388,44 @@ export function VenueDetailPage() {
                   <button
                     type="button"
                     onClick={() => checkout(PayMode.AT_VENUE)}
-                    disabled={!selected.size}
+                    disabled={!selected.size || submitting}
                     className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
                     style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
                   >
-                    <div className="text-sm font-semibold">Pay at venue</div>
+                    <div className="text-sm font-semibold">{submitting ? 'Booking…' : 'Pay at venue'}</div>
                     <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
                       Settle on arrival
                     </div>
                   </button>
                 </div>
+
+                {/* Deposit split — only when the venue offers a partial deposit
+                    and the cart actually splits (balance due > 0). Weekly is
+                    pay-at-venue only, so it's hidden while Repeat is on. */}
+                {depositAvailable && !repeatWeekly && (
+                  <button
+                    type="button"
+                    onClick={() => checkout(PayMode.PREPAY, 'deposit')}
+                    disabled={!selected.size || submitting}
+                    className="mt-2 w-full rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      background: 'color-mix(in oklab, var(--brand) 12%, var(--surface))',
+                      border: '1px solid var(--brand)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold" style={{ color: 'var(--brand)' }}>
+                        {submitting ? 'Booking…' : 'Pay deposit now'}
+                      </div>
+                      <span className="fl-mono text-sm font-bold tabular-nums" style={{ color: 'var(--brand)' }}>
+                        {flMoney(depositAmount)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px]" style={{ color: 'var(--muted)' }}>
+                      Pay {flMoney(depositAmount)} now, {flMoney(balanceDueAtVenue)} at venue
+                    </div>
+                  </button>
+                )}
                 {!otpOpen && (
                   <p className="fl-mono mt-3 text-center text-[11px]" style={{ color: 'var(--faint)' }}>
                     {user

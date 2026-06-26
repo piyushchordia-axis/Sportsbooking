@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CreditCard, RefreshCw, Sparkles, Ticket } from 'lucide-react';
 import { api, DiscoverVenue, Pack, WalletSummary } from '../../api/client';
 import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
-import { useFloodlitToast } from '../../floodlit/toast';
+import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 import { Skeleton } from '../../components/ui/skeleton';
 
 /**
@@ -84,6 +84,53 @@ function Kicker({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * PACK-6) Human-readable labels for the raw ledger enum (LedgerTxnType). Unknown
+ * types fall back to a de-snake-cased title so the row never shows a bare enum.
+ */
+const LEDGER_LABELS: Record<string, string> = {
+  pack_buy: 'Pack purchased',
+  pack_debit: 'Session used',
+  pack_refund: 'Session refunded',
+  points_earn: 'Points earned',
+  points_redeem: 'Points redeemed',
+  referral_reward: 'Referral reward',
+  no_show_fee: 'No-show fee',
+  cash_refund: 'Refund',
+  open_match_settle: 'Open match settled',
+  pack_expire: 'Pack expired',
+};
+
+const ledgerLabel = (type: string): string =>
+  LEDGER_LABELS[type] ??
+  type
+    .split('_')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+
+/** PACK-5) Human-readable one-liner for a pack's pricing mode. */
+const pricingLabel = (p: Pack): string => {
+  if (p.pricingMode === 'discount') {
+    const pct = p.discountPct == null ? null : Number(p.discountPct);
+    return pct ? `${pct}% off sessions` : 'Discounted sessions';
+  }
+  if (p.pricingMode === 'flat') {
+    const rate = p.flatRate == null ? null : Number(p.flatRate);
+    return rate ? `${flMoney(rate)} per session` : 'Flat-rate sessions';
+  }
+  return p.pricingMode;
+};
+
+/** PACK-5) Human-readable one-liner for a pack's validity / expiry policy. */
+const expiryLabel = (p: Pack): string => {
+  const days = p.validityDays == null ? null : Number(p.validityDays);
+  if (!days) return 'No expiry';
+  const window = `Valid ${days} day${days === 1 ? '' : 's'}`;
+  if (p.expiryMode === 'forfeit') return `${window} · unused sessions forfeited`;
+  if (p.expiryMode === 'rollover') return `${window} · unused sessions roll over`;
+  return window;
+};
+
 /** Customer wallet: pack balances, points, credit + buy packs (PRD §5.1). */
 export function WalletPage() {
   const { flash } = useFloodlitToast();
@@ -91,6 +138,9 @@ export function WalletPage() {
   const [ownerId, setOwnerId] = useState('');
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
+  // PACK-1fe) The pack id currently being purchased — disables its Buy button so
+  // a double-tap can't fire two purchases.
+  const [buying, setBuying] = useState<string | null>(null);
 
   // Owner-list load (drives the whole page) — tracked so a failed discover call
   // shows a visible error + retry instead of a blank page.
@@ -134,6 +184,8 @@ export function WalletPage() {
   useEffect(() => load(ownerId), [ownerId, load]);
 
   const buy = async (packId: string) => {
+    if (buying) return;
+    setBuying(packId);
     try {
       const res = await api.purchasePack(ownerId, packId);
 
@@ -153,17 +205,7 @@ export function WalletPage() {
           onSuccess: async (sig) => {
             try {
               // Confirm the purchase with the verified Razorpay signature.
-              const confirmed = await (
-                api.purchasePack as unknown as (
-                  ownerId: string,
-                  packId: string,
-                  payment: {
-                    razorpayOrderId: string;
-                    razorpayPaymentId: string;
-                    razorpaySignature: string;
-                  },
-                ) => Promise<typeof res>
-              )(ownerId, packId, {
+              const confirmed = await api.purchasePack(ownerId, packId, {
                 razorpayOrderId: sig.razorpay_order_id,
                 razorpayPaymentId: sig.razorpay_payment_id,
                 razorpaySignature: sig.razorpay_signature,
@@ -174,16 +216,22 @@ export function WalletPage() {
               load(ownerId);
             } catch (e) {
               flash((e as Error).message);
+            } finally {
+              setBuying(null);
             }
           },
+          // Modal closed without paying — re-enable the Buy button.
+          onDismiss: () => setBuying(null),
         });
         return;
       }
 
       flash(`Purchased — ${res.sessionsAdded} sessions added (balance ${res.balance}).`);
       load(ownerId);
+      setBuying(null);
     } catch (e) {
       flash((e as Error).message);
+      setBuying(null);
     }
   };
 
@@ -360,25 +408,29 @@ export function WalletPage() {
                       {p.name}
                     </div>
                     <div className="mt-0.5" style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                      {p.sessions} sessions · {p.pricingMode}
+                      {p.sessions} sessions · {pricingLabel(p)}
+                    </div>
+                    <div className="mt-0.5" style={{ fontSize: '11.5px', color: 'var(--faint)' }}>
+                      {expiryLabel(p)}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="fl-mono" style={{ fontSize: '17px', fontWeight: 600 }}>
-                      ₹{p.price}
+                      {flMoney(Number(p.price))}
                     </div>
                     <button
                       onClick={() => buy(p.id)}
-                      className="mt-1.5 rounded-lg px-4 py-1.5 font-bold"
+                      disabled={buying !== null}
+                      className="mt-1.5 rounded-lg px-4 py-1.5 font-bold disabled:opacity-50"
                       style={{
                         background: 'var(--brand)',
                         color: 'var(--on-brand)',
                         border: 'none',
                         fontSize: '12px',
-                        cursor: 'pointer',
+                        cursor: buying !== null ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      Buy
+                      {buying === p.id ? 'Buying…' : 'Buy'}
                     </button>
                   </div>
                 </div>
@@ -415,7 +467,7 @@ export function WalletPage() {
                 >
                   <div className="flex-1 min-w-0 pr-3">
                     <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--chalk)' }}>
-                      {h.type}
+                      {ledgerLabel(h.type)}
                     </div>
                     <div
                       className="mt-0.5 truncate"

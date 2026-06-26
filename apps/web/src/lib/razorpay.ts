@@ -25,6 +25,15 @@ export interface RazorpaySuccess {
   razorpay_signature: string;
 }
 
+/** Error payload Razorpay emits on `payment.failed`. */
+export interface RazorpayFailure {
+  code?: string;
+  description?: string;
+  reason?: string;
+  step?: string;
+  source?: string;
+}
+
 export interface OpenCheckoutOptions {
   /** Razorpay order id returned by our booking API. */
   orderId: string;
@@ -36,11 +45,19 @@ export interface OpenCheckoutOptions {
   prefill?: { name?: string; email?: string; contact?: string };
   /** Called with the verification ids once the payment succeeds. */
   onSuccess: (result: RazorpaySuccess) => void;
+  /** Called when the customer closes the modal without paying. */
+  onDismiss?: () => void;
+  /** Called when Razorpay reports a failed payment attempt. */
+  onFailure?: (error: RazorpayFailure) => void;
 }
 
 // Minimal shape of the global the CDN script installs on `window`.
+interface RazorpayInstance {
+  open: () => void;
+  on: (event: string, handler: (payload: unknown) => void) => void;
+}
 interface RazorpayConstructor {
-  new (options: Record<string, unknown>): { open: () => void };
+  new (options: Record<string, unknown>): RazorpayInstance;
 }
 declare global {
   interface Window {
@@ -90,6 +107,15 @@ export async function openCheckout(options: OpenCheckoutOptions): Promise<void> 
         razorpay_signature: response.razorpay_signature,
       });
     },
+    // The customer closed the checkout modal without completing payment.
+    modal: {
+      ondismiss: () => options.onDismiss?.(),
+    },
+  });
+  // Surface a failed payment attempt (gateway/bank decline, etc.) to the caller.
+  rzp.on('payment.failed', (payload: unknown) => {
+    const error = (payload as { error?: RazorpayFailure } | undefined)?.error ?? {};
+    options.onFailure?.(error);
   });
   rzp.open();
 }

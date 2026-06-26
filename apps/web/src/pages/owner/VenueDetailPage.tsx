@@ -2325,6 +2325,7 @@ function SettingsTab({
   const [cancellationTemplate, setCancellationTemplate] =
     useState<'flexible' | 'moderate' | 'strict'>('flexible');
   const [noShowFee, setNoShowFee] = useState('0');
+  const [depositPct, setDepositPct] = useState('');
   const [loyaltyEarnRate, setLoyaltyEarnRate] = useState('');
   const [loyaltyRedeemValue, setLoyaltyRedeemValue] = useState('');
   const [openMatchRepaymentMode, setOpenMatchRepaymentMode] =
@@ -2338,6 +2339,7 @@ function SettingsTab({
     setLoaded(true);
     setCancellationTemplate(s.cancellationTemplate);
     setNoShowFee(String(s.noShowFee ?? 0));
+    setDepositPct(s.depositPct == null ? '' : String(s.depositPct));
     setLoyaltyEarnRate(s.loyaltyEarnRate == null ? '' : String(s.loyaltyEarnRate));
     setLoyaltyRedeemValue(s.loyaltyRedeemValue == null ? '' : String(s.loyaltyRedeemValue));
     setOpenMatchRepaymentMode(s.openMatchRepaymentMode);
@@ -2351,9 +2353,12 @@ function SettingsTab({
     try {
       const earn = loyaltyEarnRate.trim();
       const redeem = loyaltyRedeemValue.trim();
+      const dep = depositPct.trim();
       await api.updateVenueSettings(v.id, {
         cancellationTemplate,
         noShowFee: Math.max(0, Number(noShowFee) || 0),
+        // Blank → null clears the deposit (full prepay); otherwise clamp to 0..100.
+        depositPct: dep === '' ? null : Math.min(100, Math.max(0, Number(dep) || 0)),
         ...(earn === '' ? {} : { loyaltyEarnRate: Math.max(0, Number(earn) || 0) }),
         ...(redeem === '' ? {} : { loyaltyRedeemValue: Math.max(0, Number(redeem) || 0) }),
         openMatchRepaymentMode,
@@ -2406,6 +2411,18 @@ function SettingsTab({
           value={noShowFee}
           onChange={setNoShowFee}
         />
+
+        <Field
+          label="Deposit % (online)"
+          type="number"
+          value={depositPct}
+          onChange={setDepositPct}
+          placeholder="Blank = full prepay"
+        />
+        <p className="-mt-2 mb-3 text-xs text-muted-foreground">
+          Charge only this percentage online at checkout, with the balance due at
+          the venue. Leave blank (or 0) to take the full amount up front.
+        </p>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field

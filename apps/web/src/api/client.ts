@@ -98,6 +98,16 @@ export interface Pack {
   pricingMode: string;
   discountPct: string | number | null;
   expiryMode: string;
+  /** Days from purchase before sessions expire; null = no validity window. */
+  validityDays?: number | null;
+  /** Per-session rate/cap applied when pricingMode = flat; null = unset. */
+  flatRate?: string | number | null;
+  /** Venue scope; empty = all venues. */
+  venueIds?: string[] | null;
+  /** Court (unit) scope; empty = all courts. */
+  unitIds?: string[] | null;
+  /** Whether the pack is available for purchase. */
+  active?: boolean;
 }
 
 export interface WalletSummary {
@@ -208,6 +218,8 @@ export interface VenueSettings {
   venueId: string;
   cancellationTemplate: 'flexible' | 'moderate' | 'strict';
   noShowFee: number;
+  /** Deposit percentage (0..100) charged online; null/0 = full prepay. */
+  depositPct?: number | null;
   /** Per-venue override; null = use owner default. */
   loyaltyEarnRate: number | null;
   /** Per-venue override; null = use owner default. */
@@ -225,6 +237,7 @@ export interface VenueSettings {
 export interface VenueSettingsInput {
   cancellationTemplate?: 'flexible' | 'moderate' | 'strict';
   noShowFee?: number;
+  depositPct?: number | null;
   loyaltyEarnRate?: number;
   loyaltyRedeemValue?: number;
   openMatchRepaymentMode?: OpenMatchRepaymentMode;
@@ -627,6 +640,7 @@ export interface VenueDetailSettings {
   venueId: string;
   cancellationTemplate: 'flexible' | 'moderate' | 'strict';
   noShowFee: string | number;
+  depositPct?: string | number | null;
   loyaltyEarnRate: string | number | null;
   loyaltyRedeemValue: string | number | null;
   openMatchRepaymentMode: OpenMatchRepaymentMode;
@@ -1039,9 +1053,18 @@ export const api = {
    *  for the "use pack" picker (only redeemable packs). */
   listOwnedPacks: (ownerId: string) =>
     get<OwnedPack[]>(`/owners/${ownerId}/packs/owned`),
-  purchasePack: (ownerId: string, packId: string) =>
+  purchasePack: (
+    ownerId: string,
+    packId: string,
+    payment?: {
+      razorpayOrderId: string;
+      razorpayPaymentId: string;
+      razorpaySignature: string;
+    },
+  ) =>
     post<{ packId: string; sessionsAdded: number; balance: number }>(
       `/owners/${ownerId}/packs/${packId}/purchase`,
+      payment,
     ),
   wallet: (ownerId: string) => get<WalletSummary>(`/owners/${ownerId}/wallet`),
   referralCode: (ownerId: string) => get<{ code: string }>(`/referral/code/${ownerId}`),

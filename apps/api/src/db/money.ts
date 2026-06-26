@@ -25,3 +25,22 @@ export function money(d: Decimal): string {
 export function num(v: string | null): number {
   return v === null ? 0 : Number(v);
 }
+
+/**
+ * Split a total into the deposit charged online now and the balance due at the
+ * venue, given a deposit percentage (0..100). The deposit is `total * pct / 100`
+ * rounded HALF_UP to 2dp (matching the cancellationFee rounding pattern); the
+ * balance is `total - deposit` and is NEVER rounded independently, so deposit +
+ * balance sum back to total exactly.
+ */
+export function splitDeposit(
+  total: Decimal,
+  pct: Decimal | number,
+): { deposit: Decimal; balance: Decimal } {
+  const deposit = total
+    .mul(dec(pct))
+    .div(100)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  const balance = total.sub(deposit);
+  return { deposit, balance };
+}

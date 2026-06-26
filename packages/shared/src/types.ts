@@ -129,6 +129,12 @@ export interface CreateBookingRequest {
   /** quantity-aware add-on selection (consumer flow; preferred). */
   addons?: AddonSelection[];
   payMode: PayMode;
+  /**
+   * Online payment plan, only meaningful when payMode='prepay'. 'full' (default)
+   * charges the whole total online; 'deposit' charges only the venue's
+   * configured deposit percentage online, with the balance due at the venue.
+   */
+  paymentPlan?: 'full' | 'deposit';
   packId?: string;
   offerCode?: string;
   pointsToRedeem?: number;
@@ -140,6 +146,12 @@ export interface CreateBookingRequest {
    * a `series` summary. Only supported for AT_VENUE pay mode.
    */
   recurrence?: BookingRecurrence;
+  /**
+   * Client-generated idempotency key for this checkout attempt (honored
+   * server-side). Stays stable across retries of the same attempt so a
+   * double-tap / retry never creates a duplicate booking.
+   */
+  idempotencyKey?: string;
 }
 
 /** Owner CRM directory row (PRD §4.9) — name/mobile sourced from the player
@@ -172,6 +184,10 @@ export interface BookingResponse {
   payMode: PayMode;
   paymentStatus: PaymentStatus;
   total: number;
+  /** money collected online at creation (serialized as string, like total) */
+  amountPaidOnline?: string;
+  /** money still due at the venue for a deposit booking (serialized as string) */
+  amountDueAtVenue?: string;
   lineItems: BookingLineItem[];
   razorpayOrderId?: string;
   /**
@@ -217,6 +233,13 @@ export interface BookingQuoteResponse {
   /** rupee value of the redeemed points */
   pointsValue: number;
   total: number;
+  /**
+   * Deposit preview, populated whenever the venue's depositPct>0 (independent of
+   * the chosen payment plan) so the UI can show "Pay X now, Y at venue".
+   * Serialized as string, like other money fields.
+   */
+  depositAmount?: string;
+  balanceDueAtVenue?: string;
 }
 
 /** A pack the customer actually OWNS with an owner — a positive, non-expired

@@ -267,6 +267,12 @@ export class SettingsDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @Max(100)
+  depositPct?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   loyaltyEarnRate?: number;
 
   @IsOptional()

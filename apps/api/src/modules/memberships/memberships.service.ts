@@ -102,6 +102,8 @@ export class MembershipsService {
                 dto.flatRate != null ? money(dec(dto.flatRate)) : null,
               venueIds: dto.venueIds ?? [],
               unitIds: dto.unitIds ?? [],
+              // Omit when undefined so the schema default (true) applies.
+              ...(dto.active !== undefined ? { active: dto.active } : {}),
             })
             .returning()
         )[0],
@@ -156,6 +158,7 @@ export class MembershipsService {
       }
       if (dto.venueIds !== undefined) data.venueIds = dto.venueIds;
       if (dto.unitIds !== undefined) data.unitIds = dto.unitIds;
+      if (dto.active !== undefined) data.active = dto.active;
 
       return (
         await tx
@@ -196,10 +199,18 @@ export class MembershipsService {
     });
   }
 
+  /**
+   * Owner-facing management list: returns ALL packs (active AND inactive). The
+   * owner must see deactivated packs to re-activate them — `deletePack` only
+   * flips `active=false` (packs are never hard-deleted because customers may
+   * hold session balances), so filtering by active here would strand them with
+   * no way back. Active packs sort first, newest within each group. The
+   * customer-facing purchase lists (listPacksForOwner / wallet) stay active-only.
+   */
   listPacks(user: RequestUser) {
     return this.db.withTenant((tx) =>
       tx.query.membershipPacks.findMany({
-        where: eq(membershipPacks.active, true),
+        orderBy: [desc(membershipPacks.active), desc(membershipPacks.createdAt)],
       }),
     );
   }
@@ -288,7 +299,39 @@ export class MembershipsService {
       throw new BadRequestException('Payment service unavailable');
     }
 
+    // 1) Resolve the Razorpay order (network call) BEFORE the tx so the gateway
+    // call doesn't hold the DB connection open (PERF, mirrors cancel()'s
+    // refund-before-tx pattern). We need the pack PRICE for the order amount, so
+    // do an RLS-bypass read here for that value only — the in-tx scoped fetch
+    // below remains the authoritative owner-scope/active check before crediting.
+    const packForOrder = await this.db.withTenantBypass((tx) =>
+      tx.query.membershipPacks.findFirst({
+        where: and(
+          eq(membershipPacks.id, packId),
+          eq(membershipPacks.ownerId, ownerId),
+        ),
+      }),
+    );
+    if (!packForOrder || !packForOrder.active)
+      throw new NotFoundException('Pack not found');
+    const receipt = `pack_${packId}_${customerId}`;
+    const order = await payments.createOrder(Number(packForOrder.price), receipt);
+
     return this.db.withTenantId(ownerId, async (tx) => {
+      // Serialize concurrent confirms for this customer + pack lane BEFORE the
+      // dedup SELECT below (SEC-1 / TOCTOU fix). The advisory lock inside
+      // ledger.post() only fires AFTER the dedup read, so without this two
+      // concurrent confirms with the same gatewayPaymentId would both pass the
+      // dedup check and both credit sessions (double credit). Taking the lock
+      // here — same key convention as ledger.service.ts — makes the second
+      // confirm wait for the first to commit, so it sees the first's PACK_BUY
+      // and dedups. The lock is xact-scoped and released on commit/rollback.
+      await tx.execute(sql`
+        SELECT pg_advisory_xact_lock(
+          hashtext(${customerId} || ':' || ${packLane(packId)})
+        )
+      `);
+
       // Owner scoping (defense-in-depth, mirrors SEC-4 in evaluatePack): the dev
       // DB connects as a superuser that BYPASSES RLS, and `ownerId` here comes
       // from a customer-supplied URL param, so a findUnique({ id }) would let a
@@ -302,9 +345,6 @@ export class MembershipsService {
       });
       if (!pack || !pack.active) throw new NotFoundException('Pack not found');
 
-      // 1) Create (or reuse) a Razorpay order for the pack PRICE.
-      const receipt = `pack_${packId}_${customerId}`;
-      const order = await payments.createOrder(Number(pack.price), receipt);
       const orderId = payment?.razorpayOrderId ?? order.id;
 
       // 2) Verify the payment BEFORE crediting any sessions. Track the effective

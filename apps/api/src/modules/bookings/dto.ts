@@ -87,6 +87,16 @@ export class CreateBookingDto {
   @IsEnum(PayMode)
   payMode!: PayMode;
 
+  /**
+   * Deposit/% split signal (only meaningful when payMode='prepay'): 'full'
+   * charges the whole total online (default, today's behaviour), 'deposit'
+   * charges only the venue's depositPct online and leaves the balance due at the
+   * venue. Rejected by the service when the venue has no depositPct configured.
+   */
+  @IsOptional()
+  @IsIn(['full', 'deposit'])
+  paymentPlan?: 'full' | 'deposit';
+
   @IsOptional()
   @IsUUID()
   packId?: string;

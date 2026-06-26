@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNumber,
@@ -48,6 +49,10 @@ export class CreatePackDto {
   @IsArray()
   @IsUUID('all', { each: true })
   unitIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
 }
 
 export class UpdatePackDto {
@@ -93,6 +98,10 @@ export class UpdatePackDto {
   @IsArray()
   @IsUUID('all', { each: true })
   unitIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
 }
 
 export class PurchasePackDto {

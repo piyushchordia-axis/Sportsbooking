@@ -59,6 +59,7 @@ import {
 const VENUE_SETTINGS_DEFAULTS = {
   cancellationTemplate: 'flexible' as const,
   noShowFee: 0,
+  depositPct: null,
   loyaltyEarnRate: null,
   loyaltyRedeemValue: null,
   openMatchRepaymentMode: OpenMatchRepaymentMode.INFO,
@@ -901,6 +902,10 @@ export class VenuesService {
         ? {
             cancellationTemplate: settings.cancellationTemplate,
             noShowFee: Number(settings.noShowFee),
+            depositPct:
+              settings.depositPct === null
+                ? null
+                : Number(settings.depositPct),
             loyaltyEarnRate:
               settings.loyaltyEarnRate === null
                 ? null
@@ -937,6 +942,7 @@ export class VenuesService {
       const writable: {
         cancellationTemplate?: string;
         noShowFee?: string;
+        depositPct?: string | null;
         loyaltyEarnRate?: string;
         loyaltyRedeemValue?: string;
         openMatchRepaymentMode?: OpenMatchRepaymentMode;
@@ -946,6 +952,10 @@ export class VenuesService {
       }
       if (dto.noShowFee !== undefined) {
         writable.noShowFee = money(new Decimal(dto.noShowFee));
+      }
+      if (dto.depositPct !== undefined) {
+        writable.depositPct =
+          dto.depositPct === null ? null : money(new Decimal(dto.depositPct));
       }
       if (dto.loyaltyEarnRate !== undefined) {
         writable.loyaltyEarnRate = new Decimal(dto.loyaltyEarnRate).toFixed(4);
@@ -969,6 +979,8 @@ export class VenuesService {
         venueId,
         cancellationTemplate: settings.cancellationTemplate,
         noShowFee: Number(settings.noShowFee),
+        depositPct:
+          settings.depositPct === null ? null : Number(settings.depositPct),
         loyaltyEarnRate:
           settings.loyaltyEarnRate === null
             ? null

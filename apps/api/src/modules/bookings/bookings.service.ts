@@ -35,7 +35,7 @@ import { DateTime } from 'luxon';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { customerSegments } from '../../db/segments';
-import { Decimal, dec, money } from '../../db/money';
+import { Decimal, dec, money, splitDeposit } from '../../db/money';
 import {
   addons as addonsTable,
   bookableUnits,
@@ -163,6 +163,11 @@ interface PriceBreakdown {
   pointsRedeemed: number;
   pointsValue: Decimal;
   total: Decimal;
+  /** the venue's configured deposit percentage (0 when null/unset). */
+  depositPct: Decimal;
+  /** deposit preview — populated whenever depositPct>0 (decision #10). */
+  depositAmount?: Decimal;
+  balanceDueAtVenue?: Decimal;
 }
 
 @Injectable()
@@ -220,12 +225,43 @@ export class BookingsService {
       );
     }
 
+    // Deposit guards (decision #9). A deposit plan only makes sense for a prepay
+    // booking against a venue that has configured a deposit percentage, and (like
+    // prepay) it is incompatible with recurrence. Reject up front with a clear
+    // 400 rather than silently falling back to full prepay.
+    if (dto.paymentPlan === 'deposit') {
+      if (dto.recurrence) {
+        throw new BadRequestException(
+          'Deposit bookings are not supported for recurring series. Please book a single slot or pay the full amount.',
+        );
+      }
+      const settings = await this.db.withTenantBypass((tx) =>
+        tx.query.venueSettings.findFirst({
+          where: eq(venueSettings.venueId, dto.venueId),
+        }),
+      );
+      const depositPct = settings?.depositPct ? dec(settings.depositPct) : dec(0);
+      if (!depositPct.greaterThan(0)) {
+        throw new BadRequestException(
+          'This venue does not offer deposit bookings. Please pay the full amount.',
+        );
+      }
+    }
+
     return this.db.withTenantId(ownerId, async (tx) => {
       if (dto.idempotencyKey) {
         const existing = await tx.query.bookings.findFirst({
           where: eq(bookings.idempotencyKey, dto.idempotencyKey),
         });
-        if (existing) return this.toResponse(existing, []);
+        // BOOK-2: carry the Razorpay order id on the idempotent retry too. The
+        // success path returns it (so the client can open checkout); without it
+        // a retried PREPAY booking looks 'confirmed' but unpaid — Razorpay can
+        // never be reopened and the slots stay held against an uncollected total.
+        if (existing)
+          return {
+            ...this.toResponse(existing, []),
+            razorpayOrderId: existing.razorpayOrderId ?? undefined,
+          };
       }
 
       const customerId = await this.resolveCustomer(tx, dto, user);
@@ -239,6 +275,10 @@ export class BookingsService {
           customerId,
           slotInputs: dto.slots,
           payMode: dto.payMode,
+          // BOOK-1: persist the client idempotency key on the single-booking
+          // path too, so a dropped-response retry hits the short-circuit above
+          // (returns the existing booking) instead of 409-ing on slot conflict.
+          idempotencyKey: dto.idempotencyKey,
         });
       }
 
@@ -335,6 +375,14 @@ export class BookingsService {
         pointsRedeemed: q.pointsRedeemed,
         pointsValue: q.pointsValue.toNumber(),
         total: q.total.toNumber(),
+        // Deposit preview (decision #10): only present when the venue configures
+        // a deposit. Serialized as a 2dp string like the other money columns.
+        ...(q.depositAmount && q.balanceDueAtVenue
+          ? {
+              depositAmount: money(q.depositAmount),
+              balanceDueAtVenue: money(q.balanceDueAtVenue),
+            }
+          : {}),
       };
     });
   }
@@ -486,6 +534,23 @@ export class BookingsService {
       dec(0),
     );
 
+    // 6. Deposit preview (decision #10). Split the FINAL total via the venue's
+    // depositPct (null/0 → no deposit configured). Computed independently of the
+    // chosen payment plan so the UI can show "Pay X now, Y at venue" before the
+    // customer picks. depositAmount/balanceDueAtVenue are left undefined when
+    // depositPct is 0 so a venue without deposits is unaffected.
+    const settings = await tx.query.venueSettings.findFirst({
+      where: eq(venueSettings.venueId, venue.id),
+    });
+    const depositPct = settings?.depositPct ? dec(settings.depositPct) : dec(0);
+    let depositAmount: Decimal | undefined;
+    let balanceDueAtVenue: Decimal | undefined;
+    if (depositPct.greaterThan(0)) {
+      const split = splitDeposit(total, depositPct);
+      depositAmount = split.deposit;
+      balanceDueAtVenue = split.balance;
+    }
+
     return {
       slotRows,
       addons,
@@ -501,6 +566,9 @@ export class BookingsService {
       pointsRedeemed,
       pointsValue,
       total,
+      depositPct,
+      depositAmount,
+      balanceDueAtVenue,
     };
   }
 
@@ -548,6 +616,7 @@ export class BookingsService {
         pointsRedeemed,
         pointsValue,
         total,
+        depositPct,
       } = await this.priceQuote(tx, {
         venue,
         ownerId,
@@ -559,6 +628,37 @@ export class BookingsService {
         offerCode: dto.offerCode,
         pointsToRedeem: dto.pointsToRedeem,
       });
+
+      // 5b. Snapshot the online/at-venue money split for ALL pay modes
+      // (decision #4). This is the single source of truth for what Razorpay
+      // charges and what the venue settles later:
+      //   - prepay + 'full'    → pay the whole total online, nothing at venue
+      //   - prepay + 'deposit' → pay only the deposit online, balance at venue
+      //   - at_venue           → pay nothing online, the whole total at venue
+      // The deposit plan is only honoured for prepay against a venue with a
+      // configured depositPct (the create() guard already rejected the bad
+      // combinations); we re-check depositPct>0 here so a misconfigured venue
+      // falls back to full prepay rather than charging a zero deposit.
+      const isDeposit =
+        payMode === PayMode.PREPAY &&
+        dto.paymentPlan === 'deposit' &&
+        depositPct.greaterThan(0);
+      let amountPaidOnline: Decimal;
+      let amountDueAtVenue: Decimal;
+      if (payMode === PayMode.PREPAY) {
+        if (isDeposit) {
+          const { deposit, balance } = splitDeposit(total, depositPct);
+          amountPaidOnline = deposit;
+          amountDueAtVenue = balance;
+        } else {
+          amountPaidOnline = total;
+          amountDueAtVenue = dec(0);
+        }
+      } else {
+        // pay-at-venue: nothing collected online, whole total settled on ground.
+        amountPaidOnline = dec(0);
+        amountDueAtVenue = total;
+      }
 
       // 6. Create booking + occupying slot rows (the lock).
       const booking = (
@@ -577,6 +677,8 @@ export class BookingsService {
             subtotal: money(slotSubtotal.add(addonSubtotal)),
             discount: money(packDiscount.add(offerDiscount)),
             total: money(total),
+            amountPaidOnline: money(amountPaidOnline),
+            amountDueAtVenue: money(amountDueAtVenue),
             packId: dto.packId,
             offerId,
             pointsRedeemed: money(pointsValue),
@@ -677,11 +779,18 @@ export class BookingsService {
         }
       }
 
-      // 10. Razorpay order for prepay — but only when there is money to collect.
+      // 10. Razorpay order for prepay — but only when there is money to collect
+      // ONLINE. For a deposit booking we charge only amountPaidOnline (the
+      // deposit), leaving the balance to be settled at the venue; for full prepay
+      // amountPaidOnline equals the total. When amountPaidOnline is 0 (a
+      // fully-discounted total) we skip the gateway and mark PAID as before.
       let razorpayOrderId: string | undefined;
       if (payMode === PayMode.PREPAY) {
-        if (total.greaterThan(0)) {
-          const order = await this.payments.createOrder(Number(total), booking.id);
+        if (amountPaidOnline.greaterThan(0)) {
+          const order = await this.payments.createOrder(
+            Number(amountPaidOnline),
+            booking.id,
+          );
           razorpayOrderId = order.id;
           await tx
             .update(bookings)
@@ -951,6 +1060,16 @@ export class BookingsService {
     }
 
     return this.db.withTenantId(booking.ownerId, async (tx) => {
+      // BOOK-5: lock the booking row before the check-then-act guard below.
+      // Under READ COMMITTED the client-confirm and the webhook can otherwise
+      // both read paymentStatus='pending', both pass the guard, and both run
+      // loyalty.earn + write a capture row (double-credit). SELECT ... FOR UPDATE
+      // serializes the two transactions on this row so only the first re-reads
+      // the booking as still-unpaid; the second blocks, then sees PAID and
+      // early-returns via the already-paid guard.
+      await tx.execute(
+        sql`SELECT 1 FROM bookings WHERE id = ${bookingId} FOR UPDATE`,
+      );
       const fresh = await tx.query.bookings.findFirst({
         where: eq(bookings.id, bookingId),
       });
@@ -967,13 +1086,46 @@ export class BookingsService {
         return { paid: true as const };
       }
 
+      // DEP-5: a deposit booking (amountDueAtVenue>0) splits the money lifecycle
+      // across two markPaid calls. The first (online capture, while pending) only
+      // collects the deposit and parks the booking in AWAITING_VENUE_SETTLEMENT —
+      // loyalty/referral are deferred to settlement so the customer earns on the
+      // FULL total exactly once. The second (the /settle path, from
+      // AWAITING_VENUE_SETTLEMENT) records the at-venue balance and earns loyalty,
+      // exactly as a pay-at-venue booking does.
+      const isDeposit = dec(fresh.amountDueAtVenue).greaterThan(0);
+      // A gateway call always carries a razorpayPaymentId; the venue-settlement
+      // (/settle) path never does. A re-delivered gateway capture for a deposit
+      // already in AWAITING_VENUE_SETTLEMENT must be a no-op — only /settle moves
+      // it to SETTLED_AT_VENUE — otherwise a redelivered webhook would settle the
+      // balance and double-deferred-earn.
+      if (
+        fresh.paymentStatus === PaymentStatus.AWAITING_VENUE_SETTLEMENT &&
+        razorpayPaymentId
+      ) {
+        return { paid: true as const };
+      }
+      const isDepositOnlineCapture =
+        isDeposit && fresh.paymentStatus === PaymentStatus.PENDING;
+
+      // Resolve the next status:
+      //  - deposit online capture → AWAITING_VENUE_SETTLEMENT (deposit paid,
+      //    balance still due at the venue);
+      //  - deposit balance settled at the venue (from AWAITING_VENUE_SETTLEMENT)
+      //    → SETTLED_AT_VENUE, like a pay-at-venue booking;
+      //  - full prepay → PAID; pay-at-venue → SETTLED_AT_VENUE.
+      const nextStatus = isDepositOnlineCapture
+        ? PaymentStatus.AWAITING_VENUE_SETTLEMENT
+        : isDeposit
+          ? PaymentStatus.SETTLED_AT_VENUE
+          : fresh.payMode === PayMode.PREPAY
+            ? PaymentStatus.PAID
+            : PaymentStatus.SETTLED_AT_VENUE;
+
       await tx
         .update(bookings)
         .set({
-          paymentStatus:
-            fresh.payMode === PayMode.PREPAY
-              ? PaymentStatus.PAID
-              : PaymentStatus.SETTLED_AT_VENUE,
+          paymentStatus: nextStatus,
           // Persist the captured gateway payment id so a later cancellation can
           // issue a refund against it. Only set on the prepay handshake.
           ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
@@ -981,7 +1133,9 @@ export class BookingsService {
         .where(eq(bookings.id, bookingId));
 
       // Record the gateway capture (prepay handshake only — pay-at-venue is cash,
-      // not a gateway transaction).
+      // not a gateway transaction). For a deposit booking we capture only the
+      // online portion (amountPaidOnline = the deposit); for full prepay
+      // amountPaidOnline equals the total.
       if (razorpayPaymentId && fresh.payMode === PayMode.PREPAY) {
         await this.paymentLedger.record(tx, {
           ownerId: fresh.ownerId,
@@ -990,9 +1144,15 @@ export class BookingsService {
           refId: bookingId,
           type: 'capture',
           gatewayId: razorpayPaymentId,
-          amount: fresh.total,
+          amount: fresh.amountPaidOnline,
           status: 'captured',
         });
+      }
+
+      // Defer loyalty/referral for a deposit's online capture; they fire once at
+      // settlement (below branch) on the full total.
+      if (isDepositOnlineCapture) {
+        return { paid: true as const };
       }
 
       await this.loyalty.earn(
@@ -1063,9 +1223,14 @@ export class BookingsService {
     }
 
     // Already settled → no-op (idempotent; never re-credit loyalty/referral).
+    // AWAITING_VENUE_SETTLEMENT means a deposit booking's online portion is
+    // already captured; the at-venue balance is settled via the /settle path,
+    // not by re-confirming the gateway handshake, so we stop here too (otherwise
+    // a second confirm would wrongly settle the balance and earn loyalty).
     if (
       booking.paymentStatus === PaymentStatus.PAID ||
-      booking.paymentStatus === PaymentStatus.SETTLED_AT_VENUE
+      booking.paymentStatus === PaymentStatus.SETTLED_AT_VENUE ||
+      booking.paymentStatus === PaymentStatus.AWAITING_VENUE_SETTLEMENT
     ) {
       return { paid: true as const };
     }
@@ -1146,15 +1311,28 @@ export class BookingsService {
       fee: Decimal;
       status: string;
     } | null = null;
+    // DEP-7: a deposit booking in AWAITING_VENUE_SETTLEMENT has its online
+    // deposit captured (amountPaidOnline>0) and is refundable too; full prepay
+    // stays PAID as before. We refund only the money actually collected online,
+    // net of the standard fee.
     const isPaid =
       booking.status !== BookingStatus.CANCELLED &&
       booking.payMode === PayMode.PREPAY &&
-      booking.paymentStatus === PaymentStatus.PAID &&
+      (booking.paymentStatus === PaymentStatus.PAID ||
+        (booking.paymentStatus === PaymentStatus.AWAITING_VENUE_SETTLEMENT &&
+          dec(booking.amountPaidOnline).greaterThan(0))) &&
       booking.razorpayPaymentId != null &&
-      dec(booking.total).greaterThan(0);
+      dec(booking.amountPaidOnline).greaterThan(0);
     if (isPaid) {
+      // Fee is computed off the total per the cancellation template; the refund
+      // returns only the online portion net of that fee. If the fee meets or
+      // exceeds the deposit, refund 0 and create NO ledger DUE for the shortfall
+      // (the venue keeps the deposit as the penalty).
       const fee = await this.cancellationFee(booking);
-      const refundable = Decimal.max(dec(booking.total).sub(fee), dec(0));
+      const refundable = Decimal.max(
+        dec(booking.amountPaidOnline).sub(fee),
+        dec(0),
+      );
       if (refundable.greaterThan(0)) {
         const res = await this.payments.refund(
           booking.razorpayPaymentId as string,
@@ -1680,7 +1858,12 @@ export class BookingsService {
       });
       if (!fresh) throw new NotFoundException('Booking not found');
 
-      const applyFee = fee.greaterThan(0) && !fresh.noShowFeeApplied;
+      // DEP-8: a deposit booking (amountDueAtVenue>0) already forfeits its
+      // online deposit as the no-show penalty, so skip the flat noShowFee — no
+      // double charge. Prepay/at_venue no-show behaviour is unchanged.
+      const isDeposit = dec(fresh.amountDueAtVenue).greaterThan(0);
+      const applyFee =
+        !isDeposit && fee.greaterThan(0) && !fresh.noShowFeeApplied;
       await tx
         .update(bookings)
         .set({
@@ -2288,6 +2471,8 @@ export class BookingsService {
       payMode: string;
       paymentStatus: string;
       total: string;
+      amountPaidOnline?: string;
+      amountDueAtVenue?: string;
     },
     lineItems: { label: string; amount: number }[],
   ): BookingResponse {
@@ -2297,6 +2482,15 @@ export class BookingsService {
       payMode: booking.payMode as PayMode,
       paymentStatus: booking.paymentStatus as PaymentStatus,
       total: Number(booking.total),
+      // Expose the online/at-venue split (decision #2). Serialized as 2dp
+      // strings, matching the columns; undefined-safe for callers that hand us a
+      // row without the split (e.g. legacy callers of toResponse).
+      ...(booking.amountPaidOnline != null
+        ? { amountPaidOnline: booking.amountPaidOnline }
+        : {}),
+      ...(booking.amountDueAtVenue != null
+        ? { amountDueAtVenue: booking.amountDueAtVenue }
+        : {}),
       lineItems,
     };
   }

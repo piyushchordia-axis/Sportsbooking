@@ -13,6 +13,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { TenantMiddleware } from './common/tenant/tenant.middleware';
 import { DbModule } from './db/db.module';
 import { HealthModule } from './modules/health/health.module';
+import { ClientLogsModule } from './modules/client-logs/client-logs.module';
 import { AddonsModule } from './modules/addons/addons.module';
 import { AmcModule } from './modules/amc/amc.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -55,6 +56,7 @@ import { SavedVenuesModule } from './modules/saved-venues/saved-venues.module';
     ]),
     DbModule,
     HealthModule,
+    ClientLogsModule,
     NotificationsModule,
     RemindersModule,
     PaymentsModule,

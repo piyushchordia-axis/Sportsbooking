@@ -7,8 +7,9 @@ import {
   Module,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@sportsbooking/shared';
+import { FeatureFlag, UserRole } from '@sportsbooking/shared';
 import { IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
@@ -16,6 +17,9 @@ import {
   RequestUser,
 } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireFlag } from '../../common/decorators/require-flag.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard';
 import { DbService } from '../../db/db.service';
 import { ledgerTxns, owners, users } from '../../db/schema';
 
@@ -129,12 +133,17 @@ export class LoyaltySettingsService {
   }
 }
 
+// Gated behind the LOYALTY entitlement (PRD §2.2): an owner without the flag
+// gets 403, matching memberships/tournaments. RolesGuard is global, but it's
+// listed here so FeatureFlagGuard composes in the expected order.
 @Controller('me/loyalty')
+@UseGuards(RolesGuard, FeatureFlagGuard)
 export class LoyaltySettingsController {
   constructor(private readonly loyalty: LoyaltySettingsService) {}
 
   @Get()
   @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.LOYALTY)
   getConfig(@CurrentUser() user: RequestUser) {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
     return this.loyalty.getConfig(user.ownerId);
@@ -142,6 +151,7 @@ export class LoyaltySettingsController {
 
   @Put()
   @Roles(UserRole.OWNER)
+  @RequireFlag(FeatureFlag.LOYALTY)
   updateConfig(
     @CurrentUser() user: RequestUser,
     @Body() dto: UpdateLoyaltyConfigDto,
@@ -152,6 +162,7 @@ export class LoyaltySettingsController {
 
   @Get('history')
   @Roles(UserRole.OWNER, UserRole.STAFF)
+  @RequireFlag(FeatureFlag.LOYALTY)
   getHistory(@CurrentUser() user: RequestUser, @Query('limit') limit?: string) {
     if (!user.ownerId) throw new BadRequestException('No tenant context');
     return this.loyalty.getHistory(

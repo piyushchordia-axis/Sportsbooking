@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
-import { UserRole } from '@sportsbooking/shared';
+import { FeatureFlag, UserRole } from '@sportsbooking/shared';
 import { IsHexColor, IsOptional, IsString } from 'class-validator';
 import { eq } from 'drizzle-orm';
 import {
@@ -134,6 +134,28 @@ export class OwnerSettingsService {
     });
   }
 
+  /**
+   * The owner's account-tier entitlements — feature flags + allowed games —
+   * which drive the console's nav/route gating. Reads the caller's OWN owner row
+   * (RLS-safe) and is deliberately NOT flag-gated: a flagless owner must still
+   * receive its (possibly empty) list.
+   */
+  getEntitlements(
+    ownerId: string,
+  ): Promise<{ featureFlags: FeatureFlag[]; allowedGameIds: string[] }> {
+    return this.db.withTenantId(ownerId, async (tx) => {
+      const owner = await tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+        columns: { featureFlags: true, allowedGameIds: true },
+      });
+      if (!owner) throw new BadRequestException('Owner not found');
+      return {
+        featureFlags: (owner.featureFlags ?? []) as FeatureFlag[],
+        allowedGameIds: owner.allowedGameIds ?? [],
+      };
+    });
+  }
+
   /** Update the authenticated owner's branding (owner only). */
   updateBranding(
     ownerId: string,
@@ -243,8 +265,22 @@ export class OwnerSettingsController {
   }
 }
 
+/** Owner/staff feature-flag + allowed-game entitlements (drives console gating). */
+@Controller('me/entitlements')
+export class EntitlementsController {
+  constructor(private readonly ownerSettings: OwnerSettingsService) {}
+
+  @Get()
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  get(@CurrentUser() user: RequestUser) {
+    if (!user.ownerId) throw new BadRequestException('No tenant context');
+    return this.ownerSettings.getEntitlements(user.ownerId);
+  }
+}
+
 @Module({
-  controllers: [OwnerSettingsController],
+  controllers: [OwnerSettingsController, EntitlementsController],
   providers: [OwnerSettingsService],
 })
 export class OwnerSettingsModule {}

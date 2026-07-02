@@ -285,6 +285,12 @@ export interface OwnerBooking {
   checkedInAt: string | null; // ISO — set when staff checks the customer in
 }
 
+/** Owner/staff account-tier entitlements — drives the console's feature gating. */
+export interface Entitlements {
+  featureFlags: FeatureFlag[];
+  allowedGameIds: string[];
+}
+
 /** Owner bookings list filters (all optional). */
 export interface BookingFilters {
   from?: string; // YYYY-MM-DD

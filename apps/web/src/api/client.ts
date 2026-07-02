@@ -8,6 +8,7 @@ import {
   CalendarResponse,
   CreateBookingRequest,
   CreateCustomerRequest,
+  Entitlements,
   LoginResponse,
   OpenMatchRepaymentMode,
   OwnedPack,
@@ -1250,6 +1251,7 @@ export const api = {
       `/me/loyalty/history${limit ? `?limit=${limit}` : ''}`,
     ),
   getBranding: () => get<Branding>('/me/branding'),
+  getEntitlements: () => get<Entitlements>('/me/entitlements'),
   updateBranding: (body: Partial<Branding>) => put<Branding>('/me/branding', body),
   /** Upload a logo image (multipart); stores it and returns the updated branding. */
   uploadLogo: (file: File) => uploadFile<Branding>('/me/branding/logo', file),

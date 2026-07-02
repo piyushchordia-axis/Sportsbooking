@@ -1,4 +1,4 @@
-import { UserRole } from '@sportsbooking/shared';
+import { FeatureFlag, UserRole } from '@sportsbooking/shared';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -48,6 +48,8 @@ interface NavLeaf {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** If set, the item is shown only when the owner has this entitlement. */
+  flag?: FeatureFlag;
 }
 interface NavGroup {
   label: string;
@@ -75,15 +77,15 @@ const NAV: Partial<Record<UserRole, NavNode[]>> = {
       icon: Building2,
       children: [
         { to: '/owner/venues', label: 'Grounds', icon: Building2 },
-        { to: '/owner/packs', label: 'Packs', icon: Ticket },
+        { to: '/owner/packs', label: 'Packs', icon: Ticket, flag: FeatureFlag.MEMBERSHIPS },
         { to: '/owner/offers', label: 'Offers', icon: Tag },
         { to: '/owner/branding', label: 'Branding', icon: Palette },
       ],
     },
     { to: '/owner/players', label: 'Players', icon: Users },
     { to: '/owner/staff', label: 'Staff', icon: UserCog },
-    { to: '/owner/tournaments', label: 'Tournaments', icon: Trophy },
-    { to: '/owner/loyalty', label: 'Loyalty', icon: Gift },
+    { to: '/owner/tournaments', label: 'Tournaments', icon: Trophy, flag: FeatureFlag.TOURNAMENTS },
+    { to: '/owner/loyalty', label: 'Loyalty', icon: Gift, flag: FeatureFlag.LOYALTY },
     { to: '/owner/activity', label: 'Activity', icon: History },
   ],
   [UserRole.STAFF]: [
@@ -146,6 +148,10 @@ export function Layout({ children }: { children: ReactNode }) {
   const [pwOpen, setPwOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [logoBroken, setLogoBroken] = useState(false);
+  // Owner feature entitlements — null until loaded (we show all nav items while
+  // loading, then hide the ones the owner isn't entitled to). Staff inherit the
+  // owner's flags (the endpoint reads the owner row); other roles skip the fetch.
+  const [entFlags, setEntFlags] = useState<FeatureFlag[] | null>(null);
 
   useEffect(() => setLogoBroken(false), [branding.logoUrl]);
   useEffect(() => {
@@ -160,12 +166,33 @@ export function Layout({ children }: { children: ReactNode }) {
     setMobileOpen(false);
     setUserMenu(false);
   }, [loc.pathname]);
+  // Load feature entitlements for owner/staff to gate the sidebar. Best-effort:
+  // on failure, treat as "no flags" so gated items hide rather than 403 on click.
+  useEffect(() => {
+    if (user?.role === UserRole.OWNER || user?.role === UserRole.STAFF) {
+      api
+        .getEntitlements()
+        .then((e) => setEntFlags(e.featureFlags))
+        .catch(() => setEntFlags([]));
+    } else {
+      setEntFlags(null);
+    }
+  }, [user?.id, user?.role]);
 
   // The login screen always renders full-bleed (no app shell), even if a stale
   // session is still in localStorage.
   if (!user || loc.pathname === '/login') return <>{children}</>;
 
-  const nav = NAV[user.role] ?? [];
+  // Gate flag-linked nav items by the owner's entitlements. While loading
+  // (entFlags === null) everything shows; once loaded, hide leaves whose flag is
+  // not enabled, and drop a group left with no visible children.
+  const leafVisible = (leaf: NavLeaf): boolean =>
+    !leaf.flag || entFlags === null || entFlags.includes(leaf.flag);
+  const nav = (NAV[user.role] ?? [])
+    .map((n) =>
+      isGroup(n) ? { ...n, children: n.children.filter(leafVisible) } : n,
+    )
+    .filter((n) => (isGroup(n) ? n.children.length > 0 : leafVisible(n)));
   const groupHasActive = (g: NavGroup) => g.children.some((c) => isActive(loc.pathname, c.to));
   const groupOpen = (g: NavGroup) => openGroups[g.label] ?? groupHasActive(g);
 

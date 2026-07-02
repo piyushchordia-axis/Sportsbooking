@@ -128,6 +128,7 @@ export interface CustomerBooking {
     end: string; // ISO
   }[];
   createdAt: string; // ISO
+  seriesId: string | null; // set when this booking is one of a weekly series
 }
 
 /**
@@ -1882,6 +1883,7 @@ export class BookingsService {
       total: string;
       venueId: string;
       createdAt: Date;
+      seriesId: string | null;
       slots: { unitId: string; startsAt: Date; endsAt: Date }[];
     },
     venueName: Map<string, string>,
@@ -1905,6 +1907,7 @@ export class BookingsService {
           end: s.endsAt.toISOString(),
         })),
       createdAt: b.createdAt.toISOString(),
+      seriesId: b.seriesId ?? null,
     };
   }
 

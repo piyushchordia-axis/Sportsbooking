@@ -1,5 +1,5 @@
 import { BookingStatus, PaymentStatus, PayMode, SkillLevel } from '@sportsbooking/shared';
-import { Check, Minus, Plus, Users } from 'lucide-react';
+import { Check, Minus, Plus, Repeat, Users } from 'lucide-react';
 import { useState } from 'react';
 import { api, CustomerBooking } from '../../api/client';
 import { Msg, useLoad } from '../../components/common';
@@ -568,6 +568,21 @@ function Section({
                   >
                     {courtLabel(b)} · {when.date} · {when.time}
                   </div>
+                  {b.seriesId && (
+                    <span
+                      className="mt-1.5 inline-flex items-center gap-1"
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '3px 7px',
+                        borderRadius: 6,
+                        background: 'color-mix(in oklab, var(--brand) 14%, transparent)',
+                        color: 'var(--brand)',
+                      }}
+                    >
+                      <Repeat style={{ width: 11, height: 11 }} /> Weekly series
+                    </span>
+                  )}
                 </div>
                 <span
                   className="whitespace-nowrap"

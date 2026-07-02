@@ -185,6 +185,7 @@ export interface CustomerBooking {
   venueName: string;
   slots: CustomerBookingSlot[];
   createdAt: string;
+  seriesId: string | null; // set when this booking is one of a weekly series
 }
 
 /** A pending/decided request to join an open match (host-facing view). */

@@ -53,11 +53,11 @@ Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "
 
 | # | Task | Files | Effort |
 |---|------|-------|--------|
-| 3.1 | Staff check-in flow + `checked_in` `BookingStatus` state (PRD §2/§4.3) | `packages/shared/src/enums.ts`, bookings module, owner UI | M |
-| 3.2 ∥ | Consumer recurring booking (API exists; add storefront control) — PRD §5.2 | `pages/consumer/VenueDetailPage.tsx` | M |
-| 3.3 ∥ | Player-facing notification feed (currently owner/staff only) | `notification-feed.module.ts`, consumer UI | M |
-| 3.4 | Consolidate the two consumer surfaces (`pages/consumer/*` vs older `pages/customer/*`) — pick one, retire the other | `apps/web/src/App.tsx` route table | L |
-| 3.5 ∥ | Feature-flag-aware UI (hide disabled features instead of 403-on-action); add `@RequireFlag(LOYALTY)` guard | owner pages, loyalty modules | S |
+| 3.1 ✅ | **DONE** — Staff check-in via a nullable `checkedInAt` column (migration 0002), `POST /bookings/:id/check-in` (owner/staff, idempotent, 400 for cancelled/no-show), owner UI button + "Checked in · time" indicator. Verified end-to-end. |
+| 3.2 ✅ | **DONE** — The create flow (weekly repeat) already shipped; added `seriesId` to `CustomerBooking` + a "Weekly series" chip in consumer My Bookings so recurring occurrences are recognizable. |
+| 3.3 ✅ | **DONE** — Player in-app feed: `notifications.customerId` recipient (migration 0003), `createForCustomer` + `@Controller('me/notifications') @Roles(CUSTOMER)`, booking-confirmed emit, and a `PlayerBell` in the consumer header. Verified: player/owner feeds are mutually isolated. |
+| 3.4 ✅ | **DONE** — Moved the 7 `pages/customer/*` pages into `pages/consumer/*` (they already ran in ConsumerLayout) + updated App.tsx imports. Folder move, not a rewrite. |
+| 3.5 ✅ | **DONE** — Gated `/me/loyalty` behind `@RequireFlag(LOYALTY)`; added `GET /me/entitlements`; owner nav hides Packs/Tournaments/Loyalty when the flag is off. Verified 200-with / 403-without. |
 
 **Exit criteria:** PRD feature checklist is wired end-to-end (API + UI) or explicitly descoped; no owner route renders a feature the tenant lacks entitlement for.
 

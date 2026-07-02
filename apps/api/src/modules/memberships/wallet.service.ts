@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { LedgerTxnType } from '@sportsbooking/shared';
 import { DbService } from '../../db/db.service';
@@ -40,6 +40,13 @@ export class WalletService {
    *   each distinct `points:*` / `credit:*` lane.
    */
   async summary(customerId: string, ownerId?: string) {
+    // Defense-in-depth: the aggregate (no-ownerId) path runs under RLS bypass,
+    // where the customerId predicate is the ONLY thing scoping the ledger read to
+    // this caller. Fail closed on an empty/missing customerId so a future
+    // refactor can't turn this into a cross-customer ledger dump.
+    if (!customerId) {
+      throw new BadRequestException('customerId is required');
+    }
     if (ownerId) {
       return this.db.withTenantId(ownerId, (tx) =>
         this.scopedSummary(tx, customerId),

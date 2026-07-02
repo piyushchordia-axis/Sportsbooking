@@ -46,6 +46,10 @@ import {
 
 const PAID_STATES = [PaymentStatus.PAID, PaymentStatus.SETTLED_AT_VENUE];
 
+/** Reconciliation: only flag stuck-PENDING holds older than this (the reaper's
+ *  15-min grace + headroom), so in-flight checkouts aren't reported. */
+const RECON_STUCK_GRACE_MINUTES = 30;
+
 /**
  * Resolve an optional ?from=&to= date range into a normalised window.
  *
@@ -581,6 +585,80 @@ export class ReportsService {
       };
     });
   }
+
+  /**
+   * Payment reconciliation (PRD §7 oversight): surfaces booking↔payment
+   * inconsistencies for manual review. Owner-scoped (explicit ownerId in every
+   * predicate + subquery). Each category returns an accurate total (via a window
+   * count) plus up to 20 sample rows. Read-only.
+   */
+  async reconciliation(user: RequestUser) {
+    const ownerId = user.ownerId!;
+    // Past the reaper grace, so genuinely in-flight prepay holds aren't flagged.
+    const graceIso = new Date(
+      Date.now() - RECON_STUCK_GRACE_MINUTES * 60 * 1000,
+    ).toISOString();
+
+    return this.db.withTenant(async (tx) => {
+      // 1) Stuck PENDING prepay holds past the grace window — the reaper should
+      //    have released these; their presence means it's failing/stalled.
+      const stuck = await tx.execute(sql`
+        SELECT id AS "bookingId", total, "createdAt", count(*) OVER() AS "__count"
+        FROM bookings
+        WHERE "ownerId" = ${ownerId} AND "payMode" = 'prepay'
+          AND "paymentStatus" = 'pending' AND "razorpayPaymentId" IS NULL
+          AND status <> 'cancelled' AND "createdAt" < ${graceIso}
+        ORDER BY "createdAt" LIMIT 20`);
+      // 2) PAID prepay bookings with NO recorded gateway capture (money marked
+      //    collected but no capture row — a webhook/recording gap).
+      const noCapture = await tx.execute(sql`
+        SELECT b.id AS "bookingId", b.total, b."createdAt", count(*) OVER() AS "__count"
+        FROM bookings b
+        WHERE b."ownerId" = ${ownerId} AND b."payMode" = 'prepay'
+          AND b."paymentStatus" = 'paid'
+          AND NOT EXISTS (
+            SELECT 1 FROM payments p WHERE p."ownerId" = ${ownerId}
+              AND p."refType" = 'booking' AND p."refId" = b.id AND p.type = 'capture')
+        ORDER BY b."createdAt" DESC LIMIT 20`);
+      // 3) Gateway/dashboard-initiated refunds reconciled from the webhook — these
+      //    marked the booking REFUNDED but did NOT free slots (reconcileRefund),
+      //    so an operator should review the booking/slot state.
+      const gatewayRefunds = await tx.execute(sql`
+        SELECT "refId" AS "bookingId", amount, "gatewayId" AS "refundId",
+               "createdAt", count(*) OVER() AS "__count"
+        FROM payments
+        WHERE "ownerId" = ${ownerId} AND type = 'refund'
+          AND note LIKE '%gateway-initiated%'
+        ORDER BY "createdAt" DESC LIMIT 20`);
+      // 4) Captured payments whose booking is now cancelled with NO matching
+      //    refund — money captured but the booking was cancelled without refunding.
+      const orphanedCaptures = await tx.execute(sql`
+        SELECT p."refId" AS "bookingId", p.amount, p."gatewayId",
+               p."createdAt", count(*) OVER() AS "__count"
+        FROM payments p JOIN bookings b ON b.id = p."refId"
+        WHERE p."ownerId" = ${ownerId} AND p.type = 'capture'
+          AND p."refType" = 'booking' AND b.status = 'cancelled'
+          AND NOT EXISTS (
+            SELECT 1 FROM payments r WHERE r."ownerId" = ${ownerId}
+              AND r."refId" = p."refId" AND r.type = 'refund')
+        ORDER BY p."createdAt" DESC LIMIT 20`);
+
+      const pack = (res: { rows: Record<string, unknown>[] }) => {
+        const rows = res.rows;
+        const count = rows.length ? Number(rows[0].__count) : 0;
+        const samples = rows.map(({ __count, ...rest }) => rest);
+        return { count, samples };
+      };
+
+      return {
+        generatedAt: new Date().toISOString(),
+        stuckPending: pack(stuck),
+        paidNoCapture: pack(noCapture),
+        gatewayInitiatedRefunds: pack(gatewayRefunds),
+        orphanedCaptures: pack(orphanedCaptures),
+      };
+    });
+  }
 }
 
 @Controller('reports')
@@ -602,6 +680,13 @@ export class ReportsController {
   @Roles(UserRole.SUPER_ADMIN)
   platformSummary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.reports.platformSummary(from, to);
+  }
+
+  /** Payment reconciliation — booking↔payment inconsistencies for review. */
+  @Get('reconciliation')
+  @Roles(UserRole.OWNER)
+  reconciliation(@CurrentUser() user: RequestUser) {
+    return this.reports.reconciliation(user);
   }
 }
 

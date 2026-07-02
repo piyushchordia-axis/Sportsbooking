@@ -19,25 +19,25 @@ const VenueDetailPage = lazy(() =>
 
 // Player account area (consumer shell, authed)
 const AccountPage = lazy(() =>
-  import('./pages/customer/AccountPage').then((m) => ({ default: m.AccountPage })),
+  import('./pages/consumer/AccountPage').then((m) => ({ default: m.AccountPage })),
 );
 const TournamentsPage = lazy(() =>
-  import('./pages/customer/TournamentsPage').then((m) => ({ default: m.TournamentsPage })),
+  import('./pages/consumer/TournamentsPage').then((m) => ({ default: m.TournamentsPage })),
 );
 const MyBookingsPage = lazy(() =>
-  import('./pages/customer/MyBookingsPage').then((m) => ({ default: m.MyBookingsPage })),
+  import('./pages/consumer/MyBookingsPage').then((m) => ({ default: m.MyBookingsPage })),
 );
 const WalletPage = lazy(() =>
-  import('./pages/customer/WalletPage').then((m) => ({ default: m.WalletPage })),
+  import('./pages/consumer/WalletPage').then((m) => ({ default: m.WalletPage })),
 );
 const OpenMatchesPage = lazy(() =>
-  import('./pages/customer/OpenMatchesPage').then((m) => ({ default: m.OpenMatchesPage })),
+  import('./pages/consumer/OpenMatchesPage').then((m) => ({ default: m.OpenMatchesPage })),
 );
 const SavedVenuesPage = lazy(() =>
-  import('./pages/customer/SavedVenuesPage').then((m) => ({ default: m.SavedVenuesPage })),
+  import('./pages/consumer/SavedVenuesPage').then((m) => ({ default: m.SavedVenuesPage })),
 );
 const OffersInboxPage = lazy(() =>
-  import('./pages/customer/OffersInboxPage').then((m) => ({ default: m.OffersInboxPage })),
+  import('./pages/consumer/OffersInboxPage').then((m) => ({ default: m.OffersInboxPage })),
 );
 
 // Player auth (OTP) — consumer storefront. Console auth lives at /admin/login.

@@ -85,8 +85,8 @@ Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "
 - ✅ De-Prisma'd `scripts/post-merge.sh` (removed the broken `db:generate`/`db:deploy` DB steps; migrations are deploy-only now)
 - ✅ Bound dev compose Postgres/Redis to `127.0.0.1` — `docker-compose.yml`
 - ✅ Stale-doc banners on `docs/AUDIT.md` + `docs/DEVELOPMENT_PLAN.md` pointing here
-- ⏳ nginx web container as non-root (`nginxinc/nginx-unprivileged`) — `apps/web/Dockerfile:19`
-- ⏳ CPU/memory limits in `docker-compose.prod.yml`
+- ✅ nginx web container as non-root (`nginxinc/nginx-unprivileged`, runs as UID 101) — `apps/web/Dockerfile`
+- ✅ CPU/memory limits in `docker-compose.prod.yml` (api 1.5cpu/768M, web 0.5cpu/128M)
 - ⏳ Remove dead `ioredis` dependency (kept for the deferred 4.5 Redis-throttler work) — `apps/api/package.json`
 - ⏳ Pin image digests (`@sha256:`) — `apps/*/Dockerfile`
 - ⏳ Bridge network instead of `network_mode: host` (or document the tradeoff)

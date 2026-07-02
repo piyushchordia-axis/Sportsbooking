@@ -50,6 +50,14 @@ services:
       STORAGE_LOCAL_DIR: /data/uploads
     volumes:
       - sb_uploads:/data/uploads
+    # Cap resources so a runaway process can't starve the host (which also runs
+    # Postgres + other apps). docker compose v2 honors deploy.resources.limits
+    # without Swarm. Tune to the box; these are conservative for a small VPS.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
 
   web:
     build:
@@ -64,6 +72,11 @@ services:
     network_mode: host
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
 
   # One-off schema/RLS apply + optional seed. Reuses the api image; runs as the
   # ADMIN role (DATABASE_ADMIN_URL) which needs DDL + role-creation rights.

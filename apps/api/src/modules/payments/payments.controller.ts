@@ -83,31 +83,61 @@ export class PaymentsController {
       throw new BadRequestException('Malformed webhook payload');
     }
 
-    if (event.event === 'payment.captured') {
-      const entity = event.payload?.payment?.entity;
-      const orderId = entity?.order_id;
-      const paymentId = entity?.id;
-      if (!orderId) {
-        this.logger.warn('payment.captured without order_id; ignoring');
-        return { received: true as const };
-      }
+    const bookings = this.moduleRef.get(BookingsService, { strict: false });
 
-      const booking = await this.db.withTenantBypass((tx) =>
-        tx.query.bookings.findFirst({
-          where: eq(bookingsTable.razorpayOrderId, orderId),
-        }),
-      );
-      if (!booking) {
-        this.logger.warn(`No booking for order ${orderId}; ignoring`);
-        return { received: true as const };
+    switch (event.event) {
+      case 'payment.captured': {
+        const entity = event.payload?.payment?.entity;
+        const orderId = entity?.order_id;
+        const paymentId = entity?.id;
+        if (!orderId) {
+          this.logger.warn('payment.captured without order_id; ignoring');
+          break;
+        }
+        const booking = await this.db.withTenantBypass((tx) =>
+          tx.query.bookings.findFirst({
+            where: eq(bookingsTable.razorpayOrderId, orderId),
+          }),
+        );
+        if (!booking) {
+          this.logger.warn(`No booking for order ${orderId}; ignoring`);
+          break;
+        }
+        // markPaid is idempotent (redelivery-safe); persist the payment id so a
+        // later cancel can refund — else webhook-settled prepay stores null and
+        // becomes non-refundable.
+        await bookings.markPaid(booking.id, undefined, paymentId);
+        break;
       }
-
-      // markPaid is idempotent: a redelivered webhook won't re-credit anything.
-      const bookings = this.moduleRef.get(BookingsService, { strict: false });
-      // Persist the gateway payment id so a later cancel can issue a refund;
-      // without it webhook-settled prepay bookings store razorpayPaymentId=null
-      // and become non-refundable.
-      await bookings.markPaid(booking.id, undefined, paymentId);
+      case 'payment.failed': {
+        // Release the court now instead of waiting for the 15-minute reaper.
+        const orderId = event.payload?.payment?.entity?.order_id;
+        if (!orderId) {
+          this.logger.warn('payment.failed without order_id; ignoring');
+          break;
+        }
+        await bookings.markPaymentFailed(orderId);
+        break;
+      }
+      case 'refund.created':
+      case 'refund.processed': {
+        // Reconcile a gateway refund (including dashboard-initiated) to the booking.
+        const r = event.payload?.refund?.entity;
+        if (!r?.id || !r?.payment_id) {
+          this.logger.warn('refund event missing id/payment_id; ignoring');
+          break;
+        }
+        await bookings.reconcileRefund({
+          paymentId: r.payment_id,
+          refundId: r.id,
+          amountRupees: (r.amount ?? 0) / 100, // Razorpay amounts are in paise
+          status: r.status ?? 'processed',
+        });
+        break;
+      }
+      default:
+        // Acknowledge (200) unhandled event types so Razorpay stops retrying.
+        break;
     }
 
     return { received: true as const };
@@ -121,6 +151,14 @@ interface WebhookEvent {
       entity?: {
         id?: string;
         order_id?: string;
+      };
+    };
+    refund?: {
+      entity?: {
+        id?: string;
+        payment_id?: string;
+        amount?: number;
+        status?: string;
       };
     };
   };

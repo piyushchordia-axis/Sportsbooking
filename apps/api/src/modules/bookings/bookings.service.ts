@@ -1162,6 +1162,110 @@ export class BookingsService {
   }
 
   /**
+   * Webhook: a Razorpay `payment.failed` event for a prepay order. Releases the
+   * booking immediately instead of waiting for the 15-minute reaper, so a failed
+   * payment frees the court right away. Idempotent + conservative: ONLY a still-
+   * PENDING, never-captured PREPAY booking is released (slots deleted, status →
+   * cancelled, paymentStatus → failed) — mirroring the reaper. A booking that
+   * actually captured a payment, is already paid/settled, or already cancelled is
+   * left untouched, so a stray failed event for one attempt can never cancel a
+   * paid booking. No refund is issued (nothing was captured). Internal: called
+   * from the signature-verified webhook, so it runs under the booking's tenant.
+   */
+  async markPaymentFailed(orderId: string): Promise<{ released: boolean }> {
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({
+        where: eq(bookings.razorpayOrderId, orderId),
+      }),
+    );
+    if (!booking) return { released: false };
+
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      // Serialize against a concurrent capture (webhook ordering isn't
+      // guaranteed): lock the row, then re-read under the lock.
+      await tx.execute(
+        sql`SELECT 1 FROM bookings WHERE id = ${booking.id} FOR UPDATE`,
+      );
+      const fresh = await tx.query.bookings.findFirst({
+        where: eq(bookings.id, booking.id),
+      });
+      if (!fresh) return { released: false };
+      const uncapturedPending =
+        fresh.status !== BookingStatus.CANCELLED &&
+        fresh.payMode === PayMode.PREPAY &&
+        fresh.paymentStatus === PaymentStatus.PENDING &&
+        fresh.razorpayPaymentId == null;
+      if (!uncapturedPending) return { released: false };
+
+      await tx.delete(slots).where(eq(slots.bookingId, fresh.id));
+      await tx
+        .update(bookings)
+        .set({
+          status: BookingStatus.CANCELLED,
+          paymentStatus: PaymentStatus.FAILED,
+        })
+        .where(eq(bookings.id, fresh.id));
+      this.logger.log(
+        `payment.failed: released PENDING prepay booking ${fresh.id} (order ${orderId}); slots freed.`,
+      );
+      return { released: true };
+    });
+  }
+
+  /**
+   * Webhook: a Razorpay `refund.processed` / `refund.created` event. Reconciles a
+   * gateway refund back to the booking so refunded money is never invisible.
+   * Idempotent: if this refund id is already in the payment ledger (our own
+   * cancel() path issued it, or a redelivered webhook), it's a no-op. A refund we
+   * have NO record of — one initiated from the Razorpay dashboard, bypassing
+   * cancel() — is recorded to the ledger and the booking is marked REFUNDED, with
+   * a warning for ops to reconcile the booking state (slots are not auto-freed
+   * here to avoid firing clawback side-effects from a webhook). Matched by the
+   * captured payment id. Internal: signature-verified webhook → booking's tenant.
+   */
+  async reconcileRefund(input: {
+    paymentId: string;
+    refundId: string;
+    amountRupees: number;
+    status: string;
+  }): Promise<{ reconciled: boolean }> {
+    const booking = await this.db.withTenantBypass((tx) =>
+      tx.query.bookings.findFirst({
+        where: eq(bookings.razorpayPaymentId, input.paymentId),
+      }),
+    );
+    if (!booking) return { reconciled: false };
+
+    return this.db.withTenantId(booking.ownerId, async (tx) => {
+      if (await this.paymentLedger.existsByGatewayId(tx, input.refundId)) {
+        return { reconciled: false };
+      }
+      await this.paymentLedger.record(tx, {
+        ownerId: booking.ownerId,
+        customerId: booking.customerId,
+        refType: 'booking',
+        refId: booking.id,
+        type: 'refund',
+        gatewayId: input.refundId,
+        amount: input.amountRupees.toString(),
+        status: input.status,
+        note: 'Reconciled from Razorpay refund webhook (gateway-initiated)',
+      });
+      if (booking.paymentStatus !== PaymentStatus.REFUNDED) {
+        await tx
+          .update(bookings)
+          .set({ paymentStatus: PaymentStatus.REFUNDED })
+          .where(eq(bookings.id, booking.id));
+      }
+      this.logger.warn(
+        `Reconciled gateway-initiated refund ${input.refundId} for booking ${booking.id} ` +
+          `(payment ${input.paymentId}); marked REFUNDED — review booking/slot state.`,
+      );
+      return { reconciled: true };
+    });
+  }
+
+  /**
    * Confirm a Razorpay prepay handshake and settle the booking (PRD §7).
    * Safe & idempotent:
    *  - the supplied razorpayOrderId must match the order stored on the booking,

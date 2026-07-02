@@ -56,6 +56,20 @@ export class PaymentLedgerService {
   }
 
   /**
+   * Whether a gateway transaction with this id is already recorded. Makes
+   * refund-webhook reconciliation idempotent: a refund we already logged from our
+   * own cancel path (or a redelivered webhook) must not be double-recorded.
+   */
+  async existsByGatewayId(tx: DbTx, gatewayId: string): Promise<boolean> {
+    const rows = await tx
+      .select({ id: payments.id })
+      .from(payments)
+      .where(eq(payments.gatewayId, gatewayId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  /**
    * List the caller's gateway transactions, newest first, optionally scoped to
    * one entity. Tenant isolation is enforced by an explicit ownerId filter —
    * RLS is not forced in production, so withTenant's session var alone would

@@ -1303,6 +1303,11 @@ export const api = {
     post<void>(`/notifications/${id}/read`),
   /** Mark every unread notification read. */
   markAllNotificationsRead: () => post<void>('/notifications/read-all'),
+  // ---- player (customer) in-app bell ----
+  listMyNotifications: () => get<NotificationFeed>('/me/notifications'),
+  markMyNotificationRead: (id: string) =>
+    post<void>(`/me/notifications/${id}/read`),
+  markAllMyNotificationsRead: () => post<void>('/me/notifications/read-all'),
 
   // ---- owner: global search ----
   /** Owner/staff quick-search across venues, players, tournaments, bookings. */

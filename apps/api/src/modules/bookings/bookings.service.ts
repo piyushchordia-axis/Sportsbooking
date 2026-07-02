@@ -2485,6 +2485,14 @@ export class BookingsService {
     venueName: string,
     slotCount: number,
   ): Promise<void> {
+    // In-app player bell — the primary player notification surface (no mobile
+    // needed). Best-effort: createForCustomer never throws.
+    await this.feed.createForCustomer(customerId, {
+      type: 'booking_created',
+      title: 'Booking confirmed',
+      body: `Your booking at ${venueName} is confirmed for ${slotCount} slot(s).`,
+      link: '/my-bookings',
+    });
     try {
       const customer = await this.db.withTenantBypass((tx) =>
         tx.query.users.findFirst({

@@ -703,7 +703,10 @@ export const notificationType = pgEnum("NotificationType", ['booking_created', '
 
 export const notifications = pgTable("notifications", {
 	id: text().primaryKey().notNull(),
-	ownerId: text().notNull(),
+	// Recipient is EXACTLY ONE of ownerId (owner/staff bell) or customerId
+	// (player bell) — invariant enforced in code, not a DB CHECK. Both nullable.
+	ownerId: text(),
+	customerId: text(),
 	type: notificationType().notNull(),
 	title: text().notNull(),
 	body: text(),
@@ -712,10 +715,16 @@ export const notifications = pgTable("notifications", {
 	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
 	index("notifications_ownerId_idx").using("btree", table.ownerId.asc().nullsLast()),
+	index("notifications_customerId_idx").using("btree", table.customerId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.ownerId],
 			foreignColumns: [owners.id],
 			name: "notifications_ownerId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.customerId],
+			foreignColumns: [users.id],
+			name: "notifications_customerId_fkey"
 		}).onUpdate("cascade").onDelete("cascade"),
 	pgPolicy("tenant_isolation", { as: "permissive", for: "all", to: ["public"], using: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`, withCheck: sql`(app_bypass_rls() OR ("ownerId" = app_current_owner_id()))`  }),
 ]);

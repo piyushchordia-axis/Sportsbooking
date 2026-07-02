@@ -14,6 +14,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStorefront } from '../storefront/StorefrontProvider';
 import { FloodlitToastProvider, useFloodlitToast } from '../floodlit/toast';
+import { PlayerBell } from './PlayerBell';
 import { cn } from './ui/utils';
 
 /** WCAG-ish contrast pick for text on a brand-coloured chip. */
@@ -201,8 +202,9 @@ export function ConsumerLayout() {
             >
               {mode === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            {/* No player avatar here — the Profile tab in the nav already covers
-                account access. Guests still get a Sign-in affordance. */}
+            {/* Player bell — signed-in players get in-app notifications; the
+                Profile tab covers the rest of account access. Guests get Sign-in. */}
+            {isPlayer && <PlayerBell />}
             {!isPlayer && (
               <Link
                 to="/login"

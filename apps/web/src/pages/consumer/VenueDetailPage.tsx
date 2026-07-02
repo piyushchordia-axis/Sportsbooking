@@ -29,7 +29,11 @@ import { EmptyState, ImageWithFallback } from '../../components/common';
 import { DateRail, SlotCell, TierLegend } from '../../components/slot-ui';
 import { FALLBACK_VENUE_PHOTO, venuePhoto } from '../../lib/imagery';
 import { normalizeMobile } from '../../lib/mobile';
-import { openCheckout, razorpayEnabled } from '../../lib/razorpay';
+import {
+  openCheckout,
+  razorpayEnabled,
+  onlinePrepayAvailable,
+} from '../../lib/razorpay';
 import { useAuth } from '../../auth/AuthContext';
 import { useFloodlitToast, flMoney } from '../../floodlit/toast';
 import { label } from '../../lib/labels';
@@ -1371,20 +1375,26 @@ export function VenueDetailPage() {
 
               {/* PAY */}
               <div className="px-4 py-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => !repeatWeekly && checkout(PayMode.PREPAY)}
-                    disabled={!selected.size || repeatWeekly || submitting}
-                    title={repeatWeekly ? 'Weekly bookings are pay-at-venue only' : undefined}
-                    className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
-                  >
-                    <div className="text-sm font-semibold">{submitting ? 'Booking…' : 'Prepay'}</div>
-                    <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
-                      Razorpay · slot locked
-                    </div>
-                  </button>
+                {/* Online prepay is offered only when a payment gateway is
+                    configured (or in a dev build). A production build without
+                    VITE_RAZORPAY_KEY_ID hides prepay and shows pay-at-venue only,
+                    so a customer is never sent to a checkout that can't charge. */}
+                <div className={`grid gap-2 ${onlinePrepayAvailable ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {onlinePrepayAvailable && (
+                    <button
+                      type="button"
+                      onClick={() => !repeatWeekly && checkout(PayMode.PREPAY)}
+                      disabled={!selected.size || repeatWeekly || submitting}
+                      title={repeatWeekly ? 'Weekly bookings are pay-at-venue only' : undefined}
+                      className="rounded-xl p-3.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--line-strong)' }}
+                    >
+                      <div className="text-sm font-semibold">{submitting ? 'Booking…' : 'Prepay'}</div>
+                      <div className="mt-0.5 text-[11px]" style={{ color: 'var(--faint)' }}>
+                        Razorpay · slot locked
+                      </div>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => checkout(PayMode.AT_VENUE)}
@@ -1401,8 +1411,9 @@ export function VenueDetailPage() {
 
                 {/* Deposit split — only when the venue offers a partial deposit
                     and the cart actually splits (balance due > 0). Weekly is
-                    pay-at-venue only, so it's hidden while Repeat is on. */}
-                {depositAvailable && !repeatWeekly && (
+                    pay-at-venue only, so it's hidden while Repeat is on. Requires
+                    online prepay (it charges the deposit via the gateway). */}
+                {depositAvailable && !repeatWeekly && onlinePrepayAvailable && (
                   <button
                     type="button"
                     onClick={() => checkout(PayMode.PREPAY, 'deposit')}

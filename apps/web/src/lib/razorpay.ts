@@ -18,6 +18,25 @@ const KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID as string | undefined;
 /** True only when a Razorpay key is configured (production). */
 export const razorpayEnabled = !!KEY_ID;
 
+/**
+ * Whether the storefront may offer online prepay at all. In a DEV build the
+ * mock-payment path is acceptable (lets us exercise prepay without a gateway);
+ * in a production build it is NOT — a prod build without a key would create a
+ * PENDING prepay booking, open no checkout, and let it silently expire. So a
+ * production build without a Razorpay key must hide online prepay and offer only
+ * pay-at-venue. UI surfaces gate their prepay controls on this.
+ */
+export const onlinePrepayAvailable = razorpayEnabled || import.meta.env.DEV;
+
+// Loud runtime signal if a production bundle shipped without the key (online
+// prepay silently unavailable). Build-time detection lives in vite.config.ts.
+if (import.meta.env.PROD && !razorpayEnabled) {
+  console.warn(
+    '[payments] VITE_RAZORPAY_KEY_ID is not set — online prepay is DISABLED; ' +
+      'the storefront will offer pay-at-venue only.',
+  );
+}
+
 /** Signature payload Razorpay hands back on a successful payment. */
 export interface RazorpaySuccess {
   razorpay_payment_id: string;

@@ -32,6 +32,7 @@ import {
   UserRole,
 } from '@sportsbooking/shared';
 import { DateTime } from 'luxon';
+import { VENUE_TZ } from '../../common/time';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { customerSegments } from '../../db/segments';
@@ -125,14 +126,6 @@ export interface CustomerBooking {
   }[];
   createdAt: string; // ISO
 }
-
-/**
- * Single-region launch: every venue runs on India Standard Time. Venue
- * openTime/closeTime are IST wall-clock, so grid validation (hour-of-day) and
- * recurrence expansion must interpret slot ISO strings in this zone, never the
- * server's. Mirrors AvailabilityService's VENUE_TZ — keep the two in sync.
- */
-const VENUE_TZ = 'Asia/Kolkata';
 
 /**
  * The full price breakdown for a cart — the SINGLE source of truth shared by
@@ -417,8 +410,8 @@ export class BookingsService {
     const slotRows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
     const unitIds = new Set<string>();
     for (const s of slotInputs) {
-      const start = DateTime.fromISO(s.start).toJSDate();
-      const end = DateTime.fromISO(s.end).toJSDate();
+      const start = DateTime.fromISO(s.start, { zone: VENUE_TZ }).toJSDate();
+      const end = DateTime.fromISO(s.end, { zone: VENUE_TZ }).toJSDate();
       const durationMin = Math.round((end.getTime() - start.getTime()) / 60000);
       const resolved = await this.pricing.resolve(s.unitId, start, durationMin, tx);
       slotSubtotal = slotSubtotal.add(resolved.price);
@@ -1018,7 +1011,7 @@ export class BookingsService {
         ...slotsArg.map((s) =>
           and(
             eq(slots.unitId, s.unitId),
-            eq(slots.startsAt, DateTime.fromISO(s.start).toJSDate()),
+            eq(slots.startsAt, DateTime.fromISO(s.start, { zone: VENUE_TZ }).toJSDate()),
           ),
         ),
       ),
@@ -1569,14 +1562,14 @@ export class BookingsService {
         slotConds.push(
           gte(
             slots.startsAt,
-            DateTime.fromISO(filters.from).startOf('day').toJSDate(),
+            DateTime.fromISO(filters.from, { zone: VENUE_TZ }).startOf('day').toJSDate(),
           ),
         );
       if (filters.to)
         slotConds.push(
           lte(
             slots.startsAt,
-            DateTime.fromISO(filters.to).endOf('day').toJSDate(),
+            DateTime.fromISO(filters.to, { zone: VENUE_TZ }).endOf('day').toJSDate(),
           ),
         );
       if (slotConds.length > 0) {
@@ -1944,8 +1937,8 @@ export class BookingsService {
       let newSlotSubtotal = dec(0);
       const rows: { unitId: string; startsAt: Date; endsAt: Date }[] = [];
       for (const s of newSlots) {
-        const start = DateTime.fromISO(s.start).toJSDate();
-        const end = DateTime.fromISO(s.end).toJSDate();
+        const start = DateTime.fromISO(s.start, { zone: VENUE_TZ }).toJSDate();
+        const end = DateTime.fromISO(s.end, { zone: VENUE_TZ }).toJSDate();
         const durationMin = Math.round(
           (end.getTime() - start.getTime()) / 60000,
         );
@@ -2364,9 +2357,11 @@ export class BookingsService {
     }
   }
 
-  /** Format an ISO start time for a notification body (local-ish, concise). */
+  /** Format an ISO start time (a stored UTC instant) in venue time (IST) for a
+   * notification body. Pinned to VENUE_TZ so it reads correctly regardless of the
+   * server's timezone. */
   private formatSlotTime(iso: string): string {
-    const dt = DateTime.fromISO(iso);
+    const dt = DateTime.fromISO(iso, { zone: VENUE_TZ });
     return dt.isValid ? dt.toFormat('d LLL, h:mm a') : iso;
   }
 

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DayType, TimeBand } from '@sportsbooking/shared';
 import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import { VENUE_TZ } from '../../common/time';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { Decimal, dec } from '../../db/money';
@@ -90,7 +91,9 @@ export class PricingService {
       throw new NotFoundException(`No pricing configured for unit ${unitId}`);
     }
 
-    const dt = DateTime.fromJSDate(startsAt);
+    // Pricing bands (peak hour) and dayType (weekend) are defined in venue time,
+    // so read the stored instant in IST — not the server's zone.
+    const dt = DateTime.fromJSDate(startsAt, { zone: VENUE_TZ });
     const ctx = {
       dayType: PricingService.dayType(dt),
       timeBand: PricingService.timeBand(dt),

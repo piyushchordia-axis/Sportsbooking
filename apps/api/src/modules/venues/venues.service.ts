@@ -17,6 +17,7 @@ import {
   or,
 } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import { VENUE_TZ } from '../../common/time';
 import { DbService } from '../../db/db.service';
 import type { DbTx } from '../../db';
 import { StorageService } from '../storage/storage.service';
@@ -331,7 +332,8 @@ export class VenuesService {
       const courtCount = allUnits.length;
       const activeUnitIds = allUnits.filter((u) => u.active).map((u) => u.id);
 
-      const weekStart = DateTime.now().startOf('week');
+      // Week boundary in venue time (IST), not the server's zone.
+      const weekStart = DateTime.now().setZone(VENUE_TZ).startOf('week');
       const weekEnd = weekStart.plus({ weeks: 1 });
 
       const weekBookings = await tx.query.bookings.findMany({
@@ -382,8 +384,8 @@ export class VenuesService {
       if (!venue) throw new NotFoundException('Venue not found');
 
       const date = query.date;
-      const dayStart = DateTime.fromISO(`${date}T${venue.openTime}`);
-      const dayEnd = DateTime.fromISO(`${date}T${venue.closeTime}`);
+      const dayStart = DateTime.fromISO(`${date}T${venue.openTime}`, { zone: VENUE_TZ });
+      const dayEnd = DateTime.fromISO(`${date}T${venue.closeTime}`, { zone: VENUE_TZ });
 
       const activeCourts = (venue.bookableUnits ?? []).filter((u) => u.active);
 
@@ -464,8 +466,8 @@ export class VenuesService {
       });
       if (!unit) throw new NotFoundException('Unit not found');
 
-      const start = DateTime.fromISO(dto.start).toJSDate();
-      const end = DateTime.fromISO(dto.end).toJSDate();
+      const start = DateTime.fromISO(dto.start, { zone: VENUE_TZ }).toJSDate();
+      const end = DateTime.fromISO(dto.end, { zone: VENUE_TZ }).toJSDate();
 
       const removed = await tx
         .delete(slots)
@@ -1024,8 +1026,8 @@ export class VenuesService {
       if (!unit) throw new NotFoundException('Unit not found');
       const granularity = unit.gameCatalogue.slotGranularityMin;
 
-      const start = DateTime.fromISO(dto.start);
-      const end = DateTime.fromISO(dto.end);
+      const start = DateTime.fromISO(dto.start, { zone: VENUE_TZ });
+      const end = DateTime.fromISO(dto.end, { zone: VENUE_TZ });
 
       // No recurrence → single window; a clash aborts (unchanged behaviour).
       if (!dto.recurrence) {

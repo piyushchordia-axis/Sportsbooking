@@ -2,19 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { CalendarResponse, ResolvedSlot, SlotStatus } from '@sportsbooking/shared';
 import { and, eq, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import { VENUE_TZ } from '../../common/time';
 import { DbService } from '../../db/db.service';
 import { bookableUnits, slots as slotsTable } from '../../db/schema';
 import { PricingService } from '../pricing/pricing.service';
-
-/**
- * All venues operate on India Standard Time (single-region launch). Venue
- * openTime/closeTime are IST wall-clock strings, so the day window and the slot
- * grid MUST be built in this zone — never the server's system zone. On a UTC
- * server, parsing "06:00" without a zone yields 06:00 UTC (= 11:30 IST), which
- * shifts every displayed slot and breaks the booked-slot match. Pinning the
- * zone here makes availability identical regardless of where the API runs.
- */
-const VENUE_TZ = 'Asia/Kolkata';
 
 /**
  * Builds the live availability calendar for a unit/day with resolved per-court

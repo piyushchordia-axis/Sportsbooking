@@ -20,10 +20,15 @@ describe('PricingService.resolve', () => {
 
   const makeService = () => new PricingService({} as never);
 
+  // Fixtures are EXPLICIT UTC instants (…Z) for the intended IST wall-clock, so
+  // the band/day are computed in venue time (Asia/Kolkata) independent of the
+  // test runner's TZ — a laptop on IST and CI on UTC must agree. (IST = UTC+5:30,
+  // no DST.) Several rows deliberately fall in a different band in UTC than in
+  // IST, which guards the pricing TZ pinning against regression.
   it('falls back to base rule on a weekday morning', async () => {
     const svc = makeService();
-    // 2026-06-15 is a Monday; 09:00 = morning
-    const r = await svc.resolve('u1', new Date('2026-06-15T09:00:00'), 60, tx);
+    // 2026-06-15 09:00 IST (Monday, morning) = 03:30Z
+    const r = await svc.resolve('u1', new Date('2026-06-15T03:30:00Z'), 60, tx);
     expect(Number(r.price)).toBe(600);
     expect(r.dayType).toBe(DayType.WEEKDAY);
     expect(r.timeBand).toBe(TimeBand.MORNING);
@@ -31,21 +36,25 @@ describe('PricingService.resolve', () => {
 
   it('picks the weekend rule on a Saturday morning', async () => {
     const svc = makeService();
-    // 2026-06-20 is a Saturday; 09:00 = morning
-    const r = await svc.resolve('u1', new Date('2026-06-20T09:00:00'), 60, tx);
+    // 2026-06-20 09:00 IST (Saturday, morning) = 03:30Z
+    const r = await svc.resolve('u1', new Date('2026-06-20T03:30:00Z'), 60, tx);
     expect(Number(r.price)).toBe(800);
   });
 
   it('picks the most specific weekend+evening rule', async () => {
     const svc = makeService();
-    // Saturday 19:00 = evening → both weekend and evening dims match
-    const r = await svc.resolve('u1', new Date('2026-06-20T19:00:00'), 60, tx);
+    // 2026-06-20 19:00 IST (Saturday, evening) = 13:30Z (which is AFTERNOON in
+    // UTC — asserting 1100/evening proves IST is used, not the server zone).
+    const r = await svc.resolve('u1', new Date('2026-06-20T13:30:00Z'), 60, tx);
     expect(Number(r.price)).toBe(1100);
+    expect(r.timeBand).toBe(TimeBand.EVENING);
   });
 
   it('picks evening premium on a weekday evening', async () => {
     const svc = makeService();
-    const r = await svc.resolve('u1', new Date('2026-06-15T19:00:00'), 60, tx);
+    // 2026-06-15 19:00 IST (Monday, evening) = 13:30Z (afternoon in UTC)
+    const r = await svc.resolve('u1', new Date('2026-06-15T13:30:00Z'), 60, tx);
     expect(Number(r.price)).toBe(900);
+    expect(r.timeBand).toBe(TimeBand.EVENING);
   });
 });

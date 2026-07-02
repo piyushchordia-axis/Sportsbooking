@@ -15,10 +15,14 @@
 # bind 127.0.0.1 only — nothing is exposed to the internet directly.
 # Redis is intentionally absent — the app doesn't use it (Throttler is in-memory).
 #
+# Images are tagged with the deploy's git short SHA via IMAGE_TAG (defaults to
+# `latest`); deploy.sh sets it so the running stack maps to a commit and rollback
+# is just `up -d` with a prior tag. Use deploy/deploy.sh rather than raw compose.
+#
 # Usage:
 #   cp .env.production.example .env      # then fill DATABASE_URL(s) + JWT_SECRET
-#   docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   ./deploy/deploy.sh                   # (wraps: build + migrate + up, SHA-tagged)
+#   IMAGE_TAG=<sha> docker compose -f docker-compose.prod.yml up -d   # manual/rollback
 
 name: sportsbooking
 
@@ -27,7 +31,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: sportsbooking-api:latest
+    image: sportsbooking-api:${IMAGE_TAG:-latest}
     container_name: sportsbooking-api
     restart: unless-stopped
     init: true
@@ -51,7 +55,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    image: sportsbooking-web:latest
+    image: sportsbooking-web:${IMAGE_TAG:-latest}
     container_name: sportsbooking-web
     restart: unless-stopped
     init: true
@@ -68,7 +72,7 @@ services:
   #   db:set-app-password -> rotate the runtime role pw to match DATABASE_URL
   #   db:seed             -> demo data (override the command)
   migrate:
-    image: sportsbooking-api:latest
+    image: sportsbooking-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: apps/api/Dockerfile

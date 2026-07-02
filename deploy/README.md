@@ -32,7 +32,9 @@ Nginx — the same pattern as the other apps on this host.
 | `docker-compose.prod.yml` | the stack (`api`, `web`, `migrate`) |
 | `.env.production.example` | env template → copy to `.env` on the server |
 | `deploy/nginx-site.conf.template` | host Nginx server block (sudo) |
-| `deploy/deploy.sh` | sync + build + migrate + up |
+| `deploy/deploy.sh` | ship committed ref + build SHA-tagged images + migrate + up |
+| `deploy/rollback.sh` | re-point the stack at a prior image tag |
+| `deploy/backup.sh` | nightly pg_dump + uploads snapshot (cron) |
 
 ## One-time setup (on the server)
 
@@ -90,9 +92,21 @@ SEED=1 MIGRATE=1 SKIP_BACKUP=1 ./deploy/deploy.sh
 MIGRATE=1 ./deploy/deploy.sh
 ```
 
-`deploy.sh` rsyncs the working tree (no `node_modules`/`.git`/`.env`), builds the
-images, optionally backs up + runs `db:migrate` and `db:seed`, brings the stack
-up, and curls `/api/healthz`.
+`deploy.sh` ships the **committed** ref (via `git archive`, refusing a dirty tree
+unless `ALLOW_DIRTY=1`), builds images **tagged with the git short SHA**, optionally
+backs up + runs `db:migrate`/`db:seed`, starts the stack on that tag, records the
+SHA in `deploys.log`, and curls `/api/healthz`. Deploy a specific commit with
+`REF=<sha|tag> ./deploy/deploy.sh`.
+
+### Rollback
+Prior image tags stay on the server, so rollback is instant (no rebuild):
+```bash
+ssh e2e-server 'tail ~/sportsbooking/deploys.log'   # find the previous good SHA
+./deploy/rollback.sh <previous-sha>
+```
+⚠️ Rollback reverts **code only** — it does not undo DB migrations. If the deploy
+you're reverting ran `MIGRATE=1`, restore the pre-migration backup (`deploy/backup.sh`
+writes one before every migration) instead of just rolling back the image.
 
 ## Migrations
 

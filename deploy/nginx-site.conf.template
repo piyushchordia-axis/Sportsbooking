@@ -15,6 +15,11 @@ server {
     # Match the web container's upload ceiling so large logos/photos pass through.
     client_max_body_size 12m;
 
+    # HSTS at the TLS-terminating layer (the web container also sets it as
+    # defense-in-depth). certbot preserves this directive when it adds the ssl
+    # 443 listener + the 80->443 redirect (see the listen note below).
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
     location / {
         proxy_pass http://127.0.0.1:8093;   # = WEB_PORT in .env
         proxy_http_version 1.1;
@@ -27,5 +32,8 @@ server {
 
     listen 80;
     listen [::]:80;
-    # `certbot --nginx` rewrites the above to 443 ssl + an 80->443 redirect.
+    # `certbot --nginx` rewrites the above to `listen 443 ssl` + a managed cert,
+    # and adds a separate `server { listen 80; ... return 301 https://... }`
+    # block so all HTTP is redirected to HTTPS. Verify after running certbot:
+    #   curl -sI http://SUBDOMAIN.enaacreations.com | grep -i location   # -> https://
 }

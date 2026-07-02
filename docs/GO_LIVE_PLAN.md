@@ -68,10 +68,10 @@ Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "
 
 | # | Task | Files | Effort |
 |---|------|-------|--------|
-| 4.1 ∥ | Env-schema validation at boot (zod/joi) covering `DATABASE_URL`, Razorpay, storage | `app.module.ts:47` | S |
-| 4.2 ∥ | Error tracking (Sentry/OTel) with alerting | api bootstrap | M |
-| 4.3 ∥ | DB-aware readiness probe (current healthz is liveness-only) | `health.controller.ts:9` | S |
-| 4.4 ∥ | SPA security headers (HSTS, CSP, X-Frame-Options, nosniff) + commit the 80→443 redirect | `apps/web/nginx.conf`, `deploy/nginx-site.conf.template` | S |
+| 4.1 ✅ | **DONE** — `config/env.validation.ts` wired into `ConfigModule.forRoot({ validate })`: fails boot on missing `DATABASE_URL`, bad `NODE_ENV`/`API_PORT`, half-configured Razorpay, or S3 mode without credentials — with an aggregated error. Verified: bad config throws, good config + app boot pass. | S |
+| 4.2 ⏳ | Error tracking (Sentry/OTel) — **needs a Sentry DSN/account** (external). Wiring is a small add once you provide the DSN. | M |
+| 4.3 ✅ | **DONE** — Added `GET /api/readyz` (`ReadinessController`) that pings the DB (`SELECT 1`); `/healthz` stays liveness-only by design. Verified: DB up → 200 `ready`; DB down → 503 `not_ready` while `/healthz` stays 200. DB error logged, not returned (endpoint is public). | S |
+| 4.4 ✅ | **DONE** — Added security headers to `apps/web/nginx.conf` (X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, `frame-ancestors` CSP, HSTS) — repeated in the `index.html`/`assets` locations per nginx's non-merging `add_header`. Added HSTS + an explicit 80→443 redirect note to `deploy/nginx-site.conf.template`. Verified `nginx -t`. A full resource-restricting CSP (script-src) is deferred (needs SPA + Razorpay testing) → follow-up. | S |
 | 4.5 | Move rate-limit store to Redis before scaling out; verify `trust proxy` hop count vs the real Nginx chain | `app.module.ts:54`, `main.ts:22` | M |
 
 **Exit criteria:** A synthetic DB outage flips the readiness probe; a thrown error appears in the tracker with an alert; `securityheaders.com` grades the SPA A/A+.

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { validateEnv } from './config/env.validation';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -44,7 +45,7 @@ import { SavedVenuesModule } from './modules/saved-venues/saved-venues.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ScheduleModule.forRoot(),
     // Global rate-limiting (security H1). A generous default ceiling guards
     // against scraping/DoS-lite without disrupting normal booking flows;

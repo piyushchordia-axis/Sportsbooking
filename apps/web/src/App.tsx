@@ -1,7 +1,11 @@
-import { UserRole } from '@sportsbooking/shared';
+import { FeatureFlag, UserRole } from '@sportsbooking/shared';
 import { lazy, ReactNode, Suspense } from 'react';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { isRole, useAuth } from './auth/AuthContext';
+import {
+  EntitlementsProvider,
+  useEntitlements,
+} from './auth/EntitlementsContext';
 import { Layout } from './components/Layout';
 import { ConsumerLayoutRoot } from './components/ConsumerLayout';
 import { StorefrontProvider } from './storefront/StorefrontProvider';
@@ -115,12 +119,32 @@ const owner = (el: ReactNode) => (
 );
 const admin = (el: ReactNode) => <Require roles={[UserRole.SUPER_ADMIN]}>{el}</Require>;
 
-/** Owner/staff/super-admin console — the sidebar shell. */
+/**
+ * Route guard for a flag-gated owner page: while entitlements load it renders
+ * (no flash), then redirects a typed/bookmarked URL to the Dashboard if the
+ * owner isn't entitled. Defense-in-depth — the server @RequireFlag guard is the
+ * real boundary; this just avoids showing a page that only 403s on action.
+ */
+function RequireFlag({ flag, children }: { flag: FeatureFlag; children: ReactNode }) {
+  const { flags, loaded } = useEntitlements();
+  if (loaded && flags && !flags.includes(flag)) {
+    return <Navigate to="/owner" replace />;
+  }
+  return <>{children}</>;
+}
+
+/** owner()-wrapped + flag-gated. */
+const flagged = (el: ReactNode, flag: FeatureFlag): ReactNode =>
+  owner(<RequireFlag flag={flag}>{el}</RequireFlag>);
+
+/** Owner/staff/super-admin console — the sidebar shell + entitlements context. */
 function AdminShell() {
   return (
-    <Layout>
-      <Outlet />
-    </Layout>
+    <EntitlementsProvider>
+      <Layout>
+        <Outlet />
+      </Layout>
+    </EntitlementsProvider>
   );
 }
 
@@ -178,13 +202,13 @@ export function App() {
             element={owner(<OwnerVenueDetailPage />)}
           />
           <Route path="/owner/branding" element={owner(<BrandingPage />)} />
-          <Route path="/owner/packs" element={owner(<PacksPage />)} />
+          <Route path="/owner/packs" element={flagged(<PacksPage />, FeatureFlag.MEMBERSHIPS)} />
           <Route path="/owner/offers" element={owner(<OffersPage />)} />
           <Route path="/owner/players" element={owner(<PlayersPage />)} />
           <Route path="/owner/staff" element={owner(<StaffPage />)} />
-          <Route path="/owner/tournaments" element={owner(<TournamentsAdminPage />)} />
+          <Route path="/owner/tournaments" element={flagged(<TournamentsAdminPage />, FeatureFlag.TOURNAMENTS)} />
           <Route path="/owner/activity" element={owner(<ActivityPage />)} />
-          <Route path="/owner/loyalty" element={owner(<LoyaltyPage />)} />
+          <Route path="/owner/loyalty" element={flagged(<LoyaltyPage />, FeatureFlag.LOYALTY)} />
           <Route path="/admin" element={admin(<PlatformPage />)} />
           <Route path="/admin/games" element={admin(<GamesPage />)} />
           <Route path="/admin/owners" element={admin(<OwnersPage />)} />

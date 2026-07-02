@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { api, type NotificationItem, type SearchResults } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useEntitlements } from '../auth/EntitlementsContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { initials } from '../lib/imagery';
 import {
@@ -148,10 +149,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [pwOpen, setPwOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [logoBroken, setLogoBroken] = useState(false);
-  // Owner feature entitlements — null until loaded (we show all nav items while
-  // loading, then hide the ones the owner isn't entitled to). Staff inherit the
-  // owner's flags (the endpoint reads the owner row); other roles skip the fetch.
-  const [entFlags, setEntFlags] = useState<FeatureFlag[] | null>(null);
+  // Owner feature entitlements (shared with the route guards). null until loaded
+  // → we show all nav items while loading, then hide unentitled ones.
+  const { flags: entFlags } = useEntitlements();
 
   useEffect(() => setLogoBroken(false), [branding.logoUrl]);
   useEffect(() => {
@@ -166,18 +166,6 @@ export function Layout({ children }: { children: ReactNode }) {
     setMobileOpen(false);
     setUserMenu(false);
   }, [loc.pathname]);
-  // Load feature entitlements for owner/staff to gate the sidebar. Best-effort:
-  // on failure, treat as "no flags" so gated items hide rather than 403 on click.
-  useEffect(() => {
-    if (user?.role === UserRole.OWNER || user?.role === UserRole.STAFF) {
-      api
-        .getEntitlements()
-        .then((e) => setEntFlags(e.featureFlags))
-        .catch(() => setEntFlags([]));
-    } else {
-      setEntFlags(null);
-    }
-  }, [user?.id, user?.role]);
 
   // The login screen always renders full-bleed (no app shell), even if a stale
   // session is still in localStorage.

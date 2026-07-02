@@ -92,8 +92,12 @@ export class NotificationFeedService {
    * context, so owner/staff only ever see their own tenant's feed.
    */
   list(user: RequestUser): Promise<NotificationFeedList> {
+    // Explicit ownerId filter — RLS is not forced in prod, so withTenant alone
+    // would return every tenant's notifications and a platform-wide unread count.
+    const ownerId = user.ownerId!;
     return this.db.withTenant(async (tx) => {
       const rows = await tx.query.notifications.findMany({
+        where: eq(notifications.ownerId, ownerId),
         orderBy: desc(notifications.createdAt),
         limit: 30,
       });
@@ -101,7 +105,12 @@ export class NotificationFeedService {
       const unreadRow = await tx
         .select({ value: count() })
         .from(notifications)
-        .where(isNull(notifications.readAt));
+        .where(
+          and(
+            eq(notifications.ownerId, ownerId),
+            isNull(notifications.readAt),
+          ),
+        );
       const unread = Number(unreadRow[0]?.value ?? 0);
 
       const items: NotificationFeedItem[] = rows.map((r) => ({

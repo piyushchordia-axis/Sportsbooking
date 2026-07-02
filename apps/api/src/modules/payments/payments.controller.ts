@@ -13,6 +13,10 @@ import { ModuleRef } from '@nestjs/core';
 import type { Request } from 'express';
 import { eq } from 'drizzle-orm';
 import { UserRole } from '@sportsbooking/shared';
+import {
+  CurrentUser,
+  RequestUser,
+} from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { DbService } from '../../db/db.service';
@@ -43,12 +47,17 @@ export class PaymentsController {
 
   /**
    * Owner/staff gateway transaction history (captures + refunds), optionally
-   * scoped to one booking or tournament participant. Tenant-isolated via RLS.
+   * scoped to one booking or tournament participant. Tenant-isolated by an
+   * explicit ownerId filter derived from the authenticated user.
    */
   @Roles(UserRole.OWNER, UserRole.STAFF)
   @Get()
-  list(@Query('refType') refType?: string, @Query('refId') refId?: string) {
-    return this.paymentLedger.list({ refType, refId });
+  list(
+    @CurrentUser() user: RequestUser,
+    @Query('refType') refType?: string,
+    @Query('refId') refId?: string,
+  ) {
+    return this.paymentLedger.list({ ownerId: user.ownerId!, refType, refId });
   }
 
   @Public()

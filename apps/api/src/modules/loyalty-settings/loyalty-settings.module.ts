@@ -97,7 +97,10 @@ export class LoyaltySettingsService {
     return this.getConfig(ownerId);
   }
 
-  async getHistory(limit = DEFAULT_HISTORY_LIMIT): Promise<LoyaltyHistoryItem[]> {
+  async getHistory(
+    ownerId: string,
+    limit = DEFAULT_HISTORY_LIMIT,
+  ): Promise<LoyaltyHistoryItem[]> {
     const take = Math.min(MAX_HISTORY_LIMIT, Math.max(1, limit));
     return this.db.withTenant(async (tx) => {
       const rows = await tx
@@ -111,7 +114,14 @@ export class LoyaltySettingsService {
         })
         .from(ledgerTxns)
         .leftJoin(users, eq(users.id, ledgerTxns.customerId))
-        .where(inArray(ledgerTxns.type, [...HISTORY_TYPES]))
+        // Explicit ownerId filter — RLS is not forced in prod, so withTenant
+        // alone would leak other tenants' customer names + point movements.
+        .where(
+          and(
+            eq(ledgerTxns.ownerId, ownerId),
+            inArray(ledgerTxns.type, [...HISTORY_TYPES]),
+          ),
+        )
         .orderBy(desc(ledgerTxns.createdAt))
         .limit(take);
       return rows as LoyaltyHistoryItem[];
@@ -142,8 +152,12 @@ export class LoyaltySettingsController {
 
   @Get('history')
   @Roles(UserRole.OWNER, UserRole.STAFF)
-  getHistory(@Query('limit') limit?: string) {
-    return this.loyalty.getHistory(limit ? Number(limit) : undefined);
+  getHistory(@CurrentUser() user: RequestUser, @Query('limit') limit?: string) {
+    if (!user.ownerId) throw new BadRequestException('No tenant context');
+    return this.loyalty.getHistory(
+      user.ownerId,
+      limit ? Number(limit) : undefined,
+    );
   }
 }
 

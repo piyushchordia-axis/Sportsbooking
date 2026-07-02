@@ -81,15 +81,25 @@ export class SearchService {
     if (term.length < 2) return empty;
 
     const pattern = `%${term}%`;
+    // RLS is not forced in production, so every subquery must filter by ownerId
+    // explicitly — otherwise search leaks venues, players (PII) and bookings
+    // across tenants.
+    const ownerId = user.ownerId!;
 
     return this.db.withTenant(async (tx) => {
       const [venueRows, tournamentRows] = await Promise.all([
         tx.query.venues.findMany({
-          where: or(ilike(venues.name, pattern), ilike(venues.city, pattern)),
+          where: and(
+            eq(venues.ownerId, ownerId),
+            or(ilike(venues.name, pattern), ilike(venues.city, pattern)),
+          ),
           limit: GROUP_LIMIT,
         }),
         tx.query.tournaments.findMany({
-          where: ilike(tournaments.name, pattern),
+          where: and(
+            eq(tournaments.ownerId, ownerId),
+            ilike(tournaments.name, pattern),
+          ),
           limit: GROUP_LIMIT,
         }),
       ]);
@@ -97,11 +107,11 @@ export class SearchService {
       // Players: the owner CRM (ownerCustomers) joined to the per-owner player
       // profile (preferred) and falling back to the global user record for
       // name/mobile, matched case-insensitively on either field.
-      const players = await this.searchPlayers(tx, pattern);
+      const players = await this.searchPlayers(tx, pattern, ownerId);
 
       // Bookings: customer (joined users) name/mobile matches, recent first,
       // with the venue name resolved for display.
-      const bookingsOut = await this.searchBookings(tx, pattern);
+      const bookingsOut = await this.searchBookings(tx, pattern, ownerId);
 
       const venuesOut: VenueResult[] = venueRows.map((v) => ({
         id: v.id,
@@ -125,6 +135,7 @@ export class SearchService {
   private async searchPlayers(
     tx: Parameters<Parameters<DbService['withTenant']>[0]>[0],
     pattern: string,
+    ownerId: string,
   ): Promise<PlayerResult[]> {
     const rows = await tx
       .select({
@@ -141,11 +152,14 @@ export class SearchService {
       )
       .leftJoin(users, eq(users.id, ownerCustomers.customerId))
       .where(
-        or(
-          ilike(playerProfiles.name, pattern),
-          ilike(playerProfiles.mobile, pattern),
-          ilike(users.name, pattern),
-          ilike(users.mobile, pattern),
+        and(
+          eq(ownerCustomers.ownerId, ownerId),
+          or(
+            ilike(playerProfiles.name, pattern),
+            ilike(playerProfiles.mobile, pattern),
+            ilike(users.name, pattern),
+            ilike(users.mobile, pattern),
+          ),
         ),
       )
       .limit(GROUP_LIMIT);
@@ -160,6 +174,7 @@ export class SearchService {
   private async searchBookings(
     tx: Parameters<Parameters<DbService['withTenant']>[0]>[0],
     pattern: string,
+    ownerId: string,
   ): Promise<BookingResult[]> {
     const rows = await tx
       .select({
@@ -173,7 +188,12 @@ export class SearchService {
       .from(bookings)
       .innerJoin(users, eq(users.id, bookings.customerId))
       .leftJoin(venues, eq(venues.id, bookings.venueId))
-      .where(or(ilike(users.name, pattern), ilike(users.mobile, pattern)))
+      .where(
+        and(
+          eq(bookings.ownerId, ownerId),
+          or(ilike(users.name, pattern), ilike(users.mobile, pattern)),
+        ),
+      )
       .orderBy(desc(bookings.createdAt))
       .limit(GROUP_LIMIT);
 

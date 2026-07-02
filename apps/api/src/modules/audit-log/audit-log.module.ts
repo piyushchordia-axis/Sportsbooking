@@ -1,6 +1,10 @@
 import { Controller, Get, Injectable, Module, Query } from '@nestjs/common';
 import { UserRole } from '@sportsbooking/shared';
 import { and, count, desc, eq, type SQL } from 'drizzle-orm';
+import {
+  CurrentUser,
+  RequestUser,
+} from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { DbService } from '../../db/db.service';
 import { auditLogs, users } from '../../db/schema';
@@ -31,13 +35,15 @@ const MAX_PAGE_SIZE = 100;
 /**
  * Read side of the audit trail (PRD §4.x oversight). The global
  * AuditInterceptor writes a row per management mutation; this lists them back to
- * the owner, tenant-scoped by RLS (an owner sees only their org's actions).
+ * the owner, tenant-scoped by an explicit ownerId filter (RLS is not forced in
+ * production, so an owner would otherwise read every tenant's audit trail).
  */
 @Injectable()
 export class AuditLogService {
   constructor(private readonly db: DbService) {}
 
   async list(filter: {
+    ownerId: string;
     action?: string;
     entity?: string;
     page?: number;
@@ -49,10 +55,10 @@ export class AuditLogService {
       Math.max(1, Number(filter.pageSize) || DEFAULT_PAGE_SIZE),
     );
 
-    const conds: SQL[] = [];
+    const conds: SQL[] = [eq(auditLogs.ownerId, filter.ownerId)];
     if (filter.action) conds.push(eq(auditLogs.action, filter.action));
     if (filter.entity) conds.push(eq(auditLogs.entity, filter.entity));
-    const where = conds.length ? and(...conds) : undefined;
+    const where = and(...conds);
 
     return this.db.withTenant(async (tx) => {
       const items = await tx
@@ -83,11 +89,12 @@ export class AuditLogService {
   }
 
   /** Distinct entity labels present in the owner's log, for the filter dropdown. */
-  async entities(): Promise<string[]> {
+  async entities(ownerId: string): Promise<string[]> {
     return this.db.withTenant(async (tx) => {
       const rows = await tx
         .selectDistinct({ entity: auditLogs.entity })
         .from(auditLogs)
+        .where(eq(auditLogs.ownerId, ownerId))
         .orderBy(auditLogs.entity);
       return rows.map((r) => r.entity);
     });
@@ -102,12 +109,14 @@ export class AuditLogController {
   @Roles(UserRole.OWNER)
   @Get()
   list(
+    @CurrentUser() user: RequestUser,
     @Query('action') action?: string,
     @Query('entity') entity?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ): Promise<AuditLogPage> {
     return this.audit.list({
+      ownerId: user.ownerId!,
       action,
       entity,
       page: page ? Number(page) : undefined,
@@ -118,8 +127,8 @@ export class AuditLogController {
   /** Distinct entity labels for the filter dropdown. */
   @Roles(UserRole.OWNER)
   @Get('entities')
-  entities(): Promise<string[]> {
-    return this.audit.entities();
+  entities(@CurrentUser() user: RequestUser): Promise<string[]> {
+    return this.audit.entities(user.ownerId!);
   }
 }
 

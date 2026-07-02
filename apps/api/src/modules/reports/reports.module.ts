@@ -115,10 +115,21 @@ export class ReportsService {
 
   async ownerSummary(user: RequestUser, from?: string, to?: string) {
     const range = parseRange(from, to);
+    // Tenant isolation: RLS is not forced in production (the API connects as the
+    // table owner), so withTenant's session var does NOT filter rows — every
+    // aggregate below must carry an explicit ownerId predicate. Folding it into
+    // the shared condition arrays scopes all the bookings/slots/ledger queries.
+    const ownerId = user.ownerId!;
     // Bookings created in range (used by most revenue/offer/repeat metrics).
-    const bookedConds = dateConds(bookings.createdAt, range);
+    const bookedConds = [
+      eq(bookings.ownerId, ownerId),
+      ...dateConds(bookings.createdAt, range),
+    ];
     // Slots are scoped by their actual start time (when play happens).
-    const slotConds = dateConds(slots.startsAt, range);
+    const slotConds = [
+      eq(slots.ownerId, ownerId),
+      ...dateConds(slots.startsAt, range),
+    ];
 
     return this.db.withTenant(async (tx) => {
       const [bookingCount, cancelled] = await Promise.all([
@@ -156,7 +167,12 @@ export class ReportsService {
       const liabilityRows = await tx
         .select({ amount: ledgerTxns.amount })
         .from(ledgerTxns)
-        .where(sql`${ledgerTxns.lane} LIKE 'pack:%'`);
+        .where(
+          and(
+            eq(ledgerTxns.ownerId, ownerId),
+            sql`${ledgerTxns.lane} LIKE 'pack:%'`,
+          ),
+        );
       const outstandingSessions = liabilityRows.reduce(
         (acc, r) => acc.add(dec(r.amount)),
         new Decimal(0),
@@ -179,11 +195,18 @@ export class ReportsService {
         tx
           .select({ c: count() })
           .from(ownerCustomers)
+          .where(eq(ownerCustomers.ownerId, ownerId))
           .then((r) => r[0].c),
         tx
           .select({ c: count() })
           .from(ledgerTxns)
-          .where(and(eq(ledgerTxns.type, 'pack_buy'), ...dateConds(ledgerTxns.createdAt, range)))
+          .where(
+            and(
+              eq(ledgerTxns.ownerId, ownerId),
+              eq(ledgerTxns.type, 'pack_buy'),
+              ...dateConds(ledgerTxns.createdAt, range),
+            ),
+          )
           .then((r) => r[0].c),
         tx
           .select({ c: count() })
@@ -209,7 +232,8 @@ export class ReportsService {
           openTime: venues.openTime,
           closeTime: venues.closeTime,
         })
-        .from(venues);
+        .from(venues)
+        .where(eq(venues.ownerId, ownerId));
       const venueName = new Map(venueRows.map((v) => [v.id, v.name]));
 
       // --- occupancy: booked slots ÷ available slot-capacity over the range ---
@@ -222,10 +246,16 @@ export class ReportsService {
         .from(bookableUnits)
         .innerJoin(venues, eq(bookableUnits.venueId, venues.id))
         .innerJoin(gameCatalogue, eq(bookableUnits.gameId, gameCatalogue.id))
-        .where(eq(bookableUnits.active, true));
+        .where(
+          and(
+            eq(bookableUnits.active, true),
+            eq(bookableUnits.ownerId, ownerId),
+          ),
+        );
       const earliestUnit = await tx
         .select({ createdAt: bookableUnits.createdAt })
         .from(bookableUnits)
+        .where(eq(bookableUnits.ownerId, ownerId))
         .orderBy(bookableUnits.createdAt)
         .limit(1);
       const days = rangeDays(
@@ -266,7 +296,10 @@ export class ReportsService {
       if (peakCount <= 0) peakHour = null;
 
       // --- loyalty points (earned/redeemed) over the range ---
-      const ledgerConds = dateConds(ledgerTxns.createdAt, range);
+      const ledgerConds = [
+        eq(ledgerTxns.ownerId, ownerId),
+        ...dateConds(ledgerTxns.createdAt, range),
+      ];
       const [earnedSum, redeemedSum] = await Promise.all([
         tx
           .select({ s: sum(ledgerTxns.amount) })
@@ -290,7 +323,12 @@ export class ReportsService {
         tx
           .select({ c: count() })
           .from(referrals)
-          .where(and(...dateConds(referrals.createdAt, range)))
+          .where(
+            and(
+              eq(referrals.ownerId, ownerId),
+              ...dateConds(referrals.createdAt, range),
+            ),
+          )
           .then((r) => r[0].c),
         tx
           .select({ s: sum(ledgerTxns.amount) })
@@ -325,7 +363,7 @@ export class ReportsService {
         startConds.push(lte(tournaments.startDate, range.to.toISOString().slice(0, 10)));
       }
       const tournamentRows = await tx.query.tournaments.findMany({
-        where: and(...startConds),
+        where: and(eq(tournaments.ownerId, ownerId), ...startConds),
         columns: { fee: true },
         with: {
           tournamentParticipants: { columns: { paid: true } },
@@ -349,11 +387,17 @@ export class ReportsService {
         tx
           .select({ c: count() })
           .from(ownerCustomers)
+          .where(eq(ownerCustomers.ownerId, ownerId))
           .then((r) => r[0].c),
         tx
           .select({ c: count() })
           .from(ownerCustomers)
-          .where(sql`${ownerCustomers.bookingCount} > 1`)
+          .where(
+            and(
+              eq(ownerCustomers.ownerId, ownerId),
+              sql`${ownerCustomers.bookingCount} > 1`,
+            ),
+          )
           .then((r) => r[0].c),
       ]);
       const repeatRatePct =

@@ -57,17 +57,19 @@ export class PaymentLedgerService {
 
   /**
    * List the caller's gateway transactions, newest first, optionally scoped to
-   * one entity. Tenant isolation is enforced by withTenant (RLS by ownerId).
+   * one entity. Tenant isolation is enforced by an explicit ownerId filter —
+   * RLS is not forced in production, so withTenant's session var alone would
+   * leak other tenants' captures/refunds.
    */
-  async list(filter: { refType?: string; refId?: string } = {}) {
+  async list(filter: { ownerId: string; refType?: string; refId?: string }) {
     return this.db.withTenant((tx) => {
-      const conds = [];
+      const conds = [eq(payments.ownerId, filter.ownerId)];
       if (filter.refType) conds.push(eq(payments.refType, filter.refType));
       if (filter.refId) conds.push(eq(payments.refId, filter.refId));
       return tx
         .select()
         .from(payments)
-        .where(conds.length ? and(...conds) : undefined)
+        .where(and(...conds))
         .orderBy(desc(payments.createdAt));
     });
   }

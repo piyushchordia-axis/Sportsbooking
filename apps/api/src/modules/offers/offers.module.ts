@@ -140,8 +140,12 @@ export class OffersService {
     });
   }
 
-  list(_user: RequestUser) {
-    return this.db.withTenant((tx) => tx.query.offers.findMany());
+  list(user: RequestUser) {
+    // Explicit ownerId filter — RLS is not forced in prod, so withTenant alone
+    // would return every tenant's offers (codes, caps, segments).
+    return this.db.withTenant((tx) =>
+      tx.query.offers.findMany({ where: eq(offers.ownerId, user.ownerId!) }),
+    );
   }
 
   /**

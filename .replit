@@ -11,7 +11,9 @@ channel = "stable-25_05"
 [userenv.shared]
 NODE_ENV = "development"
 API_PORT = "3001"
-JWT_SECRET = "dev-jwt-secret-change-in-prod"
+# JWT_SECRET is intentionally NOT set here — never commit a secret. In dev the API
+# uses a local fallback (NODE_ENV=development); set a real JWT_SECRET via Replit
+# Secrets if this workspace ever runs against shared/production data.
 JWT_ACCESS_TTL = "900"
 JWT_REFRESH_TTL = "2592000"
 OTP_TTL_SECONDS = "300"
@@ -46,7 +48,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd apps/api && NODE_ENV=development API_PORT=3001 JWT_SECRET=dev-jwt-secret-change-in-prod DATABASE_URL=$DATABASE_URL node dist/main.js"
+args = "cd apps/api && NODE_ENV=development API_PORT=3001 DATABASE_URL=$DATABASE_URL node dist/main.js"
 waitForPort = 3001
 
 [workflows.workflow.metadata]
@@ -76,10 +78,11 @@ externalPort = 80
 localPort = 5001
 externalPort = 3000
 
-[deployment]
-deploymentTarget = "autoscale"
-run = ["bash", "-c", "node apps/api/dist/main.js & npx serve -s apps/web/dist -l 5000"]
-build = ["bash", "-c", "cd /home/runner/workspace && npm install -g pnpm@10.33.0 && pnpm install && pnpm --filter @sportsbooking/shared build && pnpm --filter @sportsbooking/api exec npx prisma generate && pnpm --filter @sportsbooking/api exec npx nest build && pnpm --filter @sportsbooking/web exec npx vite build"]
+# NOTE: no [deployment] block — this app deploys via Docker on the host server
+# (see deploy/), NOT Replit. A Replit autoscale deploy here would run the app on a
+# public host in development mode; it is intentionally omitted. Deploy with
+# deploy/deploy.sh. (The old block also called `npx prisma generate`, stale since
+# the Drizzle migration.)
 
 [postMerge]
 path = "scripts/post-merge.sh"

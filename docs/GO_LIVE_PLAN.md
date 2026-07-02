@@ -81,15 +81,15 @@ Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "
 ## Phase 5 — Hardening & cleanup
 **Gate:** none — ongoing hygiene, do opportunistically.
 
-- nginx web container as non-root (`nginxinc/nginx-unprivileged`) — `apps/web/Dockerfile:19`
-- CPU/memory limits in `docker-compose.prod.yml`
-- Finite throttle on `POST /api/client-logs` (currently `@Public` + `@SkipThrottle`) — `client-logs.controller.ts:41`
-- Remove dead `ioredis` dependency (once 4.5 decides Redis usage) — `apps/api/package.json`
-- Fix/delete stale Prisma-era `scripts/post-merge.sh`
-- Pin image digests (`@sha256:`) — `apps/*/Dockerfile`
-- Bind dev compose Postgres/Redis to `127.0.0.1` — `docker-compose.yml:10,24`
-- Bridge network instead of `network_mode: host` (or document the tradeoff)
-- Delete/replace stale `docs/AUDIT.md` and `docs/DEVELOPMENT_PLAN.md` (describe the removed Prisma stack)
+- ✅ Finite throttle (120/min) on `POST /api/client-logs` (was `@SkipThrottle`) — `client-logs.controller.ts`
+- ✅ De-Prisma'd `scripts/post-merge.sh` (removed the broken `db:generate`/`db:deploy` DB steps; migrations are deploy-only now)
+- ✅ Bound dev compose Postgres/Redis to `127.0.0.1` — `docker-compose.yml`
+- ✅ Stale-doc banners on `docs/AUDIT.md` + `docs/DEVELOPMENT_PLAN.md` pointing here
+- ⏳ nginx web container as non-root (`nginxinc/nginx-unprivileged`) — `apps/web/Dockerfile:19`
+- ⏳ CPU/memory limits in `docker-compose.prod.yml`
+- ⏳ Remove dead `ioredis` dependency (kept for the deferred 4.5 Redis-throttler work) — `apps/api/package.json`
+- ⏳ Pin image digests (`@sha256:`) — `apps/*/Dockerfile`
+- ⏳ Bridge network instead of `network_mode: host` (or document the tradeoff)
 
 ---
 

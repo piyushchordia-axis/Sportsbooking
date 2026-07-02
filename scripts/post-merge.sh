@@ -10,9 +10,11 @@ pnpm install
 # 2. Build the shared package (apps/api + apps/web import its compiled dist).
 pnpm --filter @sportsbooking/shared build
 
-# 3. Regenerate the Prisma client and apply any committed migrations to the DB.
-pnpm --filter @sportsbooking/api run db:generate
-pnpm --filter @sportsbooking/api run db:deploy
-
-# 4. Rebuild the API so the "Start Backend" workflow's dist/main.js is current.
+# 3. Rebuild the API so the "Start Backend" workflow's dist/main.js is current.
 pnpm --filter @sportsbooking/api run build
+
+# NOTE: schema changes are NOT applied here. The project uses Drizzle (not
+# Prisma); migrations are applied explicitly on deploy via `db:migrate`
+# (deploy/deploy.sh), never automatically on a merge — auto-migrating a shared/
+# prod DB on every merge is unsafe. Run `pnpm --filter @sportsbooking/api db:push`
+# locally for a dev DB.

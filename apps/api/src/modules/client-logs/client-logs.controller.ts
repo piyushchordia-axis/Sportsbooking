@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Logger, Post } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator';
 
 /** Cap any single field so a hostile/oversized payload can't bloat the logs. */
@@ -34,11 +34,12 @@ function clip(value: unknown): string {
  * logged-out users mid-crash), and abuse-resistant: every field is size-capped
  * and nothing is echoed back to the caller.
  *
- * @Public so the global JwtAuthGuard lets it through; @SkipThrottle so a burst
- * of error reports during an incident isn't itself rate-limited away.
+ * @Public so the global JwtAuthGuard lets it through. A generous per-IP throttle
+ * (120/min) replaces the previous @SkipThrottle: it still absorbs an incident
+ * burst but bounds an attacker from flooding the server logs / filling the disk.
  * Reachable at POST /api/client-logs (global prefix applied).
  */
-@SkipThrottle()
+@Throttle({ default: { limit: 120, ttl: 60_000 } })
 @Controller('client-logs')
 export class ClientLogsController {
   private readonly logger = new Logger('ClientLog');

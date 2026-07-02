@@ -1,5 +1,9 @@
 # Development Plan
 
+> ⚠️ **STALE (historical).** Describes a Prisma-era design (the project migrated
+> to **Drizzle**). Kept for background only; for current production-readiness work
+> see [GO_LIVE_PLAN.md](GO_LIVE_PLAN.md).
+
 Full v1 build of the platform in `Sports_Venue_Booking_PRD.md`. Backend on
 **NestJS**, multi-tenancy via **Postgres Row-Level Security** (tenant = owner),
 React + Vite frontend with token-based white-label theming.

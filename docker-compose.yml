@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: sportsbooking
       POSTGRES_DB: sportsbooking
     ports:
-      - "5434:5432"
+      # Bind to loopback only — the dev DB must never be reachable off-host, even
+      # if this compose is ever brought up on a networked machine.
+      - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +24,8 @@ services:
     container_name: sportsbooking-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Loopback only (no auth on this dev Redis).
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:

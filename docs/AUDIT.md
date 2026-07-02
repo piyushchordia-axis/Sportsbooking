@@ -1,5 +1,9 @@
 # Sports Venue Booking Platform — Readiness Audit
 
+> ⚠️ **STALE (historical).** This predates the Drizzle migration (it references a
+> Prisma stack that no longer exists) and its readiness claims are out of date.
+> The current source of truth is [GO_LIVE_PLAN.md](GO_LIVE_PLAN.md).
+
 > Originally generated 2026-06-21 by an automated audit, then **reconciled
 > 2026-06-22** against the current codebase after a major build iteration
 > (auth lifecycle, payments webhook/refunds, consumer storefront, white-label

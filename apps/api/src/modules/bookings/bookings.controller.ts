@@ -111,6 +111,14 @@ export class BookingsController {
     return this.bookings.markPaid(id, user);
   }
 
+  /** Staff/owner marks the customer as arrived (checked in) on the ground. */
+  @Post('bookings/:id/check-in')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  checkIn(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.bookings.checkIn(id, user);
+  }
+
   /**
    * Cancel a booking per the owner's policy (PRD §5.4). Requires auth: the
    * service authorizes the caller (owning customer, or the booking's tenant

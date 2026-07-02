@@ -1780,6 +1780,7 @@ export class BookingsService {
               end: s.endsAt.toISOString(),
             })),
           createdAt: b.createdAt.toISOString(),
+          checkedInAt: b.checkedInAt ? b.checkedInAt.toISOString() : null,
         };
       });
 
@@ -1960,6 +1961,33 @@ export class BookingsService {
       tx.update(bookings).set({ status }).where(eq(bookings.id, bookingId)),
     );
     return { status };
+  }
+
+  /**
+   * Owner/staff: mark the customer as arrived (checked in). Idempotent — a second
+   * call keeps the original arrival time. Blocked for cancelled / no-show
+   * bookings. checkedInAt is orthogonal to `status` (a confirmed booking can be
+   * checked in and later completed/no-show), so this doesn't touch status.
+   */
+  async checkIn(
+    bookingId: string,
+    user: RequestUser,
+  ): Promise<{ checkedInAt: string }> {
+    const booking = await this.loadOwnedBooking(bookingId, user);
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Cannot check in a cancelled booking.');
+    }
+    if (booking.status === BookingStatus.NO_SHOW) {
+      throw new BadRequestException('Cannot check in a booking marked no-show.');
+    }
+    if (booking.checkedInAt) {
+      return { checkedInAt: booking.checkedInAt.toISOString() };
+    }
+    const now = new Date();
+    await this.db.withTenantId(booking.ownerId, (tx) =>
+      tx.update(bookings).set({ checkedInAt: now }).where(eq(bookings.id, bookingId)),
+    );
+    return { checkedInAt: now.toISOString() };
   }
 
   /**

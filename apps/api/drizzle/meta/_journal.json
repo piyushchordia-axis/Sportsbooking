@@ -15,6 +15,13 @@
       "when": 1783011346591,
       "tag": "0001_slot_overlap_exclude",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783013859781,
+      "tag": "0002_booking_checked_in_at",
+      "breakpoints": true
     }
   ]
 }

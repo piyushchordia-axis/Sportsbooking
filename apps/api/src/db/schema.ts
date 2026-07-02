@@ -375,6 +375,10 @@ export const bookings = pgTable("bookings", {
 	offerId: text(),
 	pointsRedeemed: numeric({ precision: 12, scale:  2 }).default('0').notNull(),
 	noShowFeeApplied: boolean().default(false).notNull(),
+	// Staff check-in: set when the customer arrives. Nullable (null = not yet
+	// arrived). Orthogonal to `status` — a confirmed booking can be checked in,
+	// then later completed/no-show — so it is a timestamp, not a status value.
+	checkedInAt: timestamp({ precision: 3, mode: 'date' }),
 	seriesId: text(),
 	razorpayOrderId: text(),
 	razorpayPaymentId: text(),

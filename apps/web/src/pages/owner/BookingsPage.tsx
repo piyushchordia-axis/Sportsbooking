@@ -18,6 +18,7 @@ import {
   Pencil,
   Search,
   SlidersHorizontal,
+  UserCheck,
   X,
 } from 'lucide-react';
 import { api, OwnerVenue, PaymentTxn } from '../../api/client';
@@ -689,6 +690,9 @@ function BookingEditor({
   const setStatus = (s: BookingStatus, ok: string) =>
     run(() => api.updateBookingStatus(booking.id, s), ok);
 
+  const checkIn = () =>
+    run(() => api.checkInBooking(booking.id), 'Customer checked in.');
+
   // Mark no-show: backend applies the venue's flat no-show fee (idempotent via
   // Booking.noShowFeeApplied). Confirm first so staff know the customer will be
   // charged, then surface the outcome.
@@ -952,6 +956,24 @@ function BookingEditor({
               Status &amp; payment
             </SectionLabel>
             <div className="flex flex-wrap gap-2">
+              {booking.checkedInAt ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-500">
+                  <UserCheck className="h-4 w-4" /> Checked in ·{' '}
+                  {fmtDateTime(booking.checkedInAt)}
+                </span>
+              ) : (
+                booking.status === BookingStatus.CONFIRMED &&
+                !cancelled && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={checkIn}
+                    disabled={busy}
+                  >
+                    <UserCheck className="h-4 w-4" /> Check in
+                  </Button>
+                )
+              )}
               <Button
                 onClick={() =>
                   setStatus(BookingStatus.COMPLETED, 'Marked as completed.')

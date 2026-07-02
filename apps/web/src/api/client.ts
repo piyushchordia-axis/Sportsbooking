@@ -1237,6 +1237,8 @@ export const api = {
   blockSlots: (body: BlockSlotsInput) => post('/venues/block', body),
   createTournament: (body: unknown) => post('/tournaments', body),
   settleBooking: (id: string) => post(`/bookings/${id}/settle`),
+  checkInBooking: (id: string) =>
+    post<{ checkedInAt: string }>(`/bookings/${id}/check-in`),
 
   // ---- owner: branding (white-label) ----
   // ---- owner: loyalty + referral config + history ----

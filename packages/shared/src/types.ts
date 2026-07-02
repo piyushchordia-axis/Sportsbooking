@@ -282,6 +282,7 @@ export interface OwnerBooking {
   customerMobile: string | null;
   slots: OwnerBookingSlot[];
   createdAt: string; // ISO
+  checkedInAt: string | null; // ISO — set when staff checks the customer in
 }
 
 /** Owner bookings list filters (all optional). */

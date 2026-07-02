@@ -1261,6 +1261,8 @@ export const api = {
     const s = qs.toString();
     return get<OwnerBooking[]>(`/bookings${s ? `?${s}` : ''}`);
   },
+  bookingsDuesSummary: () =>
+    get<{ count: number; totalDue: number }>('/bookings/dues-summary'),
   updateBookingStatus: (id: string, status: BookingStatus) =>
     post<{ status: BookingStatus }>(`/bookings/${id}/status`, { status }),
   rescheduleBooking: (

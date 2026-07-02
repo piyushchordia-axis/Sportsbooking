@@ -131,6 +131,14 @@ export class BookingsController {
     return this.bookings.listForOwner(user, q);
   }
 
+  /** Owner/staff "balance due at venue" summary (count + total awaiting settlement). */
+  @Get('bookings/dues-summary')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.STAFF)
+  duesSummary(@CurrentUser() user: RequestUser) {
+    return this.bookings.duesSummary(user);
+  }
+
   /**
    * Customer's own booking history (PRD BOOK-12): upcoming + past, newest
    * first. Declared before the `:id` route so the static path wins. Scoped to

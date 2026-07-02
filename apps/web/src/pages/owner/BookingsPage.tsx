@@ -183,6 +183,13 @@ export function BookingsPage() {
     [JSON.stringify(applied)],
   );
 
+  // "Balance due at venue" summary — deposit bookings awaiting settlement. Keyed
+  // on the applied filters so it refreshes alongside the list (e.g. after a settle).
+  const dues = useLoad<{ count: number; totalDue: number }>(
+    () => api.bookingsDuesSummary(),
+    [JSON.stringify(applied)],
+  );
+
   const venueUnits = useMemo(
     () => venues.find((v) => v.id === venueId)?.units ?? [],
     [venues, venueId],
@@ -270,6 +277,37 @@ export function BookingsPage() {
           ) : undefined
         }
       />
+
+      {/* Balance-due-at-venue summary: deposit bookings that paid online and owe
+          the rest on arrival. Shown only when money is outstanding; clicking it
+          filters the table to those bookings so they can be settled. */}
+      {dues.data && dues.data.count > 0 && (
+        <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 border-accent/40 bg-accent/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent/15 text-accent">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums text-foreground">
+                ₹{dues.data.totalDue.toLocaleString('en-IN')} to collect at venue
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {dues.data.count}{' '}
+                {dues.data.count === 1 ? 'booking' : 'bookings'} awaiting
+                settlement
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() =>
+              setPaymentStatus(PaymentStatus.AWAITING_VENUE_SETTLEMENT)
+            }
+          >
+            View
+          </Button>
+        </Card>
+      )}
 
       {/* Toolbar. Opens calm: a primary search field + a single Filters control.
           The other filters live in a panel that's collapsed by default, and any

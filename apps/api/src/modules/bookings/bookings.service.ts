@@ -20,6 +20,7 @@ import {
   lte,
   or,
   sql,
+  sum,
 } from 'drizzle-orm';
 import {
   BookingQuoteResponse,
@@ -1160,6 +1161,37 @@ export class BookingsService {
       );
       await this.referral.releaseOnFirstPaid(tx, fresh.ownerId, fresh.customerId);
       return { paid: true as const };
+    });
+  }
+
+  /**
+   * Owner/staff "balance due at venue" summary (DEP): the count and total of
+   * money still owed at the venue — deposit bookings that captured their online
+   * deposit and are parked in AWAITING_VENUE_SETTLEMENT with a positive balance.
+   * Explicitly ownerId-scoped (RLS is the backstop); staff are limited to their
+   * assigned venues, matching the bookings list.
+   */
+  async duesSummary(
+    user: RequestUser,
+  ): Promise<{ count: number; totalDue: number }> {
+    const ownerId = user.ownerId!;
+    return this.db.withTenant(async (tx) => {
+      const conds = [
+        eq(bookings.ownerId, ownerId),
+        eq(bookings.paymentStatus, PaymentStatus.AWAITING_VENUE_SETTLEMENT),
+        sql`${bookings.amountDueAtVenue} > 0`,
+        sql`${bookings.status} <> 'cancelled'`,
+      ];
+      if (user.role === UserRole.STAFF) {
+        const venueIds = user.assignedVenueIds ?? [];
+        if (venueIds.length === 0) return { count: 0, totalDue: 0 };
+        conds.push(inArray(bookings.venueId, venueIds));
+      }
+      const [row] = await tx
+        .select({ c: count(), total: sum(bookings.amountDueAtVenue) })
+        .from(bookings)
+        .where(and(...conds));
+      return { count: Number(row?.c ?? 0), totalDue: Number(row?.total ?? 0) };
     });
   }
 

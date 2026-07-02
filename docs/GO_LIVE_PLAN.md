@@ -25,7 +25,7 @@ Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "
 
 | # | Task | Files | Effort |
 |---|------|-------|--------|
-| 1.1 | Nightly `pg_dump` + offsite copy + `sb_uploads` volume; document restore (RTO/RPO) | `deploy/` (new backup script + cron) | M |
+| 1.1 ◐ | **Script done; operator steps pending** — `deploy/backup.sh` (gzipped `pg_dump` + `sb_uploads` tar + local retention + optional offsite via rsync/S3, reads creds from `.env`) + a "Backups" section in `deploy/README.md` with cron install + restore steps. **Operator must:** set `OFFSITE_DEST`, install the cron, and run a test restore. | M |
 | 1.2 | Replace `drizzle-kit push --force` with versioned SQL migrations applied by a migrator; mandatory pre-migration dump | `deploy/deploy.sh:43`, `apps/api/drizzle/` | M |
 | 1.3 ✅ | **DONE** — Prevent the silent mock-payment path. Investigation showed the server already fails closed in prod (mock signatures rejected), so the real bug was a customer *dead-end*: a prod build without the key let a customer pick online prepay → PENDING booking → no checkout → silent expiry. Fix: `onlinePrepayAvailable` gate hides online prepay + deposit in a prod build without the key (mock still available in dev), so the storefront offers pay-at-venue only; plus a loud build-time warning in `vite.config.ts`. Chose safe runtime degrade over a hard build-fail to preserve the valid pay-at-venue-only launch mode. Files: `apps/web/src/lib/razorpay.ts`, `apps/web/src/pages/consumer/VenueDetailPage.tsx`, `apps/web/vite.config.ts`. Verified: web typecheck + prod builds (with/without key) + warning. | S |
 | 1.4 ∥ | Deploy from a git ref, tag images with the SHA, keep N previous tags for rollback | `deploy/deploy.sh`, `docker-compose.prod.yml` | M |

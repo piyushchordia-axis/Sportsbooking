@@ -99,3 +99,37 @@ images, optionally runs `db:push`/`db:seed`, brings the stack up, and curls
 ssh e2e-server 'cd ~/sportsbooking && docker compose -f docker-compose.prod.yml ps'
 ssh e2e-server 'cd ~/sportsbooking && docker compose -f docker-compose.prod.yml logs -f --tail=100'
 ```
+
+## Backups
+
+`deploy/backup.sh` runs on the server and writes a gzipped `pg_dump` + a tar of
+the `sb_uploads` volume to `$BACKUP_DIR` (default `/home/ubuntu/backups/
+sportsbooking`), prunes local copies older than `$RETENTION_DAYS` (14), and — if
+`OFFSITE_DEST` is set — copies them offsite (rsync target or `s3://bucket/prefix`).
+It reads `DATABASE_ADMIN_URL` from `.env`, so no credentials are hardcoded.
+
+**Set up (one-time):**
+```bash
+# 1) confirm the uploads volume name (compose prefixes the project name):
+ssh e2e-server 'docker volume ls | grep sb_uploads'   # e.g. sportsbooking_sb_uploads
+# 2) pick an offsite target and install the cron (runs 02:30 daily):
+ssh e2e-server 'sudo tee /etc/cron.d/sportsbooking-backup >/dev/null' <<'CRON'
+OFFSITE_DEST=__FILL__            # e.g. user@backup-host:/srv/backups/sportsbooking  OR  s3://bucket/sportsbooking
+30 2 * * *  ubuntu  cd /home/ubuntu/sportsbooking && OFFSITE_DEST="$OFFSITE_DEST" ./deploy/backup.sh >> /home/ubuntu/sportsbooking-backup.log 2>&1
+CRON
+# 3) smoke-test it once by hand:
+ssh e2e-server 'cd ~/sportsbooking && ./deploy/backup.sh'
+```
+⚠️ Leave `OFFSITE_DEST` unset and backups are LOCAL ONLY (lost with the host).
+Set an offsite target before go-live.
+
+**Restore:**
+```bash
+# database (stop the api first so nothing writes mid-restore):
+gunzip -c db-<STAMP>.sql.gz | psql "$DATABASE_ADMIN_URL"
+# uploads volume:
+docker run --rm -v sportsbooking_sb_uploads:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/uploads-<STAMP>.tgz -C /data'
+```
+Test a restore into a scratch database periodically — an untested backup is not a
+backup.

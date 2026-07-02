@@ -73,22 +73,24 @@ import {
   type IntervalSlot,
 } from './dto';
 
-/** Postgres unique-violation SQLSTATE (23505). */
+/** Postgres unique-violation SQLSTATE (23505) — a concurrent EXACT-start slot
+ *  insert. And exclusion-violation (23P01) — a concurrent OVERLAPPING slot insert
+ *  caught by the slots_unit_no_overlap GiST EXCLUDE constraint. Both mean another
+ *  transaction just took the time; surface a 409 rather than a 500. */
 const UNIQUE_VIOLATION = '23505';
+const EXCLUSION_VIOLATION = '23P01';
 
 /** Cash lane: a positive balance is money returned to the customer (refunds). */
 const CASH_LANE = 'cash';
 /** Dues lane: a positive balance is money the customer OWES (e.g. no-show fee). */
 const DUES_LANE = 'dues';
 
-/** True if a thrown error is a Postgres unique-violation (concurrent slot lock). */
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: unknown }).code === UNIQUE_VIOLATION
-  );
+/** True if a thrown error is a Postgres unique- or exclusion-violation — i.e. a
+ *  concurrent transaction took an overlapping slot (the DB double-booking guard). */
+function isSlotConflictViolation(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  const code = (err as { code?: unknown }).code;
+  return code === UNIQUE_VIOLATION || code === EXCLUSION_VIOLATION;
 }
 
 /**
@@ -710,7 +712,7 @@ export class BookingsService {
           });
         }
       } catch (err) {
-        if (isUniqueViolation(err)) {
+        if (isSlotConflictViolation(err)) {
           throw new ConflictException(
             'One or more selected slots were just booked. Please pick another.',
           );
@@ -2071,7 +2073,7 @@ export class BookingsService {
           });
         }
       } catch (err) {
-        if (isUniqueViolation(err)) {
+        if (isSlotConflictViolation(err)) {
           throw new ConflictException(
             'One or more of the new slots are already booked. Please pick another.',
           );

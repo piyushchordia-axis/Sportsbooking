@@ -244,12 +244,19 @@ export function MyBookingsPage() {
     setCancellingId(b.id);
     setCancelError(null);
     try {
-      await api.cancelBooking(b.id);
-      const message =
-        b.payMode === PayMode.PREPAY &&
-        b.paymentStatus === PaymentStatus.PAID
-          ? 'Booking cancelled. Any eligible refund will be credited per the venue’s cancellation policy.'
-          : 'Booking cancelled.';
+      const res = await api.cancelBooking(b.id);
+      // Show what actually happened to the money, not a vague "per policy" line.
+      let message = 'Booking cancelled.';
+      if (res.refund) {
+        if (res.refund.amount > 0) {
+          message =
+            res.refund.fee > 0
+              ? `Booking cancelled. ${flMoney(res.refund.amount)} refunded (${flMoney(res.refund.fee)} kept as the cancellation fee).`
+              : `Booking cancelled. ${flMoney(res.refund.amount)} refunded.`;
+        } else if (res.refund.fee > 0) {
+          message = `Booking cancelled. No refund — the ${flMoney(res.refund.fee)} cancellation fee met the amount paid online.`;
+        }
+      }
       flash(message);
       setPolicyOpen(null);
       reload();

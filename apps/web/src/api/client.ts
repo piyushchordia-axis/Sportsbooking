@@ -1034,7 +1034,11 @@ export const api = {
    *  mutates. Drives the running total, promo preview and points slider. */
   quoteBooking: (payload: QuoteBookingRequest) =>
     post<BookingQuoteResponse>('/bookings/quote', payload),
-  cancelBooking: (id: string) => post<{ cancelled: true }>(`/bookings/${id}/cancel`),
+  cancelBooking: (id: string) =>
+    post<{
+      cancelled: true;
+      refund: { amount: number; fee: number; status: string } | null;
+    }>(`/bookings/${id}/cancel`),
   myBookings: () => get<CustomerBooking[]>('/bookings/mine'),
 
   // ---- saved venues / favourites (customer, PRD §5.4) ----

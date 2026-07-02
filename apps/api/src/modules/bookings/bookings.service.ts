@@ -1399,7 +1399,13 @@ export class BookingsService {
   async cancel(
     bookingId: string,
     user?: RequestUser,
-  ): Promise<{ cancelled: true }> {
+  ): Promise<{
+    cancelled: true;
+    // What actually happened to the money, so the customer isn't left guessing:
+    // amount refunded to the gateway, fee kept per the cancellation policy, and
+    // the gateway status. null when nothing was charged / no refund path.
+    refund: { amount: number; fee: number; status: string } | null;
+  }> {
     const booking = await this.db.withTenantBypass((tx) =>
       tx.query.bookings.findFirst({
         where: eq(bookings.id, bookingId),
@@ -1491,7 +1497,7 @@ export class BookingsService {
         with: { slots: true },
       });
       if (!fresh || fresh.status === BookingStatus.CANCELLED) {
-        return { cancelled: true as const };
+        return { cancelled: true as const, refund: null };
       }
 
       await tx.delete(slots).where(eq(slots.bookingId, bookingId));
@@ -1618,7 +1624,16 @@ export class BookingsService {
         venueName,
         fresh.slots,
       );
-      return { cancelled: true as const };
+      return {
+        cancelled: true as const,
+        refund: refund
+          ? {
+              amount: Number(refund.amount),
+              fee: Number(refund.fee),
+              status: refund.status,
+            }
+          : null,
+      };
     });
   }
 

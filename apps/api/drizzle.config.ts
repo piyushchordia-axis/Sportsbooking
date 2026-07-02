@@ -2,9 +2,13 @@ import 'dotenv/config';
 import { defineConfig } from 'drizzle-kit';
 
 /**
- * Drizzle Kit config. Runtime DB access uses DATABASE_URL; schema changes are
- * applied with `pnpm db:push` (drizzle-kit push) which also applies the RLS
- * policies defined in-schema. `pnpm db:generate` emits SQL migrations to ./drizzle.
+ * Drizzle Kit config. Runtime DB access uses DATABASE_URL (restricted role);
+ * DDL uses DATABASE_ADMIN_URL. Schema workflow:
+ *   pnpm db:generate  -> emit a reviewed SQL migration to ./drizzle (after a
+ *                        schema.ts change)
+ *   pnpm db:migrate   -> apply pending migrations + RLS + runtime role (DEPLOY path)
+ *   pnpm db:baseline  -> ONE-TIME on an existing push-built DB before first migrate
+ *   pnpm db:push      -> dev-only fast apply (drizzle-kit push --force)
  */
 export default defineConfig({
   dialect: 'postgresql',

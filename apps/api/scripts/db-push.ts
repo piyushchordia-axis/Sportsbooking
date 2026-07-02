@@ -1,6 +1,11 @@
 /**
  * `pnpm db:push` — apply the Drizzle schema + RLS policies in one command.
  *
+ * DEV CONVENIENCE ONLY. It runs `drizzle-kit push --force`, which diffs schema.ts
+ * against the DB and auto-approves — fast for local iteration, but a rename can be
+ * applied as a silent drop. The DEPLOY path is `pnpm db:migrate` (reviewed
+ * versioned migrations in drizzle/); never use db:push on production data.
+ *
  * The pgPolicy declarations in src/db/schema.ts reference the GUC helper
  * functions app_current_owner_id() / app_bypass_rls(). On a fresh database
  * those functions do not exist yet, so `drizzle-kit push` would fail. We first

@@ -1,458 +1,30 @@
 {
-  "id": "00000000-0000-0000-0000-000000000000",
-  "prevId": "",
+  "id": "56f36e5a-c4a0-45da-8d5c-cb5b8ca2c136",
+  "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public._prisma_migrations": {
-      "name": "_prisma_migrations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "checksum": {
-          "name": "checksum",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "migration_name": {
-          "name": "migration_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "logs": {
-          "name": "logs",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "rolled_back_at": {
-          "name": "rolled_back_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "applied_steps_count": {
-          "name": "applied_steps_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {},
-      "isRLSEnabled": false
-    },
-    "public.game_catalogue": {
-      "name": "game_catalogue",
+    "public.addons": {
+      "name": "addons",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
           "type": "text",
           "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "iconUrl": {
-          "name": "iconUrl",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "slotGranularityMin": {
-          "name": "slotGranularityMin",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
-        },
-        "unitLabel": {
-          "name": "unitLabel",
-          "type": "UnitLabel",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'court'"
-        },
-        "minPlayers": {
-          "name": "minPlayers",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 2
-        },
-        "maxPlayers": {
-          "name": "maxPlayers",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 4
-        },
-        "defaultOpenTime": {
-          "name": "defaultOpenTime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'06:00'"
-        },
-        "defaultCloseTime": {
-          "name": "defaultCloseTime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'23:00'"
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "game_catalogue_name_key": {
-          "name": "game_catalogue_name_key",
-          "columns": [
-            {
-              "expression": "name",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {},
-      "isRLSEnabled": false
-    },
-    "public.owners": {
-      "name": "owners",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "contactEmail": {
-          "name": "contactEmail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "contactMobile": {
-          "name": "contactMobile",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "OwnerStatus",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "venueQuota": {
-          "name": "venueQuota",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "allowedGameIds": {
-          "name": "allowedGameIds",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "featureFlags": {
-          "name": "featureFlags",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "logoUrl": {
-          "name": "logoUrl",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "primaryColor": {
-          "name": "primaryColor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'#0EA5E9'"
-        },
-        "secondaryColor": {
-          "name": "secondaryColor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'#0F172A'"
-        },
-        "accentColor": {
-          "name": "accentColor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'#22C55E'"
-        },
-        "setupFee": {
-          "name": "setupFee",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amcAmount": {
-          "name": "amcAmount",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amcRenewalDate": {
-          "name": "amcRenewalDate",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "loyaltyEarnRate": {
-          "name": "loyaltyEarnRate",
-          "type": "numeric(6, 4)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0.05'"
-        },
-        "loyaltyRedeemValue": {
-          "name": "loyaltyRedeemValue",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'1'"
-        },
-        "referralReward": {
-          "name": "referralReward",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'100'"
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (id = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (id = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.open_match_join_requests": {
-      "name": "open_match_join_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "matchId": {
-          "name": "matchId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "playerId": {
-          "name": "playerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "JoinRequestStatus",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'requested'"
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "open_match_join_requests_matchId_playerId_key": {
-          "name": "open_match_join_requests_matchId_playerId_key",
-          "columns": [
-            {
-              "expression": "matchId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "playerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "open_match_join_requests_matchId_fkey": {
-          "name": "open_match_join_requests_matchId_fkey",
-          "tableFrom": "open_match_join_requests",
-          "tableTo": "open_matches",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "matchId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        },
-        "open_match_join_requests_playerId_fkey": {
-          "name": "open_match_join_requests_playerId_fkey",
-          "tableFrom": "open_match_join_requests",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "playerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM open_matches m\n  WHERE ((m.id = open_match_join_requests.\"matchId\") AND (m.\"ownerId\" = app_current_owner_id())))))",
-          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM open_matches m\n  WHERE ((m.id = open_match_join_requests.\"matchId\") AND (m.\"ownerId\" = app_current_owner_id())))))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.users": {
-      "name": "users",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "UserRole",
-          "typeSchema": "public",
-          "primaryKey": false,
           "notNull": true
         },
         "ownerId": {
           "name": "ownerId",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
+        },
+        "venueId": {
+          "name": "venueId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -460,30 +32,24 @@
           "primaryKey": false,
           "notNull": true
         },
-        "email": {
-          "name": "email",
-          "type": "text",
+        "type": {
+          "name": "type",
+          "type": "AddonType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price": {
+          "name": "price",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stock": {
+          "name": "stock",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "mobile": {
-          "name": "mobile",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "passwordHash": {
-          "name": "passwordHash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "assignedVenueIds": {
-          "name": "assignedVenueIds",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
         },
         "active": {
           "name": "active",
@@ -494,54 +60,36 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
         }
       },
       "indexes": {
-        "users_email_key": {
-          "name": "users_email_key",
-          "columns": [
-            {
-              "expression": "email",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_mobile_key": {
-          "name": "users_mobile_key",
-          "columns": [
-            {
-              "expression": "mobile",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_ownerId_idx": {
-          "name": "users_ownerId_idx",
+        "addons_ownerId_idx": {
+          "name": "addons_ownerId_idx",
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "addons_venueId_idx": {
+          "name": "addons_venueId_idx",
+          "columns": [
+            {
+              "expression": "venueId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -551,11 +99,120 @@
         }
       },
       "foreignKeys": {
-        "users_ownerId_fkey": {
-          "name": "users_ownerId_fkey",
-          "tableFrom": "users",
+        "addons_venueId_fkey": {
+          "name": "addons_venueId_fkey",
+          "tableFrom": "addons",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venueId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.audit_logs": {
+      "name": "audit_logs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actorId": {
+          "name": "actorId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actorRole": {
+          "name": "actorRole",
+          "type": "UserRole",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity": {
+          "name": "entity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entityId": {
+          "name": "entityId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "audit_logs_ownerId_idx": {
+          "name": "audit_logs_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "audit_logs_ownerId_fkey": {
+          "name": "audit_logs_ownerId_fkey",
+          "tableFrom": "audit_logs",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -568,7 +225,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -577,582 +233,12 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" IS NULL) OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" IS NULL) OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
-    },
-    "public.tournament_participants": {
-      "name": "tournament_participants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "tournamentId": {
-          "name": "tournamentId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "teamName": {
-          "name": "teamName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "captainName": {
-          "name": "captainName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "captainMobile": {
-          "name": "captainMobile",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "paid": {
-          "name": "paid",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "razorpayOrderId": {
-          "name": "razorpayOrderId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "razorpayPaymentId": {
-          "name": "razorpayPaymentId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "idempotencyKey": {
-          "name": "idempotencyKey",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "tournament_participants_tournamentId_idx": {
-          "name": "tournament_participants_tournamentId_idx",
-          "columns": [
-            {
-              "expression": "tournamentId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "tournament_participants_tournamentId_fkey": {
-          "name": "tournament_participants_tournamentId_fkey",
-          "tableFrom": "tournament_participants",
-          "tableTo": "tournaments",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "tournamentId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM tournaments t\n  WHERE ((t.id = tournament_participants.\"tournamentId\") AND (t.\"ownerId\" = app_current_owner_id())))))",
-          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM tournaments t\n  WHERE ((t.id = tournament_participants.\"tournamentId\") AND (t.\"ownerId\" = app_current_owner_id())))))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.owner_customers": {
-      "name": "owner_customers",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "customerId": {
-          "name": "customerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "firstSeenAt": {
-          "name": "firstSeenAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "lastVisitAt": {
-          "name": "lastVisitAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        },
-        "bookingCount": {
-          "name": "bookingCount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "consent": {
-          "name": "consent",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "optedOut": {
-          "name": "optedOut",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        }
-      },
-      "indexes": {
-        "owner_customers_ownerId_customerId_key": {
-          "name": "owner_customers_ownerId_customerId_key",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "customerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "owner_customers_ownerId_idx": {
-          "name": "owner_customers_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "owner_customers_ownerId_fkey": {
-          "name": "owner_customers_ownerId_fkey",
-          "tableFrom": "owner_customers",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        },
-        "owner_customers_customerId_fkey": {
-          "name": "owner_customers_customerId_fkey",
-          "tableFrom": "owner_customers",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "customerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.player_profiles": {
-      "name": "player_profiles",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "customerId": {
-          "name": "customerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mobile": {
-          "name": "mobile",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "games": {
-          "name": "games",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "skillLevel": {
-          "name": "skillLevel",
-          "type": "SkillLevel",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'beginner'"
-        },
-        "consent": {
-          "name": "consent",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "player_profiles_ownerId_customerId_key": {
-          "name": "player_profiles_ownerId_customerId_key",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "customerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "player_profiles_ownerId_idx": {
-          "name": "player_profiles_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "player_profiles_customerId_fkey": {
-          "name": "player_profiles_customerId_fkey",
-          "tableFrom": "player_profiles",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "customerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        },
-        "player_profiles_ownerId_fkey": {
-          "name": "player_profiles_ownerId_fkey",
-          "tableFrom": "player_profiles",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.venues": {
-      "name": "venues",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "geoLat": {
-          "name": "geoLat",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "geoLng": {
-          "name": "geoLng",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "address": {
-          "name": "address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "city": {
-          "name": "city",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "contactPhone": {
-          "name": "contactPhone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "photos": {
-          "name": "photos",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "openTime": {
-          "name": "openTime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'06:00'"
-        },
-        "closeTime": {
-          "name": "closeTime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'23:00'"
-        },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "venues_city_idx": {
-          "name": "venues_city_idx",
-          "columns": [
-            {
-              "expression": "city",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "venues_ownerId_idx": {
-          "name": "venues_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "venues_ownerId_fkey": {
-          "name": "venues_ownerId_fkey",
-          "tableFrom": "venues",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
+      "isRLSEnabled": false
     },
     "public.bookable_units": {
       "name": "bookable_units",
@@ -1212,7 +298,7 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
@@ -1224,10 +310,9 @@
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1240,10 +325,9 @@
           "columns": [
             {
               "expression": "venueId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1257,7 +341,6 @@
           "name": "bookable_units_venueId_fkey",
           "tableFrom": "bookable_units",
           "tableTo": "venues",
-          "schemaTo": "public",
           "columnsFrom": [
             "venueId"
           ],
@@ -1271,7 +354,6 @@
           "name": "bookable_units_gameId_fkey",
           "tableFrom": "bookable_units",
           "tableTo": "game_catalogue",
-          "schemaTo": "public",
           "columnsFrom": [
             "gameId"
           ],
@@ -1285,7 +367,6 @@
           "name": "bookable_units_ownerId_fkey",
           "tableFrom": "bookable_units",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -1298,7 +379,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -1307,436 +387,12 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
-    },
-    "public.pricing_rules": {
-      "name": "pricing_rules",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "unitId": {
-          "name": "unitId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dayType": {
-          "name": "dayType",
-          "type": "DayType",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "timeBand": {
-          "name": "timeBand",
-          "type": "TimeBand",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dateOverride": {
-          "name": "dateOverride",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "minDuration": {
-          "name": "minDuration",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "price": {
-          "name": "price",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "pricing_rules_ownerId_idx": {
-          "name": "pricing_rules_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pricing_rules_unitId_idx": {
-          "name": "pricing_rules_unitId_idx",
-          "columns": [
-            {
-              "expression": "unitId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pricing_rules_unitId_fkey": {
-          "name": "pricing_rules_unitId_fkey",
-          "tableFrom": "pricing_rules",
-          "tableTo": "bookable_units",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "unitId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        },
-        "pricing_rules_ownerId_fkey": {
-          "name": "pricing_rules_ownerId_fkey",
-          "tableFrom": "pricing_rules",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.slots": {
-      "name": "slots",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "unitId": {
-          "name": "unitId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "startsAt": {
-          "name": "startsAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "endsAt": {
-          "name": "endsAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "SlotStatus",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'booked'"
-        },
-        "blockReason": {
-          "name": "blockReason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bookingId": {
-          "name": "bookingId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "slots_bookingId_idx": {
-          "name": "slots_bookingId_idx",
-          "columns": [
-            {
-              "expression": "bookingId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "slots_ownerId_idx": {
-          "name": "slots_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "slots_unitId_startsAt_idx": {
-          "name": "slots_unitId_startsAt_idx",
-          "columns": [
-            {
-              "expression": "unitId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "startsAt",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "slots_unitId_startsAt_key": {
-          "name": "slots_unitId_startsAt_key",
-          "columns": [
-            {
-              "expression": "unitId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "timestamp_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "startsAt",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "slots_unitId_fkey": {
-          "name": "slots_unitId_fkey",
-          "tableFrom": "slots",
-          "tableTo": "bookable_units",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "unitId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        },
-        "slots_ownerId_fkey": {
-          "name": "slots_ownerId_fkey",
-          "tableFrom": "slots",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        },
-        "slots_bookingId_fkey": {
-          "name": "slots_bookingId_fkey",
-          "tableFrom": "slots",
-          "tableTo": "bookings",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "bookingId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.venue_settings": {
-      "name": "venue_settings",
-      "schema": "",
-      "columns": {
-        "venueId": {
-          "name": "venueId",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "cancellationTemplate": {
-          "name": "cancellationTemplate",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'flexible'"
-        },
-        "noShowFee": {
-          "name": "noShowFee",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
-        "loyaltyEarnRate": {
-          "name": "loyaltyEarnRate",
-          "type": "numeric(6, 4)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "loyaltyRedeemValue": {
-          "name": "loyaltyRedeemValue",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "openMatchRepaymentMode": {
-          "name": "openMatchRepaymentMode",
-          "type": "OpenMatchRepaymentMode",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'info'"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "venue_settings_venueId_fkey": {
-          "name": "venue_settings_venueId_fkey",
-          "tableFrom": "venue_settings",
-          "tableTo": "venues",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "venueId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_settings.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))",
-          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_settings.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))"
-        }
-      },
-      "isRLSEnabled": true
+      "isRLSEnabled": false
     },
     "public.booking_addons": {
       "name": "booking_addons",
@@ -1780,10 +436,9 @@
           "columns": [
             {
               "expression": "addonId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1796,10 +451,9 @@
           "columns": [
             {
               "expression": "bookingId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1813,7 +467,6 @@
           "name": "booking_addons_bookingId_fkey",
           "tableFrom": "booking_addons",
           "tableTo": "bookings",
-          "schemaTo": "public",
           "columnsFrom": [
             "bookingId"
           ],
@@ -1827,7 +480,6 @@
           "name": "booking_addons_addonId_fkey",
           "tableFrom": "booking_addons",
           "tableTo": "addons",
-          "schemaTo": "public",
           "columnsFrom": [
             "addonId"
           ],
@@ -1840,7 +492,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -1849,11 +500,12 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM bookings b\n  WHERE ((b.id = booking_addons.\"bookingId\") AND (b.\"ownerId\" = app_current_owner_id())))))",
-          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM bookings b\n  WHERE ((b.id = booking_addons.\"bookingId\") AND (b.\"ownerId\" = app_current_owner_id())))))"
+          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM bookings b\n  WHERE ((b.id = booking_addons.\"bookingId\") AND (b.\"ownerId\" = app_current_owner_id())))))",
+          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM bookings b\n  WHERE ((b.id = booking_addons.\"bookingId\") AND (b.\"ownerId\" = app_current_owner_id())))))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
     "public.bookings": {
       "name": "bookings",
@@ -1925,6 +577,20 @@
           "primaryKey": false,
           "notNull": true
         },
+        "amountPaidOnline": {
+          "name": "amountPaidOnline",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "amountDueAtVenue": {
+          "name": "amountDueAtVenue",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
         "packId": {
           "name": "packId",
           "type": "text",
@@ -1977,7 +643,7 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
@@ -1989,10 +655,9 @@
           "columns": [
             {
               "expression": "customerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2005,10 +670,9 @@
           "columns": [
             {
               "expression": "idempotencyKey",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -2021,10 +685,9 @@
           "columns": [
             {
               "expression": "offerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2037,10 +700,9 @@
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2053,10 +715,9 @@
           "columns": [
             {
               "expression": "packId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2069,10 +730,9 @@
           "columns": [
             {
               "expression": "seriesId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2085,10 +745,9 @@
           "columns": [
             {
               "expression": "venueId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2102,7 +761,6 @@
           "name": "bookings_packId_fkey",
           "tableFrom": "bookings",
           "tableTo": "membership_packs",
-          "schemaTo": "public",
           "columnsFrom": [
             "packId"
           ],
@@ -2116,7 +774,6 @@
           "name": "bookings_offerId_fkey",
           "tableFrom": "bookings",
           "tableTo": "offers",
-          "schemaTo": "public",
           "columnsFrom": [
             "offerId"
           ],
@@ -2130,7 +787,6 @@
           "name": "bookings_customerId_fkey",
           "tableFrom": "bookings",
           "tableTo": "users",
-          "schemaTo": "public",
           "columnsFrom": [
             "customerId"
           ],
@@ -2144,7 +800,6 @@
           "name": "bookings_venueId_fkey",
           "tableFrom": "bookings",
           "tableTo": "venues",
-          "schemaTo": "public",
           "columnsFrom": [
             "venueId"
           ],
@@ -2158,7 +813,6 @@
           "name": "bookings_ownerId_fkey",
           "tableFrom": "bookings",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -2171,7 +825,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -2180,11 +833,265 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.game_catalogue": {
+      "name": "game_catalogue",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "iconUrl": {
+          "name": "iconUrl",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slotGranularityMin": {
+          "name": "slotGranularityMin",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 60
+        },
+        "unitLabel": {
+          "name": "unitLabel",
+          "type": "UnitLabel",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'court'"
+        },
+        "minPlayers": {
+          "name": "minPlayers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 2
+        },
+        "maxPlayers": {
+          "name": "maxPlayers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 4
+        },
+        "defaultOpenTime": {
+          "name": "defaultOpenTime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'06:00'"
+        },
+        "defaultCloseTime": {
+          "name": "defaultCloseTime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'23:00'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "game_catalogue_name_key": {
+          "name": "game_catalogue_name_key",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ledger_txns": {
+      "name": "ledger_txns",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customerId": {
+          "name": "customerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "LedgerTxnType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "balanceAfter": {
+          "name": "balanceAfter",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lane": {
+          "name": "lane",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refType": {
+          "name": "refType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refId": {
+          "name": "refId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "ledger_txns_customerId_lane_idx": {
+          "name": "ledger_txns_customerId_lane_idx",
+          "columns": [
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lane",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_txns_ownerId_idx": {
+          "name": "ledger_txns_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ledger_txns_ownerId_fkey": {
+          "name": "ledger_txns_ownerId_fkey",
+          "tableFrom": "ledger_txns",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "ledger_txns_customerId_fkey": {
+          "name": "ledger_txns_customerId_fkey",
+          "tableFrom": "ledger_txns",
+          "tableTo": "users",
+          "columnsFrom": [
+            "customerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
     "public.membership_packs": {
       "name": "membership_packs",
@@ -2259,14 +1166,14 @@
           "type": "text[]",
           "primaryKey": false,
           "notNull": false,
-          "default": "'{\"RAY\"}'"
+          "default": "'{}'::text[]"
         },
         "unitIds": {
           "name": "unitIds",
           "type": "text[]",
           "primaryKey": false,
           "notNull": false,
-          "default": "'{\"RAY\"}'"
+          "default": "'{}'::text[]"
         },
         "active": {
           "name": "active",
@@ -2277,7 +1184,7 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
@@ -2289,10 +1196,9 @@
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2306,7 +1212,6 @@
           "name": "membership_packs_ownerId_fkey",
           "tableFrom": "membership_packs",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -2319,7 +1224,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -2328,14 +1232,15 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
-    "public.ledger_txns": {
-      "name": "ledger_txns",
+    "public.notifications": {
+      "name": "notifications",
       "schema": "",
       "columns": {
         "id": {
@@ -2346,6 +1251,116 @@
         },
         "ownerId": {
           "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "NotificationType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link": {
+          "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "readAt": {
+          "name": "readAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "notifications_ownerId_idx": {
+          "name": "notifications_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "notifications_ownerId_fkey": {
+          "name": "notifications_ownerId_fkey",
+          "tableFrom": "notifications",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.offer_redemptions": {
+      "name": "offer_redemptions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offerId": {
+          "name": "offerId",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2356,10 +1371,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
-          "type": "LedgerTxnType",
-          "typeSchema": "public",
+        "bookingId": {
+          "name": "bookingId",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -2369,206 +1383,23 @@
           "primaryKey": false,
           "notNull": true
         },
-        "balanceAfter": {
-          "name": "balanceAfter",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "lane": {
-          "name": "lane",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "refType": {
-          "name": "refType",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refId": {
-          "name": "refId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
         }
       },
       "indexes": {
-        "ledger_txns_customerId_lane_idx": {
-          "name": "ledger_txns_customerId_lane_idx",
+        "offer_redemptions_bookingId_key": {
+          "name": "offer_redemptions_bookingId_key",
           "columns": [
             {
-              "expression": "customerId",
+              "expression": "bookingId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "lane",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "ledger_txns_ownerId_idx": {
-          "name": "ledger_txns_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "ledger_txns_ownerId_fkey": {
-          "name": "ledger_txns_ownerId_fkey",
-          "tableFrom": "ledger_txns",
-          "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        },
-        "ledger_txns_customerId_fkey": {
-          "name": "ledger_txns_customerId_fkey",
-          "tableFrom": "ledger_txns",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "customerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.referrals": {
-      "name": "referrals",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "referrerId": {
-          "name": "referrerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "refereeId": {
-          "name": "refereeId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "ReferralStatus",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "rewardReleasedOnFirstPaid": {
-          "name": "rewardReleasedOnFirstPaid",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "referrals_ownerId_code_key": {
-          "name": "referrals_ownerId_code_key",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "code",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -2576,15 +1407,35 @@
           "method": "btree",
           "with": {}
         },
-        "referrals_ownerId_idx": {
-          "name": "referrals_ownerId_idx",
+        "offer_redemptions_offerId_idx": {
+          "name": "offer_redemptions_offerId_idx",
           "columns": [
             {
-              "expression": "ownerId",
+              "expression": "offerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "offer_redemptions_offer_customer_idx": {
+          "name": "offer_redemptions_offer_customer_idx",
+          "columns": [
+            {
+              "expression": "offerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2594,11 +1445,36 @@
         }
       },
       "foreignKeys": {
-        "referrals_ownerId_fkey": {
-          "name": "referrals_ownerId_fkey",
-          "tableFrom": "referrals",
+        "offer_redemptions_offerId_fkey": {
+          "name": "offer_redemptions_offerId_fkey",
+          "tableFrom": "offer_redemptions",
+          "tableTo": "offers",
+          "columnsFrom": [
+            "offerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "offer_redemptions_bookingId_fkey": {
+          "name": "offer_redemptions_bookingId_fkey",
+          "tableFrom": "offer_redemptions",
+          "tableTo": "bookings",
+          "columnsFrom": [
+            "bookingId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "offer_redemptions_ownerId_fkey": {
+          "name": "offer_redemptions_ownerId_fkey",
+          "tableFrom": "offer_redemptions",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -2607,39 +1483,10 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "cascade"
-        },
-        "referrals_referrerId_fkey": {
-          "name": "referrals_referrerId_fkey",
-          "tableFrom": "referrals",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "referrerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        },
-        "referrals_refereeId_fkey": {
-          "name": "referrals_refereeId_fkey",
-          "tableFrom": "referrals",
-          "tableTo": "users",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "refereeId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -2648,14 +1495,15 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
-    "public.addons": {
-      "name": "addons",
+    "public.offers": {
+      "name": "offers",
       "schema": "",
       "columns": {
         "id": {
@@ -2666,12 +1514,6 @@
         },
         "ownerId": {
           "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "venueId": {
-          "name": "venueId",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2684,19 +1526,82 @@
         },
         "type": {
           "name": "type",
-          "type": "AddonType",
+          "type": "OfferType",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
-        "price": {
-          "name": "price",
+        "value": {
+          "name": "value",
           "type": "numeric(10, 2)",
           "primaryKey": false,
           "notNull": true
         },
-        "stock": {
-          "name": "stock",
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "autoApply": {
+          "name": "autoApply",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "validFrom": {
+          "name": "validFrom",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "validTo": {
+          "name": "validTo",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "venueIds": {
+          "name": "venueIds",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "gameIds": {
+          "name": "gameIds",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "segment": {
+          "name": "segment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minOrderValue": {
+          "name": "minOrderValue",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maxDiscount": {
+          "name": "maxDiscount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usageLimit": {
+          "name": "usageLimit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "perUserLimit": {
+          "name": "perUserLimit",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -2710,38 +1615,42 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
         }
       },
       "indexes": {
-        "addons_ownerId_idx": {
-          "name": "addons_ownerId_idx",
+        "offers_ownerId_code_key": {
+          "name": "offers_ownerId_code_key",
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
+            },
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "addons_venueId_idx": {
-          "name": "addons_venueId_idx",
+        "offers_ownerId_idx": {
+          "name": "offers_ownerId_idx",
           "columns": [
             {
-              "expression": "venueId",
+              "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2751,24 +1660,22 @@
         }
       },
       "foreignKeys": {
-        "addons_venueId_fkey": {
-          "name": "addons_venueId_fkey",
-          "tableFrom": "addons",
-          "tableTo": "venues",
-          "schemaTo": "public",
+        "offers_ownerId_fkey": {
+          "name": "offers_ownerId_fkey",
+          "tableFrom": "offers",
+          "tableTo": "owners",
           "columnsFrom": [
-            "venueId"
+            "ownerId"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "restrict",
           "onUpdate": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -2777,11 +1684,118 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.open_match_join_requests": {
+      "name": "open_match_join_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "matchId": {
+          "name": "matchId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "playerId": {
+          "name": "playerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "JoinRequestStatus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'requested'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "open_match_join_requests_matchId_playerId_key": {
+          "name": "open_match_join_requests_matchId_playerId_key",
+          "columns": [
+            {
+              "expression": "matchId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "playerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "open_match_join_requests_matchId_fkey": {
+          "name": "open_match_join_requests_matchId_fkey",
+          "tableFrom": "open_match_join_requests",
+          "tableTo": "open_matches",
+          "columnsFrom": [
+            "matchId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "open_match_join_requests_playerId_fkey": {
+          "name": "open_match_join_requests_playerId_fkey",
+          "tableFrom": "open_match_join_requests",
+          "tableTo": "users",
+          "columnsFrom": [
+            "playerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM open_matches m\n  WHERE ((m.id = open_match_join_requests.\"matchId\") AND (m.\"ownerId\" = app_current_owner_id())))))",
+          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM open_matches m\n  WHERE ((m.id = open_match_join_requests.\"matchId\") AND (m.\"ownerId\" = app_current_owner_id())))))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
     "public.open_matches": {
       "name": "open_matches",
@@ -2851,7 +1865,7 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
@@ -2863,10 +1877,9 @@
           "columns": [
             {
               "expression": "bookingId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -2879,10 +1892,9 @@
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2896,7 +1908,6 @@
           "name": "open_matches_bookingId_fkey",
           "tableFrom": "open_matches",
           "tableTo": "bookings",
-          "schemaTo": "public",
           "columnsFrom": [
             "bookingId"
           ],
@@ -2910,7 +1921,6 @@
           "name": "open_matches_hostId_fkey",
           "tableFrom": "open_matches",
           "tableTo": "users",
-          "schemaTo": "public",
           "columnsFrom": [
             "hostId"
           ],
@@ -2924,7 +1934,6 @@
           "name": "open_matches_ownerId_fkey",
           "tableFrom": "open_matches",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -2937,7 +1946,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -2946,11 +1954,1743 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.otp_codes": {
+      "name": "otp_codes",
+      "schema": "",
+      "columns": {
+        "mobile": {
+          "name": "mobile",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.otp_requests": {
+      "name": "otp_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "mobile": {
+          "name": "mobile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "otp_requests_mobile_createdAt_idx": {
+          "name": "otp_requests_mobile_createdAt_idx",
+          "columns": [
+            {
+              "expression": "mobile",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "createdAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.otp_verify_attempts": {
+      "name": "otp_verify_attempts",
+      "schema": "",
+      "columns": {
+        "mobile": {
+          "name": "mobile",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "failedCount": {
+          "name": "failedCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "windowStartedAt": {
+          "name": "windowStartedAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "lockedUntil": {
+          "name": "lockedUntil",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.owner_customers": {
+      "name": "owner_customers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customerId": {
+          "name": "customerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "firstSeenAt": {
+          "name": "firstSeenAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "lastVisitAt": {
+          "name": "lastVisitAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "bookingCount": {
+          "name": "bookingCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "consent": {
+          "name": "consent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "optedOut": {
+          "name": "optedOut",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "owner_customers_ownerId_customerId_key": {
+          "name": "owner_customers_ownerId_customerId_key",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "owner_customers_ownerId_idx": {
+          "name": "owner_customers_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "owner_customers_ownerId_fkey": {
+          "name": "owner_customers_ownerId_fkey",
+          "tableFrom": "owner_customers",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "owner_customers_customerId_fkey": {
+          "name": "owner_customers_customerId_fkey",
+          "tableFrom": "owner_customers",
+          "tableTo": "users",
+          "columnsFrom": [
+            "customerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.owners": {
+      "name": "owners",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contactEmail": {
+          "name": "contactEmail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contactMobile": {
+          "name": "contactMobile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "OwnerStatus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "venueQuota": {
+          "name": "venueQuota",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "allowedGameIds": {
+          "name": "allowedGameIds",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "featureFlags": {
+          "name": "featureFlags",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "logoUrl": {
+          "name": "logoUrl",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "primaryColor": {
+          "name": "primaryColor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#0EA5E9'"
+        },
+        "secondaryColor": {
+          "name": "secondaryColor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#0F172A'"
+        },
+        "accentColor": {
+          "name": "accentColor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#22C55E'"
+        },
+        "setupFee": {
+          "name": "setupFee",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amcAmount": {
+          "name": "amcAmount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amcRenewalDate": {
+          "name": "amcRenewalDate",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "loyaltyEarnRate": {
+          "name": "loyaltyEarnRate",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.05'"
+        },
+        "loyaltyRedeemValue": {
+          "name": "loyaltyRedeemValue",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'1'"
+        },
+        "referralReward": {
+          "name": "referralReward",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'100'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (id = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (id = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.password_reset_tokens": {
+      "name": "password_reset_tokens",
+      "schema": "",
+      "columns": {
+        "tokenHash": {
+          "name": "tokenHash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "userId": {
+          "name": "userId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "password_reset_tokens_expiresAt_idx": {
+          "name": "password_reset_tokens_expiresAt_idx",
+          "columns": [
+            {
+              "expression": "expiresAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.payments": {
+      "name": "payments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customerId": {
+          "name": "customerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refType": {
+          "name": "refType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refId": {
+          "name": "refId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "PaymentTxnType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gatewayId": {
+          "name": "gatewayId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fee": {
+          "name": "fee",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "payments_ownerId_idx": {
+          "name": "payments_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payments_refType_refId_idx": {
+          "name": "payments_refType_refId_idx",
+          "columns": [
+            {
+              "expression": "refType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "refId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.player_profiles": {
+      "name": "player_profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customerId": {
+          "name": "customerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mobile": {
+          "name": "mobile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "games": {
+          "name": "games",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "skillLevel": {
+          "name": "skillLevel",
+          "type": "SkillLevel",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'beginner'"
+        },
+        "consent": {
+          "name": "consent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "player_profiles_ownerId_customerId_key": {
+          "name": "player_profiles_ownerId_customerId_key",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "player_profiles_ownerId_idx": {
+          "name": "player_profiles_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "player_profiles_customerId_fkey": {
+          "name": "player_profiles_customerId_fkey",
+          "tableFrom": "player_profiles",
+          "tableTo": "users",
+          "columnsFrom": [
+            "customerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "player_profiles_ownerId_fkey": {
+          "name": "player_profiles_ownerId_fkey",
+          "tableFrom": "player_profiles",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pricing_rules": {
+      "name": "pricing_rules",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "unitId": {
+          "name": "unitId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dayType": {
+          "name": "dayType",
+          "type": "DayType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "timeBand": {
+          "name": "timeBand",
+          "type": "TimeBand",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dateOverride": {
+          "name": "dateOverride",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minDuration": {
+          "name": "minDuration",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "price": {
+          "name": "price",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "pricing_rules_ownerId_idx": {
+          "name": "pricing_rules_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pricing_rules_unitId_idx": {
+          "name": "pricing_rules_unitId_idx",
+          "columns": [
+            {
+              "expression": "unitId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pricing_rules_unitId_fkey": {
+          "name": "pricing_rules_unitId_fkey",
+          "tableFrom": "pricing_rules",
+          "tableTo": "bookable_units",
+          "columnsFrom": [
+            "unitId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "pricing_rules_ownerId_fkey": {
+          "name": "pricing_rules_ownerId_fkey",
+          "tableFrom": "pricing_rules",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.referrals": {
+      "name": "referrals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "referrerId": {
+          "name": "referrerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refereeId": {
+          "name": "refereeId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "ReferralStatus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "rewardReleasedOnFirstPaid": {
+          "name": "rewardReleasedOnFirstPaid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "referrals_ownerId_code_key": {
+          "name": "referrals_ownerId_code_key",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "referrals_ownerId_idx": {
+          "name": "referrals_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "referrals_ownerId_fkey": {
+          "name": "referrals_ownerId_fkey",
+          "tableFrom": "referrals",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "referrals_referrerId_fkey": {
+          "name": "referrals_referrerId_fkey",
+          "tableFrom": "referrals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "referrerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "referrals_refereeId_fkey": {
+          "name": "referrals_refereeId_fkey",
+          "tableFrom": "referrals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "refereeId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.revoked_refresh_tokens": {
+      "name": "revoked_refresh_tokens",
+      "schema": "",
+      "columns": {
+        "jti": {
+          "name": "jti",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "revoked_refresh_tokens_expiresAt_idx": {
+          "name": "revoked_refresh_tokens_expiresAt_idx",
+          "columns": [
+            {
+              "expression": "expiresAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.saved_venues": {
+      "name": "saved_venues",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customerId": {
+          "name": "customerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "venueId": {
+          "name": "venueId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "saved_venues_customerId_venueId_key": {
+          "name": "saved_venues_customerId_venueId_key",
+          "columns": [
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "venueId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "saved_venues_customerId_idx": {
+          "name": "saved_venues_customerId_idx",
+          "columns": [
+            {
+              "expression": "customerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "saved_venues_ownerId_idx": {
+          "name": "saved_venues_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "saved_venues_venueId_fkey": {
+          "name": "saved_venues_venueId_fkey",
+          "tableFrom": "saved_venues",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venueId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "saved_venues_customerId_fkey": {
+          "name": "saved_venues_customerId_fkey",
+          "tableFrom": "saved_venues",
+          "tableTo": "users",
+          "columnsFrom": [
+            "customerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "saved_venues_ownerId_fkey": {
+          "name": "saved_venues_ownerId_fkey",
+          "tableFrom": "saved_venues",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.slots": {
+      "name": "slots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "unitId": {
+          "name": "unitId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "startsAt": {
+          "name": "startsAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endsAt": {
+          "name": "endsAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "SlotStatus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'booked'"
+        },
+        "blockReason": {
+          "name": "blockReason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bookingId": {
+          "name": "bookingId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "slots_bookingId_idx": {
+          "name": "slots_bookingId_idx",
+          "columns": [
+            {
+              "expression": "bookingId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "slots_ownerId_idx": {
+          "name": "slots_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "slots_unitId_startsAt_idx": {
+          "name": "slots_unitId_startsAt_idx",
+          "columns": [
+            {
+              "expression": "unitId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "startsAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "slots_unitId_startsAt_key": {
+          "name": "slots_unitId_startsAt_key",
+          "columns": [
+            {
+              "expression": "unitId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "startsAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "slots_unitId_fkey": {
+          "name": "slots_unitId_fkey",
+          "tableFrom": "slots",
+          "tableTo": "bookable_units",
+          "columnsFrom": [
+            "unitId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "slots_ownerId_fkey": {
+          "name": "slots_ownerId_fkey",
+          "tableFrom": "slots",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        },
+        "slots_bookingId_fkey": {
+          "name": "slots_bookingId_fkey",
+          "tableFrom": "slots",
+          "tableTo": "bookings",
+          "columnsFrom": [
+            "bookingId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tournament_matches": {
+      "name": "tournament_matches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tournamentId": {
+          "name": "tournamentId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round": {
+          "name": "round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "participantAId": {
+          "name": "participantAId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "participantBId": {
+          "name": "participantBId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scoreA": {
+          "name": "scoreA",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scoreB": {
+          "name": "scoreB",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "winnerId": {
+          "name": "winnerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "TournamentMatchStatus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "nextMatchId": {
+          "name": "nextMatchId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nextSlot": {
+          "name": "nextSlot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "tournament_matches_ownerId_idx": {
+          "name": "tournament_matches_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tournament_matches_tournamentId_idx": {
+          "name": "tournament_matches_tournamentId_idx",
+          "columns": [
+            {
+              "expression": "tournamentId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tournament_matches_tournamentId_fkey": {
+          "name": "tournament_matches_tournamentId_fkey",
+          "tableFrom": "tournament_matches",
+          "tableTo": "tournaments",
+          "columnsFrom": [
+            "tournamentId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tournament_participants": {
+      "name": "tournament_participants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tournamentId": {
+          "name": "tournamentId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "teamName": {
+          "name": "teamName",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "captainName": {
+          "name": "captainName",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "captainMobile": {
+          "name": "captainMobile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roster": {
+          "name": "roster",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid": {
+          "name": "paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "razorpayOrderId": {
+          "name": "razorpayOrderId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpayPaymentId": {
+          "name": "razorpayPaymentId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotencyKey": {
+          "name": "idempotencyKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tournament_participants_tournamentId_idx": {
+          "name": "tournament_participants_tournamentId_idx",
+          "columns": [
+            {
+              "expression": "tournamentId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tournament_participants_tournamentId_fkey": {
+          "name": "tournament_participants_tournamentId_fkey",
+          "tableFrom": "tournament_participants",
+          "tableTo": "tournaments",
+          "columnsFrom": [
+            "tournamentId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM tournaments t\n  WHERE ((t.id = tournament_participants.\"tournamentId\") AND (t.\"ownerId\" = app_current_owner_id())))))",
+          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM tournaments t\n  WHERE ((t.id = tournament_participants.\"tournamentId\") AND (t.\"ownerId\" = app_current_owner_id())))))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
     "public.tournaments": {
       "name": "tournaments",
@@ -3033,7 +3773,7 @@
         },
         "regCloseAt": {
           "name": "regCloseAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": false
         },
@@ -3046,7 +3786,7 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
@@ -3058,10 +3798,9 @@
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -3074,10 +3813,9 @@
           "columns": [
             {
               "expression": "venueId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -3091,7 +3829,6 @@
           "name": "tournaments_gameId_fkey",
           "tableFrom": "tournaments",
           "tableTo": "game_catalogue",
-          "schemaTo": "public",
           "columnsFrom": [
             "gameId"
           ],
@@ -3105,7 +3842,6 @@
           "name": "tournaments_ownerId_fkey",
           "tableFrom": "tournaments",
           "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -3119,7 +3855,6 @@
           "name": "tournaments_venueId_fkey",
           "tableFrom": "tournaments",
           "tableTo": "venues",
-          "schemaTo": "public",
           "columnsFrom": [
             "venueId"
           ],
@@ -3132,7 +3867,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -3141,14 +3875,15 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
-    "public.offers": {
-      "name": "offers",
+    "public.users": {
+      "name": "users",
       "schema": "",
       "columns": {
         "id": {
@@ -3157,11 +3892,18 @@
           "primaryKey": true,
           "notNull": true
         },
+        "role": {
+          "name": "role",
+          "type": "UserRole",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
         "ownerId": {
           "name": "ownerId",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "name": {
           "name": "name",
@@ -3169,63 +3911,44 @@
           "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
-          "type": "OfferType",
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mobile": {
+          "name": "mobile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "passwordHash": {
+          "name": "passwordHash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assignedVenueIds": {
+          "name": "assignedVenueIds",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "skillLevel": {
+          "name": "skillLevel",
+          "type": "SkillLevel",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
-        },
-        "value": {
-          "name": "value",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
           "notNull": false
         },
-        "autoApply": {
-          "name": "autoApply",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "validFrom": {
-          "name": "validFrom",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "validTo": {
-          "name": "validTo",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venueIds": {
-          "name": "venueIds",
+        "games": {
+          "name": "games",
           "type": "text[]",
           "primaryKey": false,
           "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "gameIds": {
-          "name": "gameIds",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"RAY\"}'"
-        },
-        "segment": {
-          "name": "segment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "default": "'{}'::text[]"
         },
         "active": {
           "name": "active",
@@ -3236,29 +3959,21 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "timestamp(3)",
+          "type": "timestamp (3)",
           "primaryKey": false,
           "notNull": true,
           "default": "CURRENT_TIMESTAMP"
         }
       },
       "indexes": {
-        "offers_ownerId_code_key": {
-          "name": "offers_ownerId_code_key",
+        "users_email_key": {
+          "name": "users_email_key",
           "columns": [
             {
-              "expression": "ownerId",
+              "expression": "email",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            },
-            {
-              "expression": "code",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -3266,15 +3981,29 @@
           "method": "btree",
           "with": {}
         },
-        "offers_ownerId_idx": {
-          "name": "offers_ownerId_idx",
+        "users_mobile_key": {
+          "name": "users_mobile_key",
+          "columns": [
+            {
+              "expression": "mobile",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_ownerId_idx": {
+          "name": "users_ownerId_idx",
           "columns": [
             {
               "expression": "ownerId",
+              "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -3284,123 +4013,10 @@
         }
       },
       "foreignKeys": {
-        "offers_ownerId_fkey": {
-          "name": "offers_ownerId_fkey",
-          "tableFrom": "offers",
+        "users_ownerId_fkey": {
+          "name": "users_ownerId_fkey",
+          "tableFrom": "users",
           "tableTo": "owners",
-          "schemaTo": "public",
-          "columnsFrom": [
-            "ownerId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {},
-      "policies": {
-        "tenant_isolation": {
-          "name": "tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.audit_logs": {
-      "name": "audit_logs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "ownerId": {
-          "name": "ownerId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actorId": {
-          "name": "actorId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actorRole": {
-          "name": "actorRole",
-          "type": "UserRole",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entity": {
-          "name": "entity",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entityId": {
-          "name": "entityId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "timestamp(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "audit_logs_ownerId_idx": {
-          "name": "audit_logs_ownerId_idx",
-          "columns": [
-            {
-              "expression": "ownerId",
-              "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops",
-              "isExpression": false
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "audit_logs_ownerId_fkey": {
-          "name": "audit_logs_ownerId_fkey",
-          "tableFrom": "audit_logs",
-          "tableTo": "owners",
-          "schemaTo": "public",
           "columnsFrom": [
             "ownerId"
           ],
@@ -3413,7 +4029,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -3422,11 +4037,12 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
-          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+          "using": "(app_bypass_rls() OR (\"ownerId\" IS NULL) OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" IS NULL) OR (\"ownerId\" = app_current_owner_id()))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
     },
     "public.venue_games": {
       "name": "venue_games",
@@ -3451,7 +4067,6 @@
           "name": "venue_games_venueId_fkey",
           "tableFrom": "venue_games",
           "tableTo": "venues",
-          "schemaTo": "public",
           "columnsFrom": [
             "venueId"
           ],
@@ -3465,7 +4080,6 @@
           "name": "venue_games_gameId_fkey",
           "tableFrom": "venue_games",
           "tableTo": "game_catalogue",
-          "schemaTo": "public",
           "columnsFrom": [
             "gameId"
           ],
@@ -3486,7 +4100,6 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {},
       "policies": {
         "tenant_isolation": {
           "name": "tenant_isolation",
@@ -3495,60 +4108,298 @@
           "to": [
             "public"
           ],
-          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_games.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))",
-          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_games.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))"
+          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_games.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))",
+          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_games.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))"
         }
       },
-      "isRLSEnabled": true
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.venue_settings": {
+      "name": "venue_settings",
+      "schema": "",
+      "columns": {
+        "venueId": {
+          "name": "venueId",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "cancellationTemplate": {
+          "name": "cancellationTemplate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'flexible'"
+        },
+        "noShowFee": {
+          "name": "noShowFee",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "depositPct": {
+          "name": "depositPct",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "loyaltyEarnRate": {
+          "name": "loyaltyEarnRate",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "loyaltyRedeemValue": {
+          "name": "loyaltyRedeemValue",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "openMatchRepaymentMode": {
+          "name": "openMatchRepaymentMode",
+          "type": "OpenMatchRepaymentMode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'info'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "venue_settings_venueId_fkey": {
+          "name": "venue_settings_venueId_fkey",
+          "tableFrom": "venue_settings",
+          "tableTo": "venues",
+          "columnsFrom": [
+            "venueId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_settings.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))",
+          "withCheck": "(app_bypass_rls() OR (EXISTS ( SELECT 1\n   FROM venues v\n  WHERE ((v.id = venue_settings.\"venueId\") AND (v.\"ownerId\" = app_current_owner_id())))))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.venues": {
+      "name": "venues",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "geoLat": {
+          "name": "geoLat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geoLng": {
+          "name": "geoLng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city": {
+          "name": "city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contactPhone": {
+          "name": "contactPhone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "photos": {
+          "name": "photos",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "openTime": {
+          "name": "openTime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'06:00'"
+        },
+        "closeTime": {
+          "name": "closeTime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'23:00'"
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "venues_city_idx": {
+          "name": "venues_city_idx",
+          "columns": [
+            {
+              "expression": "city",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "venues_ownerId_idx": {
+          "name": "venues_ownerId_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "venues_ownerId_fkey": {
+          "name": "venues_ownerId_fkey",
+          "tableFrom": "venues",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "tenant_isolation": {
+          "name": "tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))",
+          "withCheck": "(app_bypass_rls() OR (\"ownerId\" = app_current_owner_id()))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
     "public.AddonType": {
       "name": "AddonType",
+      "schema": "public",
       "values": [
         "rental",
         "cafe",
         "coaching"
-      ],
-      "schema": "public"
+      ]
     },
     "public.BookingStatus": {
       "name": "BookingStatus",
+      "schema": "public",
       "values": [
         "confirmed",
         "cancelled",
         "completed",
         "no_show"
-      ],
-      "schema": "public"
+      ]
     },
     "public.DayType": {
       "name": "DayType",
+      "schema": "public",
       "values": [
         "weekday",
         "weekend"
-      ],
-      "schema": "public"
+      ]
     },
     "public.FeeBasis": {
       "name": "FeeBasis",
+      "schema": "public",
       "values": [
         "per_player",
         "per_team"
-      ],
-      "schema": "public"
+      ]
     },
     "public.JoinRequestStatus": {
       "name": "JoinRequestStatus",
+      "schema": "public",
       "values": [
         "requested",
         "approved",
         "rejected"
-      ],
-      "schema": "public"
+      ]
     },
     "public.LedgerTxnType": {
       "name": "LedgerTxnType",
+      "schema": "public",
       "values": [
         "pack_buy",
         "pack_debit",
@@ -3558,72 +4409,85 @@
         "referral_reward",
         "no_show_fee",
         "cash_refund",
-        "open_match_settle"
-      ],
-      "schema": "public"
+        "open_match_settle",
+        "pack_expire"
+      ]
+    },
+    "public.NotificationType": {
+      "name": "NotificationType",
+      "schema": "public",
+      "values": [
+        "booking_created",
+        "booking_cancelled",
+        "tournament_registration",
+        "open_match_join",
+        "amc_reminder",
+        "general"
+      ]
     },
     "public.OfferType": {
       "name": "OfferType",
+      "schema": "public",
       "values": [
         "percent",
         "flat"
-      ],
-      "schema": "public"
+      ]
     },
     "public.OpenMatchRepaymentMode": {
       "name": "OpenMatchRepaymentMode",
+      "schema": "public",
       "values": [
         "info",
         "ledger"
-      ],
-      "schema": "public"
+      ]
     },
     "public.OpenMatchStatus": {
       "name": "OpenMatchStatus",
+      "schema": "public",
       "values": [
         "open",
         "full",
         "cancelled",
         "completed"
-      ],
-      "schema": "public"
+      ]
     },
     "public.OwnerStatus": {
       "name": "OwnerStatus",
+      "schema": "public",
       "values": [
         "active",
         "suspended",
         "pending"
-      ],
-      "schema": "public"
+      ]
     },
     "public.PackExpiryMode": {
       "name": "PackExpiryMode",
+      "schema": "public",
       "values": [
         "forfeit",
         "rollover",
         "none"
-      ],
-      "schema": "public"
+      ]
     },
     "public.PackPricingMode": {
       "name": "PackPricingMode",
+      "schema": "public",
       "values": [
         "flat",
         "discount"
-      ],
-      "schema": "public"
+      ]
     },
     "public.PayMode": {
       "name": "PayMode",
+      "schema": "public",
       "values": [
         "prepay",
         "at_venue"
-      ],
-      "schema": "public"
+      ]
     },
     "public.PaymentStatus": {
       "name": "PaymentStatus",
+      "schema": "public",
       "values": [
         "pending",
         "paid",
@@ -3631,82 +4495,97 @@
         "settled_at_venue",
         "refunded",
         "failed"
-      ],
-      "schema": "public"
+      ]
+    },
+    "public.PaymentTxnType": {
+      "name": "PaymentTxnType",
+      "schema": "public",
+      "values": [
+        "capture",
+        "refund"
+      ]
     },
     "public.ReferralStatus": {
       "name": "ReferralStatus",
+      "schema": "public",
       "values": [
         "pending",
         "rewarded",
         "expired"
-      ],
-      "schema": "public"
+      ]
     },
     "public.RegistrationType": {
       "name": "RegistrationType",
+      "schema": "public",
       "values": [
         "solo",
         "team"
-      ],
-      "schema": "public"
+      ]
     },
     "public.SkillLevel": {
       "name": "SkillLevel",
+      "schema": "public",
       "values": [
         "beginner",
         "advanced_beginner",
         "advanced",
         "pro"
-      ],
-      "schema": "public"
+      ]
     },
     "public.SlotStatus": {
       "name": "SlotStatus",
+      "schema": "public",
       "values": [
         "open",
         "booked",
         "blocked"
-      ],
-      "schema": "public"
+      ]
     },
     "public.TimeBand": {
       "name": "TimeBand",
+      "schema": "public",
       "values": [
         "morning",
         "afternoon",
         "evening"
-      ],
-      "schema": "public"
+      ]
     },
     "public.TournamentFormat": {
       "name": "TournamentFormat",
+      "schema": "public",
       "values": [
         "knockout",
         "league",
         "round_robin"
-      ],
-      "schema": "public"
+      ]
+    },
+    "public.TournamentMatchStatus": {
+      "name": "TournamentMatchStatus",
+      "schema": "public",
+      "values": [
+        "pending",
+        "completed"
+      ]
     },
     "public.UnitLabel": {
       "name": "UnitLabel",
+      "schema": "public",
       "values": [
         "court",
         "turf",
         "lane",
         "net"
-      ],
-      "schema": "public"
+      ]
     },
     "public.UserRole": {
       "name": "UserRole",
+      "schema": "public",
       "values": [
         "super_admin",
         "owner",
         "staff",
         "customer"
-      ],
-      "schema": "public"
+      ]
     }
   },
   "schemas": {},
@@ -3715,81 +4594,8 @@
   "policies": {},
   "views": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
-  },
-  "internal": {
-    "tables": {
-      "owners": {
-        "columns": {
-          "allowedGameIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          },
-          "featureFlags": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      },
-      "users": {
-        "columns": {
-          "assignedVenueIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      },
-      "player_profiles": {
-        "columns": {
-          "games": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      },
-      "venues": {
-        "columns": {
-          "photos": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      },
-      "membership_packs": {
-        "columns": {
-          "venueIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          },
-          "unitIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      },
-      "offers": {
-        "columns": {
-          "venueIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          },
-          "gameIds": {
-            "isArray": true,
-            "dimensions": 1,
-            "rawType": "text"
-          }
-        }
-      }
-    }
+    "tables": {}
   }
 }

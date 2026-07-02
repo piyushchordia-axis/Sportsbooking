@@ -62,8 +62,9 @@ services:
       - api
 
   # One-off schema/RLS apply + optional seed. Reuses the api image; runs as the
-  # ADMIN role (DATABASE_ADMIN_URL) which db:push needs for DDL + role creation.
-  #   db:push             -> GUC funcs + schema + RLS(ENABLE+FORCE) + policies + runtime role
+  # ADMIN role (DATABASE_ADMIN_URL) which needs DDL + role-creation rights.
+  #   db:migrate          -> GUC funcs + versioned migrations + RLS(ENABLE+FORCE) + policies + runtime role (default)
+  #   db:baseline         -> ONE-TIME on an existing push-built DB: stamp current schema as applied (override the command)
   #   db:set-app-password -> rotate the runtime role pw to match DATABASE_URL
   #   db:seed             -> demo data (override the command)
   migrate:
@@ -77,7 +78,7 @@ services:
       - .env
     environment:
       NODE_ENV: production
-    command: ["pnpm", "db:push"]
+    command: ["pnpm", "db:migrate"]
 
 volumes:
   sb_uploads:

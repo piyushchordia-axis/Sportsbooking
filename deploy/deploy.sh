@@ -41,15 +41,25 @@ ssh "$SSH_HOST" "cd '$REMOTE_DIR' && test -f .env || { echo 'ERROR: $REMOTE_DIR/
 ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE build"
 
 if [ "${MIGRATE:-0}" = "1" ]; then
-  # NOTE: db:push runs `drizzle-kit push --force` — it auto-approves schema
-  # changes. Safe on a FRESH database (first deploy). On an existing DB with
-  # data, review the diff first (run `pnpm db:push -- --strict` manually) so a
-  # column/table rename isn't silently dropped.
-  echo "==> Applying schema + RLS + runtime role (db:push)"
+  # Back up BEFORE any schema change — a migration is the one operation that can
+  # lose data, so we snapshot first. SKIP_BACKUP=1 bypasses (first deploy on a
+  # fresh DB, where there's nothing to back up).
+  if [ "${SKIP_BACKUP:-0}" != "1" ]; then
+    echo "==> Backing up before migration (deploy/backup.sh)"
+    ssh "$SSH_HOST" "cd '$REMOTE_DIR' && ./deploy/backup.sh" || {
+      echo "ERROR: pre-migration backup failed — aborting. Fix backups or re-run with SKIP_BACKUP=1 (fresh DB only)."; exit 1; }
+  fi
+  # db:migrate applies ONLY the reviewed SQL in drizzle/*.sql (no `push --force`,
+  # so a rename can't be applied as a silent drop), then the RLS policies + FORCE
+  # and the runtime role.
+  # ONE-TIME per existing DB (built by the old db:push): run the baseline first so
+  # migrate doesn't try to recreate existing tables —
+  #   ssh $SSH_HOST "cd $REMOTE_DIR && $COMPOSE --profile tools run --rm migrate pnpm db:baseline"
+  echo "==> Applying migrations + RLS + runtime role (db:migrate)"
   ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate"
-  # db:push bootstraps sportsbooking_app with a placeholder password; rotate it to
-  # the real secret in DATABASE_URL so the live runtime password is never the weak
-  # default. Idempotent — safe to re-run every deploy.
+  # db:push/migrate bootstraps sportsbooking_app with a placeholder password;
+  # rotate it to the real secret in DATABASE_URL so the live runtime password is
+  # never the weak default. Idempotent — safe to re-run every deploy.
   echo "==> Rotating runtime DB role password to match DATABASE_URL"
   ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate pnpm db:set-app-password"
 fi

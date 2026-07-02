@@ -77,10 +77,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sportsbooking/shared build
-      # Drizzle (not Prisma): db:push applies the schema, the RLS GUC functions,
-      # the policy bodies + FORCE, and the restricted sportsbooking_app runtime
-      # role in one step (it connects via DATABASE_ADMIN_URL for all DDL).
-      - run: pnpm --filter @sportsbooking/api db:push
+      # Drizzle (not Prisma): db:migrate applies the versioned migrations
+      # (drizzle/*.sql), the RLS GUC functions, the policy bodies + FORCE, and the
+      # restricted sportsbooking_app runtime role (connects via DATABASE_ADMIN_URL
+      # for DDL). A fresh CI DB runs the baseline migration — same path as a fresh
+      # production deploy.
+      - run: pnpm --filter @sportsbooking/api db:migrate
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       # playwright.config.ts boots the full stack (pnpm dev: API :3001 + web) and

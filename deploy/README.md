@@ -80,19 +80,40 @@ Nginx — the same pattern as the other apps on this host.
 
 From a checkout on your machine:
 ```bash
-# first deploy — also applies schema/RLS and seeds demo data
-SEED=1 MIGRATE=1 ./deploy/deploy.sh
+# first deploy (fresh DB — nothing to back up yet, so skip the pre-migration backup)
+SEED=1 MIGRATE=1 SKIP_BACKUP=1 ./deploy/deploy.sh
 
 # subsequent deploys — code only
 ./deploy/deploy.sh
 
-# later, if the schema changed
+# later, if the schema changed (backs up first, then db:migrate)
 MIGRATE=1 ./deploy/deploy.sh
 ```
 
 `deploy.sh` rsyncs the working tree (no `node_modules`/`.git`/`.env`), builds the
-images, optionally runs `db:push`/`db:seed`, brings the stack up, and curls
-`/api/healthz`.
+images, optionally backs up + runs `db:migrate` and `db:seed`, brings the stack
+up, and curls `/api/healthz`.
+
+## Migrations
+
+Schema changes ship as **reviewed versioned migrations**, not `push --force`.
+
+- **Change the schema:** edit `src/db/schema.ts`, then `pnpm --filter
+  @sportsbooking/api db:generate` → review the new `drizzle/NNNN_*.sql` → commit
+  it. Never edit an already-shipped migration.
+- **Apply on deploy:** `MIGRATE=1 ./deploy/deploy.sh` backs up first, then runs
+  `db:migrate` (applies only pending `drizzle/*.sql`, then RLS policies + FORCE +
+  the runtime role). No auto-approve, so a rename can't become a silent drop.
+- **ONE-TIME cutover for the existing prod DB** (built by the old `db:push`, so it
+  has the schema but no migrations table). Baseline it once so `migrate` doesn't
+  try to recreate existing tables:
+  ```bash
+  ssh e2e-server 'cd ~/sportsbooking && docker compose -f docker-compose.prod.yml \
+    --profile tools run --rm migrate pnpm db:baseline'
+  ```
+  Then `MIGRATE=1 ./deploy/deploy.sh` from then on. A FRESH DB skips this — its
+  first `db:migrate` runs the baseline migration normally.
+- `db:push` remains for local dev only (fast, auto-approve); never on prod data.
 
 ## Operating
 ```bash

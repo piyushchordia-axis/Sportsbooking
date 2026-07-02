@@ -18,9 +18,10 @@ Nginx — the same pattern as the other apps on this host.
 
 - **No Redis** — the app doesn't use it.
 - **Host networking** — both containers run on the host net and bind `127.0.0.1`
-  only (nothing public). This lets the API reach Postgres on `127.0.0.1:5432` with
-  password auth as the admin/owner role. RLS is enabled but not forced, so the
-  owner bypasses it; tenant isolation is enforced in app code by ownerId.
+  only (nothing public). This lets the restricted `sportsbooking_app` role reach
+  Postgres on `127.0.0.1:5432` with password auth, so **RLS stays enforced** (RLS
+  is ENABLEd + FORCEd; the runtime role is NOBYPASSRLS). The admin/owner role is
+  used only for migrations + seed.
 - **TLS + the subdomain** are owned by the host Nginx (Certbot), not the containers.
 
 ## Files
@@ -35,21 +36,26 @@ Nginx — the same pattern as the other apps on this host.
 
 ## One-time setup (on the server)
 
-1. **Database + role.** As a Postgres admin, create the app database and the
-   admin/owner role the API runs as (`db:push` applies the schema, RLS functions
-   and policy bodies — it does not create a separate runtime role):
+1. **Database + roles.** As a Postgres admin, create the app database and the
+   admin/owner role. `db:push` (run as this admin role) then creates the
+   restricted runtime role `sportsbooking_app` automatically from
+   `apps/api/src/db/role-setup.sql` — the admin role needs `CREATEROLE` for that:
    ```sql
    CREATE ROLE sportline_admin LOGIN PASSWORD '<admin-pw>' CREATEROLE;
    CREATE DATABASE sportsbooking OWNER sportline_admin;
    ```
-   Both `DATABASE_URL` and `DATABASE_ADMIN_URL` in `.env` point at this owner role.
-   RLS is enabled but not forced, so the owner bypasses it and tenant isolation is
-   enforced in app code by ownerId/customerId.
+   The API connects as `sportsbooking_app` (NOSUPERUSER, NOBYPASSRLS,
+   NOCREATEROLE), so RLS (ENABLEd + FORCEd) is the tenant-isolation backstop
+   behind the in-code ownerId scoping. `db:set-app-password` (run by `deploy.sh`
+   after `db:push`) rotates the role's bootstrap password to the secret in
+   `DATABASE_URL`. If the admin role lacks `CREATEROLE`, run `db:push` with
+   `SKIP_APP_ROLE=true` and create `sportsbooking_app` manually as a superuser
+   (see `role-setup.sql`).
 
 2. **`.env`.** On the server, in the app dir:
    ```bash
    cp .env.production.example .env
-   # fill DATABASE_URL + DATABASE_ADMIN_URL (both = sportline_admin),
+   # fill DATABASE_URL (sportsbooking_app), DATABASE_ADMIN_URL (sportline_admin),
    # JWT_SECRET (openssl rand -base64 48), WEB_ORIGIN, WEB_PORT,
    # STORAGE_LOCAL_BASE_URL (https://SUBDOMAIN/uploads),
    # and SMS: NOTIFICATION_DRIVER=live + SMS_API_URL (+ SMS_API_KEY)

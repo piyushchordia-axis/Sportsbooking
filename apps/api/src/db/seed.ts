@@ -10,8 +10,10 @@ import { type DbTx } from './index';
 import { dec, money } from './money';
 
 // The seed is an ADMIN/setup task (clears + repopulates every table), so it
-// connects as the admin/owner role — the owner bypasses (non-forced) RLS so
-// WITH CHECK policies never block the inserts.
+// connects as the admin role (DATABASE_ADMIN_URL). RLS is FORCEd, so even the
+// table owner is subject to it — the seed sets app.bypass_rls='on' at the top of
+// its transaction (see seed()) so WITH CHECK policies never block the inserts.
+// Never uses the restricted runtime DATABASE_URL role.
 const pool = new Pool({
   connectionString: process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL,
 });

@@ -56,7 +56,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
+      # The app runs as the restricted sportsbooking_app role (created by db:push
+      # from role-setup.sql, bootstrap password = its name) so CI exercises RLS
+      # enforcement for real. DDL + seed use the admin/superuser role.
+      DATABASE_URL: postgresql://sportsbooking_app:sportsbooking_app@localhost:5432/sportsbooking?schema=public
       DATABASE_ADMIN_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
       JWT_SECRET: ci-secret
       NODE_ENV: development
@@ -75,7 +78,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sportsbooking/shared build
       # Drizzle (not Prisma): db:push applies the schema, the RLS GUC functions,
-      # and the policy bodies in one step.
+      # the policy bodies + FORCE, and the restricted sportsbooking_app runtime
+      # role in one step (it connects via DATABASE_ADMIN_URL for all DDL).
       - run: pnpm --filter @sportsbooking/api db:push
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium

@@ -45,8 +45,13 @@ if [ "${MIGRATE:-0}" = "1" ]; then
   # changes. Safe on a FRESH database (first deploy). On an existing DB with
   # data, review the diff first (run `pnpm db:push -- --strict` manually) so a
   # column/table rename isn't silently dropped.
-  echo "==> Applying schema + RLS (db:push)"
+  echo "==> Applying schema + RLS + runtime role (db:push)"
   ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate"
+  # db:push bootstraps sportsbooking_app with a placeholder password; rotate it to
+  # the real secret in DATABASE_URL so the live runtime password is never the weak
+  # default. Idempotent — safe to re-run every deploy.
+  echo "==> Rotating runtime DB role password to match DATABASE_URL"
+  ssh "$SSH_HOST" "cd '$REMOTE_DIR' && $COMPOSE --profile tools run --rm migrate pnpm db:set-app-password"
 fi
 
 if [ "${SEED:-0}" = "1" ]; then

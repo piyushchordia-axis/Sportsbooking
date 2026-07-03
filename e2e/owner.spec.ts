@@ -13,34 +13,37 @@ test.describe('Owner console', () => {
   });
 
   test('create a membership pack and see it listed', async ({ page }) => {
-    await page.getByRole('link', { name: 'Packs' }).click();
+    // Deep-link rather than click the (collapsible) sidebar group.
+    await page.goto('/owner/packs');
     await expect(page).toHaveURL(/\/owner\/packs$/);
 
+    await page.getByRole('button', { name: 'New pack' }).click();
     const name = `E2E Pack ${Date.now()}`;
-    await page.getByLabel('Name').fill(name);
+    await page.getByLabel('Pack name').fill(name);
     await page.getByRole('button', { name: 'Create pack' }).click();
 
-    await expect(page.getByText('Pack created.')).toBeVisible();
+    // The dialog closes and the new pack appears in the list.
     await expect(page.getByText(name)).toBeVisible();
   });
 
   test('create an offer and see it listed', async ({ page }) => {
-    await page.getByRole('link', { name: 'Offers' }).click();
+    await page.goto('/owner/offers');
     await expect(page).toHaveURL(/\/owner\/offers$/);
 
+    await page.getByRole('button', { name: 'New offer' }).click();
     const name = `E2E Offer ${Date.now()}`;
-    await page.getByLabel('Name').fill(name);
+    await page.getByLabel('Name', { exact: true }).fill(name);
     // Unique promo code so the test is re-runnable (code is unique per owner).
-    await page.getByLabel('Code').fill(`E2E${Date.now()}`);
+    await page.getByLabel('Promo code').fill(`E2E${Date.now()}`);
     await page.getByRole('button', { name: 'Create offer' }).click();
 
-    await expect(page.getByText('Offer created.')).toBeVisible();
     await expect(page.getByText(name)).toBeVisible();
   });
 
   test('players CRM directory loads', async ({ page }) => {
-    await page.getByRole('link', { name: 'Players' }).click();
+    await page.goto('/owner/players');
     await expect(page).toHaveURL(/\/owner\/players$/);
-    await expect(page.getByRole('heading', { name: 'Players (CRM)' })).toBeVisible();
+    // Redesign: page title "Players" + a "CRM" badge (was a "Players (CRM)" heading).
+    await expect(page.getByRole('heading', { name: 'Players' })).toBeVisible();
   });
 });

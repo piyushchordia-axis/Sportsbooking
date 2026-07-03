@@ -1,0 +1,101 @@
+# Production stack for Sportline — mirrors the proven pattern already running on
+# this host (jain-pathshala): app containers on the HOST network so they reach
+# the host's Postgres on 127.0.0.1:5432 (TCP, password auth) without exposing it
+# to Docker, and the host's public Nginx terminates TLS and proxies the
+# subdomain to the web container on 127.0.0.1.
+#
+#   web (nginx)  -> 127.0.0.1:8093  serves the SPA, proxies /api + /uploads to api
+#   api (nest)   -> 127.0.0.1:3001  /api, connects to host Postgres @127.0.0.1:5432
+#   migrate      -> one-off: applies schema + RLS (db:push) and seeds (profile)
+#
+# Host networking is what lets the restricted `sportsbooking_app` role connect at
+# all (the socket peer-maps only the admin role), so RLS stays enforced. The API
+# connects as that non-owner, NOBYPASSRLS role; RLS is ENABLEd + FORCEd, so it is
+# the tenant-isolation backstop behind the in-code ownerId scoping. Both services
+# bind 127.0.0.1 only — nothing is exposed to the internet directly.
+# Redis is intentionally absent — the app doesn't use it (Throttler is in-memory).
+#
+# Images are tagged with the deploy's git short SHA via IMAGE_TAG (defaults to
+# `latest`); deploy.sh sets it so the running stack maps to a commit and rollback
+# is just `up -d` with a prior tag. Use deploy/deploy.sh rather than raw compose.
+#
+# Usage:
+#   cp .env.production.example .env      # then fill DATABASE_URL(s) + JWT_SECRET
+#   ./deploy/deploy.sh                   # (wraps: build + migrate + up, SHA-tagged)
+#   IMAGE_TAG=<sha> docker compose -f docker-compose.prod.yml up -d   # manual/rollback
+
+name: sportsbooking
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: sportsbooking-api:${IMAGE_TAG:-latest}
+    container_name: sportsbooking-api
+    restart: unless-stopped
+    init: true
+    # Host net: reach Postgres on 127.0.0.1:5432; HOST=127.0.0.1 binds the API to
+    # loopback only (not public). The host Nginx + web tier reach it via 3001.
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 127.0.0.1
+      API_PORT: "3001"
+      # Local storage driver writes here (the code reads STORAGE_LOCAL_DIR,
+      # resolved from cwd) — the mounted volume, so uploads persist across
+      # rebuilds. STORAGE_LOCAL_BASE_URL (public URLs) is set per-domain in .env.
+      STORAGE_LOCAL_DIR: /data/uploads
+    volumes:
+      - sb_uploads:/data/uploads
+    # Cap resources so a runaway process can't starve the host (which also runs
+    # Postgres + other apps). docker compose v2 honors deploy.resources.limits
+    # without Swarm. Tune to the box; these are conservative for a small VPS.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: sportsbooking-web:${IMAGE_TAG:-latest}
+    container_name: sportsbooking-web
+    restart: unless-stopped
+    init: true
+    # Host net: nginx binds 127.0.0.1:8093 and proxies to the API on 127.0.0.1:3001.
+    # The host's public Nginx proxies the subdomain here.
+    network_mode: host
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # One-off schema/RLS apply + optional seed. Reuses the api image; runs as the
+  # ADMIN role (DATABASE_ADMIN_URL) which needs DDL + role-creation rights.
+  #   db:migrate          -> GUC funcs + versioned migrations + RLS(ENABLE+FORCE) + policies + runtime role (default)
+  #   db:baseline         -> ONE-TIME on an existing push-built DB: stamp current schema as applied (override the command)
+  #   db:set-app-password -> rotate the runtime role pw to match DATABASE_URL
+  #   db:seed             -> demo data (override the command)
+  migrate:
+    image: sportsbooking-api:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ["tools"]
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    command: ["pnpm", "db:migrate"]
+
+volumes:
+  sb_uploads:

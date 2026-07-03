@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { DayType, TimeBand } from '@sportsbooking/shared';
+import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { PrismaService } from '../../prisma/prisma.service';
+import { VENUE_TZ } from '../../common/time';
+import { DbService } from '../../db/db.service';
+import type { DbTx } from '../../db';
+import { Decimal, dec } from '../../db/money';
+import { pricingRules } from '../../db/schema';
 
 export interface ResolvedPrice {
-  price: Prisma.Decimal;
+  price: Decimal;
   dayType: DayType;
   timeBand: TimeBand;
 }
@@ -18,7 +22,7 @@ export interface ResolvedPrice {
  */
 @Injectable()
 export class PricingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: DbService) {}
 
   static dayType(dt: DateTime): DayType {
     // Sat=6, Sun=7 in luxon weekday
@@ -37,14 +41,15 @@ export class PricingService {
     rule: {
       dayType: string | null;
       timeBand: string | null;
-      dateOverride: Date | null;
+      dateOverride: string | null;
       minDuration: number | null;
     },
     ctx: { dayType: DayType; timeBand: TimeBand; date: string; durationMin: number },
   ): number {
     let s = 0;
     if (rule.dateOverride) {
-      const ruleDate = DateTime.fromJSDate(rule.dateOverride).toISODate();
+      // numeric date columns come back as ISO date strings (mode:'string').
+      const ruleDate = DateTime.fromISO(rule.dateOverride).toISODate();
       if (ruleDate !== ctx.date) return -1;
       s += 8; // date override is the strongest signal
     }
@@ -71,15 +76,24 @@ export class PricingService {
     unitId: string,
     startsAt: Date,
     durationMin: number,
-    tx?: Prisma.TransactionClient,
+    tx?: DbTx,
   ): Promise<ResolvedPrice> {
-    const client = tx ?? this.prisma;
-    const rules = await client.pricingRule.findMany({ where: { unitId } });
+    if (!tx) {
+      return this.db.withTenant((scoped) =>
+        this.resolve(unitId, startsAt, durationMin, scoped),
+      );
+    }
+
+    const rules = await tx.query.pricingRules.findMany({
+      where: eq(pricingRules.unitId, unitId),
+    });
     if (rules.length === 0) {
       throw new NotFoundException(`No pricing configured for unit ${unitId}`);
     }
 
-    const dt = DateTime.fromJSDate(startsAt);
+    // Pricing bands (peak hour) and dayType (weekend) are defined in venue time,
+    // so read the stored instant in IST — not the server's zone.
+    const dt = DateTime.fromJSDate(startsAt, { zone: VENUE_TZ });
     const ctx = {
       dayType: PricingService.dayType(dt),
       timeBand: PricingService.timeBand(dt),
@@ -87,17 +101,29 @@ export class PricingService {
       durationMin,
     };
 
-    let best: { score: number; price: Prisma.Decimal } | null = null;
+    let best: { score: number; price: Decimal; id: string } | null = null;
     for (const rule of rules) {
       const s = this.score(rule, ctx);
       if (s < 0) continue;
+      // numeric(10,2) columns come back as strings; build a Decimal for math.
+      const rulePrice = dec(rule.price);
       if (!best || s > best.score) {
-        best = { score: s, price: rule.price };
+        best = { score: s, price: rulePrice, id: rule.id };
+        continue;
+      }
+      // Deterministic tiebreaker for equal specificity: prefer the lower
+      // price, then the lexicographically smaller rule id, so resolution is
+      // stable regardless of row ordering (BUG-12).
+      if (s === best.score) {
+        const cmp = rulePrice.comparedTo(best.price);
+        if (cmp < 0 || (cmp === 0 && rule.id < best.id)) {
+          best = { score: s, price: rulePrice, id: rule.id };
+        }
       }
     }
     if (!best) {
       // fall back to a base rule (no dimensions) if present; else first rule
-      best = { score: 0, price: rules[0].price };
+      best = { score: 0, price: dec(rules[0].price), id: rules[0].id };
     }
     return { price: best.price, dayType: ctx.dayType, timeBand: ctx.timeBand };
   }

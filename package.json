@@ -20,9 +20,15 @@
     "db:seed": "pnpm --filter @sportsbooking/api db:seed"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.49.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
-    "prettier": "^3.4.2"
+    "typescript-eslint": "^8.61.1"
   }
 }

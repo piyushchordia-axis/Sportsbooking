@@ -1,73 +1,226 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&family=Saira+Condensed:wght@500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Sportline design tokens. White-label branding (see ThemeProvider) overrides
- * the source --primary / --secondary / --accent vars at runtime so the whole
- * app re-themes per owner while keeping the Sportline palette as the default.
+ * "Warm Industrial" palette — ported 1:1 from the Reflex Logistics TMS
+ * (src/app/globals.css): warm-neutral surfaces + a deep teal primary (OKLCH).
+ * Light mode: crisp, airy, high contrast. Dark mode: warm graphite.
  *
- * Light is the :root default; the `.dark` block below overrides only the
- * NEUTRAL surface tokens (background / card / popover / muted / border / input
- * + text). Brand tokens (--primary/--secondary/--accent + their foregrounds and
- * --ring) are mode-independent and re-themed at runtime by ThemeProvider, so
- * they live here once and stay consistent across dark/light. The dark/light
- * mode is toggled by adding/removing `.dark` on <html> (see ThemeProvider and
- * the no-flash bootstrap script in index.html).
+ * White-label branding (ThemeProvider) overrides --primary/--secondary/--accent
+ * + foregrounds + --ring ONLY when a real owner brand is active; the default app
+ * uses these exact tokens, per mode. Mode is toggled by .dark on <html>
+ * (ThemeProvider + the no-flash bootstrap in index.html).
+ *
+ * Tokens prefixed below that are NOT in shadcn's set (--border-faint, --row-hover,
+ * --input-background, --elevated, --rail-*) are app extensions used by our
+ * primitives (cards, tables, KPI rails).
  */
 :root {
   --font-size: 16px;
-  /* Neutral surfaces — light (default). Overridden by `.dark`. */
-  --background: #f3f5fa;
-  --foreground: #101828;
-  --card: #ffffff;
-  --card-foreground: #101828;
-  --popover: #ffffff;
-  --popover-foreground: #101828;
-  --muted: #eef1f8;
-  --muted-foreground: #5b6a85;
-  --border: rgba(13, 20, 36, 0.12);
-  --border-faint: rgba(13, 20, 36, 0.07);
-  --row-hover: rgba(13, 20, 36, 0.035);
+
+  /* Refined neutral daylight */
+  --background: oklch(0.972 0.004 84);
+  --foreground: oklch(0.19 0.014 58);
+  --card: oklch(0.995 0.002 84);
+  --card-foreground: oklch(0.19 0.014 58);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.014 58);
+
+  /* Deep teal — the distinctive primary. Not blue, not green. */
+  --primary: oklch(0.48 0.102 184);
+  --primary-foreground: oklch(0.98 0 0);
+
+  --secondary: oklch(0.93 0.005 84);
+  --secondary-foreground: oklch(0.27 0.015 58);
+  --muted: oklch(0.94 0.004 84);
+  --muted-foreground: oklch(0.47 0.016 58);
+
+  /* Accent: we repurpose Reflex's amber (chart-2) as a VIVID highlight, since our
+     primitives use `accent` for icon/rail color rather than a hover surface. */
+  --accent: oklch(0.65 0.14 65);
+  --accent-foreground: oklch(0.2 0.02 65);
+
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.86 0.007 84);
+  --border-faint: oklch(0.9 0.006 84);
+  --row-hover: color-mix(in oklab, var(--foreground) 4%, transparent);
   --input: transparent;
-  --input-background: #eef1f8;
-  /* Brand palette (mode-independent; overridden at runtime by ThemeProvider). */
-  --primary: #20d07a;
-  --primary-foreground: #040a10;
-  --secondary: #162038;
-  --secondary-foreground: #a0b0cc;
-  --accent: #f5a623;
-  --accent-foreground: #070b14;
-  --ring: #20d07a;
-  /* Mode-independent. */
-  --destructive: #e53e5a;
-  --destructive-foreground: #ffffff;
+  --input-background: oklch(0.94 0.004 84);
+  --ring: oklch(0.48 0.102 184);
+
+  /* App-shell surfaces */
+  --sidebar: oklch(0.955 0.004 84);
+  --elevated: oklch(0.985 0.003 84);
+
+  /* Charts: teal → amber → slate → copper → olive (Reflex) */
+  --chart-1: oklch(0.5 0.11 175);
+  --chart-2: oklch(0.65 0.14 65);
+  --chart-3: oklch(0.48 0.04 250);
+  --chart-4: oklch(0.6 0.13 45);
+  --chart-5: oklch(0.52 0.09 140);
+
+  /* Vivid card-rail accents (mode-independent mid-tones) */
+  --rail-blue: oklch(0.58 0.13 245);
+  --rail-emerald: oklch(0.6 0.12 178);
+  --rail-purple: oklch(0.55 0.17 300);
+  --rail-orange: oklch(0.66 0.15 55);
+  --rail-pink: oklch(0.62 0.21 8);
+
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: #20d07a;
-  --chart-2: #f5a623;
-  --chart-3: #3b82f6;
-  --chart-4: #a855f7;
-  --chart-5: #e53e5a;
   --radius: 0.625rem;
 }
 
-/* Dark mode — the original Sportline "stadium-night" neutral surfaces. */
+/* Dark mode — near-black surfaces so the teal accent reads (Reflex). The
+   background is the blackest; cards/elevated sit just above it for depth. */
 .dark {
-  --background: #070b14;
-  --foreground: #e8edf8;
-  --card: #0d1424;
-  --card-foreground: #e8edf8;
-  --popover: #0d1424;
-  --popover-foreground: #e8edf8;
-  --muted: #111c30;
-  --muted-foreground: #6a7d9c;
-  --border: rgba(255, 255, 255, 0.07);
-  --border-faint: rgba(255, 255, 255, 0.04);
-  --row-hover: rgba(255, 255, 255, 0.02);
+  --background: oklch(0.09 0.006 56);
+  --foreground: oklch(0.93 0.007 82);
+  --card: oklch(0.135 0.009 56);
+  --card-foreground: oklch(0.93 0.007 82);
+  --popover: oklch(0.145 0.009 56);
+  --popover-foreground: oklch(0.93 0.007 82);
+
+  --primary: oklch(0.67 0.116 184);
+  --primary-foreground: oklch(0.16 0.012 56);
+
+  --secondary: oklch(0.185 0.011 56);
+  --secondary-foreground: oklch(0.87 0.008 82);
+  --muted: oklch(0.175 0.01 56);
+  --muted-foreground: oklch(0.65 0.014 70);
+
+  --accent: oklch(0.68 0.14 65);
+  --accent-foreground: oklch(0.16 0.02 65);
+
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.24 0.012 56);
+  --border-faint: oklch(0.185 0.01 56);
   --input: transparent;
-  --input-background: #111c30;
+  --input-background: oklch(0.165 0.01 56);
+  --ring: oklch(0.6 0.11 184);
+
+  --sidebar: oklch(0.075 0.006 56);
+  --elevated: oklch(0.165 0.01 56);
+
+  --chart-1: oklch(0.6 0.12 175);
+  --chart-2: oklch(0.68 0.14 65);
+  --chart-3: oklch(0.55 0.04 250);
+  --chart-4: oklch(0.65 0.12 45);
+  --chart-5: oklch(0.58 0.08 140);
+}
+
+/* ============================================================================
+ * "Floodlit" — the PLAYER storefront + landing theme (from Claude Design).
+ * SCOPED to `.floodlit` so the owner/admin console keeps Warm Industrial.
+ * Dark by default; `data-fl-mode="light"` swaps to the daytime-court palette.
+ * White-label: `--brand` defaults to the Floodlit green; the storefront wrapper
+ * overrides `--brand`/`--on-brand` inline from the active owner's primaryColor.
+ * The design's bare token names are used verbatim so the markup ports 1:1; they
+ * only resolve inside `.floodlit`, so the console palette is untouched.
+ * ==========================================================================*/
+.floodlit {
+  --bg: oklch(0.155 0.022 252);
+  --bg-2: oklch(0.125 0.02 252);
+  --surface: oklch(0.205 0.024 250);
+  --surface-2: oklch(0.255 0.026 250);
+  --line: oklch(0.95 0.01 110 / 0.18);
+  --line-strong: oklch(0.96 0.01 110 / 0.45);
+  --chalk: oklch(0.965 0.012 110);
+  --muted: oklch(0.74 0.018 252);
+  --faint: oklch(0.6 0.02 252);
+  --green: oklch(0.84 0.2 150);
+  --green-2: oklch(0.66 0.17 152);
+  --amber: oklch(0.81 0.155 72);
+  --amber-2: oklch(0.72 0.155 62);
+  --on-amber: oklch(0.2 0.03 60);
+  --danger: oklch(0.7 0.18 25);
+  --brand: var(--green);
+  --on-brand: oklch(0.17 0.04 152);
+  background: var(--bg);
+  color: var(--chalk);
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+.floodlit[data-fl-mode='light'] {
+  --bg: oklch(0.972 0.006 110);
+  --bg-2: oklch(0.93 0.01 120);
+  --surface: oklch(0.995 0.004 110);
+  --surface-2: oklch(0.95 0.008 120);
+  --line: oklch(0.42 0.03 252 / 0.18);
+  --line-strong: oklch(0.32 0.04 252 / 0.45);
+  --chalk: oklch(0.22 0.025 252);
+  --muted: oklch(0.44 0.025 252);
+  --faint: oklch(0.55 0.02 252);
+  --green: oklch(0.52 0.16 150);
+  --green-2: oklch(0.48 0.15 152);
+  --amber: oklch(0.64 0.16 60);
+  --amber-2: oklch(0.58 0.16 55);
+  --on-amber: oklch(0.99 0.01 90);
+  --danger: oklch(0.62 0.2 25);
+  --on-brand: oklch(0.99 0.01 150);
+}
+.fl-display {
+  font-family: 'Saira Condensed', 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.fl-mono {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.fl-scroll::-webkit-scrollbar { width: 0; height: 0; }
+.fl-scroll { scrollbar-width: none; }
+/* Bookable slot cell (SlotPicker) — hover lift on available, unselected cells. */
+.fl-slot { transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.fl-slot:not(.is-sel):hover { border-color: var(--brand); background: color-mix(in oklab, var(--brand) 10%, transparent); }
+@keyframes fl-flick { 0%,100%{opacity:.9} 50%{opacity:.62} 53%{opacity:.85} 70%{opacity:.7} }
+@keyframes fl-blip { 0%,100%{opacity:.35} 50%{opacity:1} }
+@keyframes fl-rise { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+
+/* Native-feel page transition: a subtle fade + lift on each route change. The
+   shell keys this wrapper by pathname so it re-runs on every tab switch.
+   fill-mode `backwards` (NOT `both`): `both` keeps the end keyframe's
+   `transform: translateY(0)` applied forever, and any non-`none` transform turns
+   this wrapper into the containing block for `position: fixed` descendants —
+   which pins the venue page's sticky cart bar to the bottom of the page content
+   instead of the viewport. `backwards` still shows the enter effect (and avoids a
+   start-frame flash) but drops the transform once the animation finishes, so
+   fixed elements inside a page stay glued to the viewport. */
+.fl-page-enter { animation: fl-rise 0.24s ease backwards; }
+
+/* Skeleton shimmer — Floodlit only (the admin console keeps its own pulse).
+   Targets the shared <Skeleton data-slot="skeleton">, so every floodlit skeleton
+   gets a left-to-right sweep instead of a flat pulse (native loading feel). */
+.floodlit [data-slot='skeleton'] {
+  background-color: var(--surface-2);
+  position: relative;
+  overflow: hidden;
+  animation: none;
+}
+.floodlit [data-slot='skeleton']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--chalk) 10%, transparent) 50%,
+    transparent 100%
+  );
+  animation: fl-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes fl-shimmer { to { transform: translateX(100%); } }
+
+/* Respect reduced-motion: drop the transition + shimmer movement. */
+@media (prefers-reduced-motion: reduce) {
+  .fl-page-enter { animation: none; }
+  .floodlit [data-slot='skeleton']::after { animation: none; }
 }
 
 @theme inline {
@@ -91,18 +244,26 @@
   --color-input: var(--input);
   --color-input-background: var(--input-background);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-elevated: var(--elevated);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --color-rail-blue: var(--rail-blue);
+  --color-rail-emerald: var(--rail-emerald);
+  --color-rail-purple: var(--rail-purple);
+  --color-rail-orange: var(--rail-orange);
+  --color-rail-pink: var(--rail-pink);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, monospace;
-  --font-display: 'Rajdhani', sans-serif;
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -112,14 +273,35 @@
 
   html {
     font-size: var(--font-size);
+    /* Belt-and-braces against horizontal overflow on mobile. `clip` (not
+       `hidden`) clips without creating a scroll container, so position:sticky
+       on the app header + bottom nav keeps working. */
+    overflow-x: clip;
   }
 
   body {
     margin: 0;
     background-color: var(--background);
+    /* Refined "warm industrial" backdrop: a soft teal glow top-left + a vertical
+       lighten toward the top (ported from Reflex). Shows through the transparent
+       app-shell main column. */
+    background-image:
+      radial-gradient(
+        circle at top left,
+        color-mix(in oklab, var(--primary) 14%, transparent) 0%,
+        transparent 38%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--background) 78%, white) 0%,
+        var(--background) 100%
+      );
+    background-attachment: fixed;
     color: var(--foreground);
-    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'cv01', 'cv03', 'ss01';
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   a {
@@ -127,11 +309,6 @@
     text-decoration: none;
   }
 
-  /*
-   * Sensible dark-theme defaults for raw elements that appear across CRUD
-   * pages. These live in @layer base, so any Tailwind utility class on an
-   * element overrides them — bespoke screens stay in full control.
-   */
   button:not([class*='bg-']):not([class*='text-']) {
     cursor: pointer;
     font-family: inherit;
@@ -140,7 +317,7 @@
     color: var(--primary-foreground);
     background-color: var(--primary);
     border: none;
-    border-radius: 0.5rem;
+    border-radius: 0.625rem;
     padding: 0.5rem 0.9rem;
     transition: all 0.15s ease;
   }
@@ -154,6 +331,37 @@
     cursor: not-allowed;
   }
 
+  /* The console default button padding above (0.5rem 0.9rem) leaks onto floodlit
+     buttons that style themselves inline (no bg-/text- utility), pushing the
+     icon off-centre in icon-only buttons like the day/night toggle. Zero it for
+     the floodlit app; padded buttons still set their own px-/py- utilities,
+     which win (utilities layer > base layer). */
+  .floodlit button:not([class*='bg-']):not([class*='text-']) {
+    padding: 0;
+  }
+
+  /*
+   * Tailwind v4's Preflight removed the default `cursor: pointer` on buttons, so
+   * styled controls render with the arrow cursor. Restore the pointer for every
+   * interactive control (links, native + ARIA-role widgets). Disabled controls
+   * keep the default cursor.
+   */
+  button:not(:disabled):not([aria-disabled='true']),
+  [role='button']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true']),
+  [role='menuitemradio']:not([aria-disabled='true']),
+  [role='menuitemcheckbox']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']),
+  [role='switch']:not([aria-disabled='true']),
+  a[href],
+  label[for],
+  select:not(:disabled),
+  summary,
+  ::file-selector-button {
+    cursor: pointer;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -162,24 +370,41 @@
 
   th {
     text-align: left;
-    font-family: 'DM Mono', ui-monospace, monospace;
     font-size: 10px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.13em;
     color: var(--muted-foreground);
-    padding: 0.7rem 0.75rem;
+    padding: 0.75rem 0.85rem;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
   }
 
   td {
-    padding: 0.7rem 0.75rem;
+    padding: 0.8rem 0.85rem;
     border-bottom: 1px solid var(--border-faint);
     color: var(--foreground);
   }
 
   tbody tr:hover {
     background-color: var(--row-hover);
+  }
+
+  /* react-day-picker renders the calendar as a <table>, so the data-table rules
+     above (uppercase headers, per-row borders, cell padding, row hover) leak in
+     and break the shadcn look. Neutralize them inside the calendar only; the
+     component's own utility classes own sizing, color and selection styling. */
+  .rdp-root th,
+  .rdp-root td {
+    padding: 0;
+    border: 0;
+    text-align: center;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .rdp-root tbody tr:hover {
+    background-color: transparent;
   }
 
   summary {
@@ -193,7 +418,8 @@
 
 @layer utilities {
   .font-display {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
   }
 
   .hide-scrollbar::-webkit-scrollbar {
@@ -204,16 +430,159 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Subtle teal glow for the primary CTA. */
+  .glow-primary {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+      0 12px 40px -12px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
+
+  /* Card surface: a dark-teal radial glow from the top-left corner (Reflex look)
+     over the solid card colour, plus a soft teal-tinted drop shadow — replaces
+     the muddy neutral gray. background-image is independent of the bg-* colour,
+     so it overlays cleanly. */
+  .shadow-card {
+    box-shadow: 0 22px 70px rgba(18, 71, 68, 0.08);
+    background-image: radial-gradient(
+      125% 90% at 0% 0%,
+      color-mix(in oklab, var(--primary) 9%, transparent) 0%,
+      transparent 52%
+    );
+  }
+  :where(.dark) .shadow-card {
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.36);
+    background-image: radial-gradient(
+      125% 90% at 0% 0%,
+      color-mix(in oklab, var(--primary) 18%, transparent) 0%,
+      transparent 55%
+    );
+  }
+
+  /* Engineering-mesh backdrop used on the login hero panel. */
+  .grid-backdrop {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 46px 46px;
+  }
+
+  .surface-elevated {
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--card) 92%, var(--primary) 5%),
+      var(--card)
+    );
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * "Floodlights" — the consumer landing identity. Scoped via these
+   * opt-in classes so the admin/owner console keeps the Geist look.
+   * Display = Archivo (athletic grotesque); scoreboard = Space Mono.
+   * ────────────────────────────────────────────────────────────────── */
+  .ff-display {
+    font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.03em;
+  }
+  .ff-score {
+    font-family: 'Space Mono', ui-monospace, monospace;
+    font-feature-settings: 'tnum';
+    letter-spacing: -0.01em;
+  }
+
+  /* Painted pitch markings — faint field lines behind the floodlit hero. */
+  .pitch-lines {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--accent) 22%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--accent) 16%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 64px 64px;
+    background-position: center;
+  }
+
+  /* The single floodlamp sweep across the slot board — the one bold motion. */
+  .flood-sweep {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      color-mix(in oklab, var(--accent) 14%, transparent) 48%,
+      transparent 66%
+    );
+    transform: translateX(-60%);
+    animation: flood-sweep 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes flood-sweep {
+    0%,
+    100% {
+      transform: translateX(-60%);
+    }
+    50% {
+      transform: translateX(60%);
+    }
+  }
+
+  /* Live "now" indicator — a soft breathing dot. */
+  .live-dot {
+    animation: live-dot 1.9s ease-in-out infinite;
+  }
+  @keyframes live-dot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.4;
+      transform: scale(0.78);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flood-sweep,
+    .live-dot {
+      animation: none;
+    }
+  }
 }
 
 /*
- * Page container. Defined unlayered so it reliably overrides Tailwind's
- * built-in `.container` utility (unlayered CSS wins over @layer rules).
- * Centers content and matches the app shell width.
+ * Calendar selection colors. react-day-picker puts the selection state on the
+ * day <td>, but the inner ghost <button> keeps its own `text-muted-foreground`
+ * (Tailwind utilities layer), so a selected day number would render dark on the
+ * primary fill. These rules stay unlayered to beat that utility. range_middle is
+ * listed last so a middle day — which carries both .rdp-selected and
+ * .rdp-range_middle — stays dark on the muted band.
+ */
+.rdp-root .rdp-selected button {
+  color: var(--primary-foreground);
+}
+.rdp-root .rdp-selected button:hover {
+  color: var(--primary-foreground);
+  background-color: transparent;
+}
+.rdp-root .rdp-range_middle button,
+.rdp-root .rdp-range_middle button:hover {
+  color: var(--foreground);
+  background-color: transparent;
+}
+
+/*
+ * Page container. Unlayered so it reliably overrides Tailwind's built-in
+ * `.container`. Centers content + matches the shell content width.
  */
 .container {
   width: 100%;
-  max-width: 80rem;
+  max-width: 84rem;
   margin-inline: auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 1.75rem 1.5rem 4rem;
 }

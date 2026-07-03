@@ -1,23 +1,56 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { LoginResponse, UserRole } from '@sportsbooking/shared';
+import {
+  AuthTokens,
+  LoginResponse,
+  OwnerStatus,
+  UserRole,
+} from '@sportsbooking/shared';
 import * as bcrypt from 'bcryptjs';
-import { PrismaService } from '../../prisma/prisma.service';
+import { eq, lt } from 'drizzle-orm';
+import { DbService } from '../../db/db.service';
+import {
+  owners,
+  passwordResetTokens,
+  revokedRefreshTokens,
+  users,
+} from '../../db/schema';
+import { NotificationService } from '../notifications/notification.service';
 import { JwtPayload } from './jwt.strategy';
 import { OtpService } from './otp.service';
 import { StaffLoginDto, VerifyOtpDto } from './dto';
 
+/** Roles permitted to use password-based auth (customers are OTP-only). */
+const PASSWORD_ROLES: readonly UserRole[] = [
+  UserRole.OWNER,
+  UserRole.STAFF,
+  UserRole.SUPER_ADMIN,
+];
+
+/** Shape of a refresh-token JWT payload (distinct from access tokens). */
+interface RefreshTokenPayload {
+  sub: string;
+  jti: string;
+  type: 'refresh';
+  exp?: number;
+}
+
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: DbService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly otp: OtpService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async requestOtp(mobile: string): Promise<{ sent: true }> {
@@ -27,37 +60,41 @@ export class AuthService {
 
   /** Customer OTP verification — find-or-create the global customer user. */
   async verifyOtp(dto: VerifyOtpDto): Promise<LoginResponse> {
-    if (!this.otp.verify(dto.mobile, dto.code)) {
+    if (!(await this.otp.verify(dto.mobile, dto.code))) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
     // Customers are global; super admin bypasses RLS to upsert by mobile.
-    const user = await this.prisma.withTenantBypass(async (tx) => {
-      const existing = await tx.user.findUnique({
-        where: { mobile: dto.mobile },
+    const user = await this.db.withTenantBypass(async (tx) => {
+      const existing = await tx.query.users.findFirst({
+        where: eq(users.mobile, dto.mobile),
       });
       if (existing) return existing;
-      return tx.user.create({
-        data: {
-          role: UserRole.CUSTOMER,
-          name: dto.name ?? 'Player',
-          mobile: dto.mobile,
-        },
-      });
+      return (
+        await tx
+          .insert(users)
+          .values({
+            id: randomUUID(),
+            role: UserRole.CUSTOMER,
+            name: dto.name ?? 'Player',
+            mobile: dto.mobile,
+          })
+          .returning()
+      )[0];
     });
 
     return this.issueTokens({
       sub: user.id,
       role: user.role as UserRole,
       ownerId: user.ownerId,
-      assignedVenueIds: user.assignedVenueIds,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
     }, user.name);
   }
 
   /** Owner/staff email + password login (PRD §2.1). */
   async staffLogin(dto: StaffLoginDto): Promise<LoginResponse> {
-    const user = await this.prisma.withTenantBypass((tx) =>
-      tx.user.findUnique({ where: { email: dto.email } }),
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.email, dto.email) }),
     );
     if (!user || !user.passwordHash || !user.active) {
       throw new UnauthorizedException('Invalid credentials');
@@ -65,25 +102,207 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
 
+    // Suspended owners (and their staff) are denied access even with valid creds.
+    await this.assertOwnerNotSuspended(user.ownerId);
+
     return this.issueTokens({
       sub: user.id,
       role: user.role as UserRole,
       ownerId: user.ownerId,
-      assignedVenueIds: user.assignedVenueIds,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
     }, user.name);
   }
 
-  private issueTokens(payload: JwtPayload, name: string): LoginResponse {
-    const accessToken = this.jwt.sign(payload, {
-      expiresIn: Number(this.config.get('JWT_ACCESS_TTL', 900)),
-    });
-    const refreshToken = this.jwt.sign(
-      { sub: payload.sub },
-      { expiresIn: Number(this.config.get('JWT_REFRESH_TTL', 2592000)) },
+  /**
+   * Rotate a refresh token: verify it, ensure it is not revoked, then issue a
+   * fresh access token and a new refresh token. The presented token is revoked
+   * so it cannot be reused (rotation). (PRD §2.1 auth lifecycle.)
+   */
+  async refresh(refreshToken: string): Promise<AuthTokens> {
+    let payload: RefreshTokenPayload;
+    try {
+      payload = await this.jwt.verifyAsync<RefreshTokenPayload>(refreshToken);
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // Reject access tokens presented as refresh tokens.
+    if (payload.type !== 'refresh' || !payload.jti || !payload.sub) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (await this.isRefreshRevoked(payload.jti)) {
+      throw new UnauthorizedException('Refresh token has been revoked');
+    }
+
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.id, payload.sub) }),
     );
+    if (!user || !user.active) {
+      throw new UnauthorizedException('User is no longer active');
+    }
+
+    // Re-check owner status on every refresh so suspension takes effect within
+    // one access-token lifetime even for already-issued sessions.
+    await this.assertOwnerNotSuspended(user.ownerId);
+
+    // Rotate: revoke the presented token so it cannot be replayed.
+    await this.revokeRefresh(payload.jti, payload.exp);
+
+    return this.mintTokens({
+      sub: user.id,
+      role: user.role as UserRole,
+      ownerId: user.ownerId,
+      assignedVenueIds: user.assignedVenueIds ?? undefined,
+    });
+  }
+
+  /** Revoke a refresh token (logout). Idempotent and never leaks token state. */
+  async logout(refreshToken: string): Promise<{ revoked: true }> {
+    try {
+      const payload =
+        await this.jwt.verifyAsync<RefreshTokenPayload>(refreshToken);
+      if (payload.type === 'refresh' && payload.jti) {
+        await this.revokeRefresh(payload.jti, payload.exp);
+      }
+    } catch {
+      // Already-invalid/expired tokens need no revocation; treat as success.
+    }
+    return { revoked: true };
+  }
+
+  /**
+   * Change the password of an authenticated owner/staff/admin user.
+   * Verifies the current password before persisting the new hash.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ updated: true }> {
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.id, userId) }),
+    );
+    if (!user || !user.passwordHash || !PASSWORD_ROLES.includes(user.role as UserRole)) {
+      // Customers (OTP-only) and users without a password cannot use this.
+      throw new BadRequestException('Password change is not available for this account');
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) throw new BadRequestException('Current password is incorrect');
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.db.withTenantBypass((tx) =>
+      tx.update(users).set({ passwordHash }).where(eq(users.id, user.id)),
+    );
+    return { updated: true };
+  }
+
+  /**
+   * Forgot-password step 1: if an owner/staff/admin user matches the email,
+   * mint a single-use reset token and deliver it. Always returns { sent: true }
+   * so callers cannot probe which emails exist.
+   */
+  async requestPasswordReset(email: string): Promise<{ sent: true }> {
+    const user = await this.db.withTenantBypass((tx) =>
+      tx.query.users.findFirst({ where: eq(users.email, email) }),
+    );
+
+    if (
+      user &&
+      user.active &&
+      user.passwordHash &&
+      PASSWORD_ROLES.includes(user.role as UserRole)
+    ) {
+      // Store only a hash of the opaque token (defence-in-depth: a DB leak does
+      // not expose usable reset tokens). The raw token is delivered to the user.
+      const token = randomBytes(32).toString('hex');
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      await this.db.withTenantBypass(async (tx) => {
+        await tx
+          .delete(passwordResetTokens)
+          .where(lt(passwordResetTokens.expiresAt, new Date()));
+        await tx.insert(passwordResetTokens).values({
+          tokenHash,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+        });
+      });
+      // Dev: NotificationService 'log' driver just logs this. For prod, an email
+      // provider is needed (SMS is not appropriate for staff password resets).
+      await this.notifications.sendSms(
+        user.mobile ?? email,
+        `Your password reset code is ${token}. It expires in 15 minutes.`,
+      );
+    }
+
+    return { sent: true };
+  }
+
+  /**
+   * Forgot-password step 2: validate the reset token, set the new password,
+   * and invalidate the token (single-use).
+   */
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ updated: true }> {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.db.withTenantBypass(async (tx) => {
+      // Sweep expired tokens, then validate + consume this one atomically so the
+      // password update and single-use invalidation cannot diverge.
+      await tx
+        .delete(passwordResetTokens)
+        .where(lt(passwordResetTokens.expiresAt, new Date()));
+      const entry = (
+        await tx
+          .select()
+          .from(passwordResetTokens)
+          .where(eq(passwordResetTokens.tokenHash, tokenHash))
+          .limit(1)
+      )[0];
+      if (!entry || entry.expiresAt.getTime() < Date.now()) {
+        if (entry) {
+          await tx
+            .delete(passwordResetTokens)
+            .where(eq(passwordResetTokens.tokenHash, tokenHash));
+        }
+        throw new BadRequestException('Invalid or expired reset token');
+      }
+      await tx
+        .update(users)
+        .set({ passwordHash })
+        .where(eq(users.id, entry.userId));
+      await tx
+        .delete(passwordResetTokens)
+        .where(eq(passwordResetTokens.tokenHash, tokenHash));
+    });
+    return { updated: true };
+  }
+
+  /**
+   * Reject owner/staff whose owner account has been suspended (e.g. by AMC).
+   * Customers (no ownerId) and super-admin (no ownerId) are unaffected. Loaded
+   * via tenant bypass since RLS would otherwise scope the lookup to the caller.
+   */
+  private async assertOwnerNotSuspended(ownerId: string | null): Promise<void> {
+    if (!ownerId) return;
+    const owner = await this.db.withTenantBypass((tx) =>
+      tx.query.owners.findFirst({
+        where: eq(owners.id, ownerId),
+        columns: { status: true },
+      }),
+    );
+    if (owner?.status === OwnerStatus.SUSPENDED) {
+      throw new UnauthorizedException('Account suspended');
+    }
+  }
+
+  private issueTokens(payload: JwtPayload, name: string): LoginResponse {
+    const tokens = this.mintTokens(payload);
     return {
-      accessToken,
-      refreshToken,
+      ...tokens,
       user: {
         id: payload.sub,
         role: payload.role,
@@ -92,5 +311,51 @@ export class AuthService {
         assignedVenueIds: payload.assignedVenueIds,
       },
     };
+  }
+
+  /** Mint an access token (full claims) + a rotated refresh token (jti+type). */
+  private mintTokens(payload: JwtPayload): AuthTokens {
+    const accessToken = this.jwt.sign(payload, {
+      expiresIn: Number(this.config.get('JWT_ACCESS_TTL', 900)),
+    });
+    const refreshToken = this.jwt.sign(
+      { sub: payload.sub, jti: randomUUID(), type: 'refresh' },
+      { expiresIn: Number(this.config.get('JWT_REFRESH_TTL', 2592000)) },
+    );
+    return { accessToken, refreshToken };
+  }
+
+  private async revokeRefresh(jti: string, exp?: number): Promise<void> {
+    // Keep the entry only until the token would expire anyway, then it is moot.
+    // Fall back to the refresh-token TTL (not the much shorter reset-token TTL)
+    // so a revoked-but-unexpired token can never be purged from the denylist
+    // early and replayed.
+    const refreshTtlMs =
+      Number(this.config.get('JWT_REFRESH_TTL', 2592000)) * 1000;
+    const expiresAt = new Date(exp ? exp * 1000 : Date.now() + refreshTtlMs);
+    await this.db.withTenantBypass((tx) =>
+      tx
+        .insert(revokedRefreshTokens)
+        .values({ jti, expiresAt })
+        .onConflictDoNothing(),
+    );
+  }
+
+  private async isRefreshRevoked(jti: string): Promise<boolean> {
+    return this.db.withTenantBypass(async (tx) => {
+      // Drop denylist entries whose underlying token has already expired, then
+      // check the presented jti.
+      await tx
+        .delete(revokedRefreshTokens)
+        .where(lt(revokedRefreshTokens.expiresAt, new Date()));
+      const row = (
+        await tx
+          .select({ jti: revokedRefreshTokens.jti })
+          .from(revokedRefreshTokens)
+          .where(eq(revokedRefreshTokens.jti, jti))
+          .limit(1)
+      )[0];
+      return !!row;
+    });
   }
 }

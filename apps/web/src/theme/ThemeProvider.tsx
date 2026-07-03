@@ -15,11 +15,13 @@ import { createContext, ReactNode, useContext, useEffect, useState } from 'react
  * script in index.html; this provider keeps React state in sync and persists
  * the choice so it survives reloads.
  */
-const DEFAULT_BRANDING: Branding = {
+/** Platform-default branding. Exported so the consumer storefront can reset the
+ *  theme when leaving an owner's white-label site back to the marketplace. */
+export const DEFAULT_BRANDING: Branding = {
   logoUrl: null,
-  primaryColor: '#20D07A',
-  secondaryColor: '#162038',
-  accentColor: '#F5A623',
+  primaryColor: '#14C8A2',
+  secondaryColor: '#17211D',
+  accentColor: '#F59E0B',
 };
 
 export type ThemeMode = 'dark' | 'light';
@@ -94,6 +96,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
+    const brandVars = [
+      '--primary',
+      '--primary-foreground',
+      '--secondary',
+      '--secondary-foreground',
+      '--accent',
+      '--accent-foreground',
+      '--ring',
+    ];
+    // Default app uses the design-system tokens from styles.css (the exact
+    // per-mode Reflex palette). Only a real owner brand overrides them at runtime.
+    if (branding === DEFAULT_BRANDING) {
+      brandVars.forEach((v) => root.style.removeProperty(v));
+      return;
+    }
     root.style.setProperty('--primary', branding.primaryColor);
     root.style.setProperty('--primary-foreground', foregroundFor(branding.primaryColor));
     root.style.setProperty('--secondary', branding.secondaryColor);

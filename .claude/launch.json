@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@sportsbooking/api", "dev"],
+      "port": 3001,
+      "autoPort": false
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@sportsbooking/web",
+        "exec",
+        "vite",
+        "--port",
+        "5055",
+        "--strictPort",
+        "--host"
+      ],
+      "port": 5055,
+      "autoPort": false
+    }
+  ]
+}

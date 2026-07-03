@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 /**
  * Request-scoped tenant context propagated via AsyncLocalStorage.
  * Populated by TenantMiddleware from the authenticated JWT, and consumed by
- * PrismaService to set the Postgres session vars that drive RLS (PRD §7).
+ * DbService to set the Postgres session vars that drive RLS (PRD §7).
  */
 export interface TenantStore {
   ownerId: string | null;

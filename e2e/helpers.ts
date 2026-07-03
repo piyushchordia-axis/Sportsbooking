@@ -1,6 +1,6 @@
 import { expect, Page } from '@playwright/test';
 
-/** Seed credentials (apps/api/prisma/seed.ts). */
+/** Seed credentials (apps/api/src/db/seed.ts). */
 export const SEED = {
   owner: { email: 'owner@smasharena.local', password: 'owner12345' },
   admin: { email: 'admin@sportsbooking.local', password: 'admin12345' },
@@ -22,29 +22,31 @@ export function futureDate(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Customer OTP login → lands on /book. Returns the mobile used. */
+/** Customer OTP login (player storefront) → lands on the storefront home. */
 export async function loginAsCustomer(page: Page, name = 'E2E Player'): Promise<string> {
   const mobile = randomMobile();
   await page.goto('/login');
-  await page.getByRole('button', { name: 'Player (OTP)' }).click();
-  await page.getByLabel('Mobile').fill(mobile);
-  await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Send OTP' }).click();
-  await page.getByLabel('OTP code').fill(SEED.devOtp);
-  await page.getByRole('button', { name: 'Verify & continue' }).click();
-  await expect(page).toHaveURL(/\/book$/);
+  // Floodlit auth: mobile (tel) + optional name → "Send code", then OTP → "Verify".
+  await page.locator('input[inputmode="tel"]').fill(mobile);
+  await page.getByPlaceholder(/your name/i).fill(name);
+  await page.getByRole('button', { name: /send code/i }).click();
+  await page.locator('input[inputmode="numeric"]').fill(SEED.devOtp);
+  await page.getByRole('button', { name: /^verify/i }).click();
+  // Signed-in players land on /browse (the app), not the marketing landing.
+  await expect(page).toHaveURL(/\/browse$/);
   return mobile;
 }
 
-/** Email/password login for owner or admin. */
+/** Email/password login for owner or admin (console at /admin/login). */
 export async function loginWithPassword(
   page: Page,
   email: string,
   password: string,
 ): Promise<void> {
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'Owner / Staff / Admin' }).click();
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
+  await page.goto('/admin/login');
+  // Target inputs by type — the password field's "Password" label collides with
+  // the "Forgot password?" and "Show password" controls under getByLabel.
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
 }

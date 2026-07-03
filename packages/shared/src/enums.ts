@@ -87,6 +87,8 @@ export enum LedgerTxnType {
   NO_SHOW_FEE = 'no_show_fee',
   CASH_REFUND = 'cash_refund',
   OPEN_MATCH_SETTLE = 'open_match_settle',
+  /** Forfeiture of expired pack sessions (PRD §4.4 expiry=forfeit). */
+  PACK_EXPIRE = 'pack_expire',
 }
 
 export enum ReferralStatus {

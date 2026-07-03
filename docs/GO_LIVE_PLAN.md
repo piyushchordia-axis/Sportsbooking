@@ -1,0 +1,106 @@
+# Production Go-Live Plan
+
+Phased remediation plan derived from the 2026-07-02 codebase audit (security + production-readiness). Phases are **gated**: each phase's exit criteria should be met before the next begins, because earlier phases are either actively exploitable or protect against unrecoverable data loss.
+
+Effort key: **S** ≈ <½ day · **M** ≈ ½–2 days · **L** ≈ multi-day. "∥" = parallelizable within the phase.
+
+---
+
+## Phase 0 — Stop-the-bleed security
+**Gate:** must complete before any non-test user touches production. Everything here is exploitable *today*.
+
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 0.1 ✅ | **DONE** — Added explicit `eq(table.ownerId, user.ownerId)` to the 7 unscoped read paths | `reports.module.ts` (ownerSummary), `search.module.ts` (venues/tournaments/players/bookings), `payment-ledger.service.ts` + `payments.controller.ts`, `audit-log.module.ts` (list + entities), `offers.module.ts` (list), `notification-feed.module.ts` (list), `loyalty-settings.module.ts` (getHistory) — typecheck + lint + 31 unit tests green | M |
+| 0.2 ✅ | **DONE (repo + dev DB; prod rollout pending)** — `FORCE ROW LEVEL SECURITY` on all 27 tenant tables + restored the non-owner `sportsbooking_app` runtime role (NOSUPERUSER/NOBYPASSRLS/NOCREATEROLE) with grants + append-only REVOKEs on `ledger_txns`/`payments`; `DATABASE_URL`→runtime role, admin only for migrate/seed. Verified on dev DB: cross-tenant reads blocked, append-only enforced, `WITH CHECK` blocks cross-tenant writes, app boots + owner endpoints work as the restricted role. **Prod rollout:** deploy → `MIGRATE=1 ./deploy/deploy.sh` (creates role + rotates password) → switch server `.env` `DATABASE_URL` to `sportsbooking_app`. Files: `rls-policies.sql`, `role-setup.sql`, `db-push.ts`, `set-app-role-password.ts`, `deploy.sh`, `docker-compose.prod.yml`, `.env*.example`, `deploy/README.md`, `ci.yml` | M |
+| 0.3 | Remove `STATIC_OTP`; wire a live SMS provider (or gate player login behind `ALLOW_NO_SMS` until ready) | `otp.service.ts:49`, `.env.production.example:38`, server `.env` | M |
+| 0.4 | Delete the `.replit` dev launch path + committed dev JWT secret | `.replit:14,49` | S |
+
+**Exit criteria:** With two seeded tenants, hit all 7 endpoints as tenant A and confirm zero tenant-B rows returned; confirm forcing RLS breaks nothing for legitimate queries; login requires a real OTP; no `development` launch path can reach a public host.
+
+---
+
+## Phase 1 — Data safety & deploy integrity
+**Gate:** before real customer data accumulates at any scale. Protects against unrecoverable loss.
+
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 1.1 ◐ | **Script done; operator steps pending** — `deploy/backup.sh` (gzipped `pg_dump` + `sb_uploads` tar + local retention + optional offsite via rsync/S3, reads creds from `.env`) + a "Backups" section in `deploy/README.md` with cron install + restore steps. **Operator must:** set `OFFSITE_DEST`, install the cron, and run a test restore. | M |
+| 1.2 ✅ | **DONE (prod needs one-time baseline)** — Replaced `push --force` deploy path with reviewed versioned migrations. Regenerated a fresh full-schema baseline (`0000_baseline.sql`); added `db:migrate` (migrations + RLS + role) and `db:baseline` (stamp existing schema as applied, using drizzle's own hashing). `deploy.sh` now backs up (`backup.sh`) before migrating; compose `migrate` default = `db:migrate`; CI runs `db:migrate`. `db:push` kept dev-only. Verified: baseline+migrate on dev DB (no data loss, idempotent), fresh-install migrate on a scratch DB (33 tables, 27 forced, grants), `db:generate` clean. **Prod: run `db:baseline` ONCE** before the first `MIGRATE=1` deploy. | M |
+| 1.3 ✅ | **DONE** — Prevent the silent mock-payment path. Investigation showed the server already fails closed in prod (mock signatures rejected), so the real bug was a customer *dead-end*: a prod build without the key let a customer pick online prepay → PENDING booking → no checkout → silent expiry. Fix: `onlinePrepayAvailable` gate hides online prepay + deposit in a prod build without the key (mock still available in dev), so the storefront offers pay-at-venue only; plus a loud build-time warning in `vite.config.ts`. Chose safe runtime degrade over a hard build-fail to preserve the valid pay-at-venue-only launch mode. Files: `apps/web/src/lib/razorpay.ts`, `apps/web/src/pages/consumer/VenueDetailPage.tsx`, `apps/web/vite.config.ts`. Verified: web typecheck + prod builds (with/without key) + warning. | S |
+| 1.4 ✅ | **DONE** — `deploy.sh` now ships the **committed** ref (`git archive`, refuses a dirty tree unless `ALLOW_DIRTY=1`, `REF=<sha>` selectable), builds images **tagged with the git SHA** (`IMAGE_TAG` in compose), records each deploy in `deploys.log`. New `deploy/rollback.sh <sha>` re-points the stack at a prior tag (with a DB-migration caveat). Verified: script syntax, ref resolution, dirty-tree guard, `git archive` export. | M |
+
+**Exit criteria:** A restore from last night's backup succeeds on a scratch DB; a test schema change is reviewed as SQL and applied via the migrator (no `--force`); a prod build with the key missing fails; documented one-command rollback to the prior image tag.
+
+---
+
+## Phase 2 — Money & booking correctness
+**Gate:** before high booking/payment volume.
+
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 2.1 ◐ | **Webhook handling DONE; reconciliation report follow-up** — webhook now dispatches `payment.failed` (releases a PENDING prepay hold immediately: cancel + failed + free slots, instead of waiting for the reaper) and `refund.created/processed` (reconciles gateway/dashboard refunds → REFUNDED + ledger row, idempotent via `existsByGatewayId`). Verified end-to-end with signed webhooks against the dev DB (happy path, guards, idempotency, bad-sig 400). The standalone reconciliation *report* (orphaned payments / stuck-PENDING) is a separate ops tool — flagged as a follow-up. | M |
+| 2.2 ✅ | **DONE** — Consolidated `VENUE_TZ` into `common/time.ts` (single source) and pinned every wall-clock/instant parse to IST: bookings create/reschedule/conflict-check/date-filter/notif-format, venues schedule-grid/block/unblock/week-boundary, and **pricing band/dayType read** (`fromJSDate` was reading the server's UTC hour → wrong peak/weekend price). Added a TZ-independent regression test (fixtures as explicit UTC instants). Verified: unit tests pass under both TZ=IST and TZ=UTC; demonstrated an 18:00 IST slot now stores 12:30Z on any host. | S |
+| 2.3 ✅ | **DONE** — Added a `btree_gist` `EXCLUDE` constraint (`slots_unit_no_overlap`) via versioned migration `0001_slot_overlap_exclude.sql`: no two slot rows on the same unit can have overlapping `[startsAt, endsAt)` ranges — the race-safe backstop behind the app-level `findSlotConflict` check (UNIQUE only caught exact-start). Mapped `23P01` → 409 (`isSlotConflictViolation`). Verified: overlap rejected, adjacent + different-unit allowed; migration applied on the baselined dev DB; `db:generate` clean; 31 tests pass. **Prod precondition:** no existing overlapping slots (dev has 0; `ADD CONSTRAINT` fails transactionally if any exist — clean them first). | M |
+| 2.4 ✅ | **DONE** — (a) `GET /bookings/dues-summary` + a "₹X to collect at venue / N bookings awaiting settlement" card on the owner BookingsPage (verified `{count:2, totalDue:1400}` vs SQL). (b) Cancel refund transparency: `cancel()` now returns `{ refund: { amount, fee, status } | null }` and the customer My Bookings toast shows exactly what was refunded vs kept as the cancellation fee (was a vague "per policy" line). | M |
+
+**Exit criteria:** e2e test drives a failed payment and a gateway refund and both reconcile; TZ tests pass on a UTC-clock host; an overlapping-duration double-book attempt is rejected by the DB.
+
+---
+
+## Phase 3 — Feature completeness (PRD parity)
+**Gate:** before marketing the full feature set. Not a security/data risk — parity and UX.
+
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 3.1 ✅ | **DONE** — Staff check-in via a nullable `checkedInAt` column (migration 0002), `POST /bookings/:id/check-in` (owner/staff, idempotent, 400 for cancelled/no-show), owner UI button + "Checked in · time" indicator. Verified end-to-end. |
+| 3.2 ✅ | **DONE** — The create flow (weekly repeat) already shipped; added `seriesId` to `CustomerBooking` + a "Weekly series" chip in consumer My Bookings so recurring occurrences are recognizable. |
+| 3.3 ✅ | **DONE** — Player in-app feed: `notifications.customerId` recipient (migration 0003), `createForCustomer` + `@Controller('me/notifications') @Roles(CUSTOMER)`, booking-confirmed emit, and a `PlayerBell` in the consumer header. Verified: player/owner feeds are mutually isolated. |
+| 3.4 ✅ | **DONE** — Moved the 7 `pages/customer/*` pages into `pages/consumer/*` (they already ran in ConsumerLayout) + updated App.tsx imports. Folder move, not a rewrite. |
+| 3.5 ✅ | **DONE** — Gated `/me/loyalty` behind `@RequireFlag(LOYALTY)`; added `GET /me/entitlements`; owner nav hides Packs/Tournaments/Loyalty when the flag is off. Verified 200-with / 403-without. |
+
+**Exit criteria:** PRD feature checklist is wired end-to-end (API + UI) or explicitly descoped; no owner route renders a feature the tenant lacks entitlement for.
+
+---
+
+## Phase 4 — Observability & operational maturity
+**Gate:** before relying on prod for revenue without a person watching logs.
+
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 4.1 ✅ | **DONE** — `config/env.validation.ts` wired into `ConfigModule.forRoot({ validate })`: fails boot on missing `DATABASE_URL`, bad `NODE_ENV`/`API_PORT`, half-configured Razorpay, or S3 mode without credentials — with an aggregated error. Verified: bad config throws, good config + app boot pass. | S |
+| 4.2 ⏳ | Error tracking (Sentry/OTel) — **needs a Sentry DSN/account** (external). Wiring is a small add once you provide the DSN. | M |
+| 4.3 ✅ | **DONE** — Added `GET /api/readyz` (`ReadinessController`) that pings the DB (`SELECT 1`); `/healthz` stays liveness-only by design. Verified: DB up → 200 `ready`; DB down → 503 `not_ready` while `/healthz` stays 200. DB error logged, not returned (endpoint is public). | S |
+| 4.4 ✅ | **DONE** — Added security headers to `apps/web/nginx.conf` (X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, `frame-ancestors` CSP, HSTS) — repeated in the `index.html`/`assets` locations per nginx's non-merging `add_header`. Added HSTS + an explicit 80→443 redirect note to `deploy/nginx-site.conf.template`. Verified `nginx -t`. A full resource-restricting CSP (script-src) is deferred (needs SPA + Razorpay testing) → follow-up. | S |
+| 4.5 | Move rate-limit store to Redis before scaling out; verify `trust proxy` hop count vs the real Nginx chain | `app.module.ts:54`, `main.ts:22` | M |
+
+**Exit criteria:** A synthetic DB outage flips the readiness probe; a thrown error appears in the tracker with an alert; `securityheaders.com` grades the SPA A/A+.
+
+---
+
+## Phase 5 — Hardening & cleanup
+**Gate:** none — ongoing hygiene, do opportunistically.
+
+- ✅ Finite throttle (120/min) on `POST /api/client-logs` (was `@SkipThrottle`) — `client-logs.controller.ts`
+- ✅ De-Prisma'd `scripts/post-merge.sh` (removed the broken `db:generate`/`db:deploy` DB steps; migrations are deploy-only now)
+- ✅ Bound dev compose Postgres/Redis to `127.0.0.1` — `docker-compose.yml`
+- ✅ Stale-doc banners on `docs/AUDIT.md` + `docs/DEVELOPMENT_PLAN.md` pointing here
+- ✅ nginx web container as non-root (`nginxinc/nginx-unprivileged`, runs as UID 101) — `apps/web/Dockerfile`
+- ✅ CPU/memory limits in `docker-compose.prod.yml` (api 1.5cpu/768M, web 0.5cpu/128M)
+- ⏳ Remove dead `ioredis` dependency (kept for the deferred 4.5 Redis-throttler work) — `apps/api/package.json`
+- ⏳ Pin image digests (`@sha256:`) — `apps/*/Dockerfile`
+- ⏳ Bridge network instead of `network_mode: host` (or document the tradeoff)
+
+---
+
+## Sequencing summary
+
+```
+Phase 0 (exploitable now) ──► Phase 1 (data loss) ──► Phase 2 (money correctness)
+                                                            │
+                                     Phase 3 (features) ────┤  (3 can overlap 2/4)
+                                                            │
+                                     Phase 4 (observability)┘ ──► Phase 5 (hygiene, ongoing)
+```
+
+Phase 0 is the only hard blocker for *any* live user. Phases 1–2 are blockers for *scaled/revenue* use. Phases 3–4 gate a *confident* full launch. Phase 5 is continuous.

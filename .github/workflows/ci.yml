@@ -56,7 +56,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
+      # The app runs as the restricted sportsbooking_app role (created by db:push
+      # from role-setup.sql, bootstrap password = its name) so CI exercises RLS
+      # enforcement for real. DDL + seed use the admin/superuser role.
+      DATABASE_URL: postgresql://sportsbooking_app:sportsbooking_app@localhost:5432/sportsbooking?schema=public
       DATABASE_ADMIN_URL: postgresql://sportsbooking:sportsbooking@localhost:5432/sportsbooking?schema=public
       JWT_SECRET: ci-secret
       NODE_ENV: development
@@ -74,14 +77,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sportsbooking/shared build
-      - run: pnpm --filter @sportsbooking/api db:generate
-      # Schema is managed via `prisma db push` (no migration history yet).
-      - run: pnpm --filter @sportsbooking/api exec prisma db push --skip-generate
-      - run: psql "$DATABASE_URL" -f apps/api/prisma/sql/rls.sql
+      # Drizzle (not Prisma): db:migrate applies the versioned migrations
+      # (drizzle/*.sql), the RLS GUC functions, the policy bodies + FORCE, and the
+      # restricted sportsbooking_app runtime role (connects via DATABASE_ADMIN_URL
+      # for DDL). A fresh CI DB runs the baseline migration — same path as a fresh
+      # production deploy.
+      - run: pnpm --filter @sportsbooking/api db:migrate
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
-      # playwright.config.ts boots the full stack (pnpm dev) and waits for :5173.
+      # playwright.config.ts boots the full stack (pnpm dev: API :3001 + web) and
+      # waits for E2E_BASE_URL. The dev Vite port is 5000.
       - run: pnpm test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:5000
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
